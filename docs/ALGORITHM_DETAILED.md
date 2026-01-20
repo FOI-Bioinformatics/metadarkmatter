@@ -53,6 +53,40 @@ competing_genomes = {h.genome for h in ambiguous_hits}  # Unique genomes
 
 **Key concept**: Ambiguous hits represent genomes that matched the read nearly as well as the top hit. If multiple genomes compete, we need to assess whether they're similar (same species) or divergent (conserved gene).
 
+#### Optional: Coverage-Weighted Hit Selection
+
+When coverage weighting is enabled (`--coverage-weight-mode linear|log|sigmoid`), the top hit selection uses a weighted score instead of raw bitscore:
+
+```python
+def calculate_weighted_score(hit, mode, strength):
+    """Calculate coverage-weighted bitscore."""
+    coverage = (hit.qend - hit.qstart + 1) / hit.qlen
+    weight = calculate_coverage_weight(coverage, mode, strength)
+    return hit.bitscore * weight
+
+def calculate_coverage_weight(coverage, mode, strength):
+    """Calculate weight factor based on coverage."""
+    min_weight = 1.0 - strength
+    max_weight = 1.0 + strength
+    weight_range = max_weight - min_weight
+
+    if mode == "linear":
+        normalized = coverage
+    elif mode == "log":
+        normalized = log(1 + 9 * coverage) / log(10)
+    elif mode == "sigmoid":
+        normalized = 1.0 / (1.0 + exp(-10.0 * (coverage - 0.6)))
+
+    return min_weight + weight_range * normalized
+
+# With coverage weighting enabled:
+top_hit = max(hits, key=lambda h: calculate_weighted_score(h, mode, strength))
+```
+
+**Effect:** Short high-identity hits (conserved domains) are penalized relative to longer alignments that span more of the read. This helps distinguish true species matches from conserved gene fragments.
+
+**When to use:** Enable coverage weighting when short conserved regions (e.g., 16S rRNA) are dominating classification despite lower overall alignment coverage.
+
 ### Step 3: Calculate Novelty Index (N)
 
 ```python

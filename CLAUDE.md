@@ -128,3 +128,48 @@ Where:
 - **U** = Placement Uncertainty = `100 - max(ANI between competing genomes)`
 
 See [docs/REFERENCE.md](docs/REFERENCE.md) for complete threshold tables and interpretation.
+
+## Coverage-Weighted Hit Selection
+
+Optional feature to prioritize longer alignments over short conserved domains.
+
+### CLI Usage
+
+```bash
+# Enable coverage weighting
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
+  --coverage-weight-mode linear --output classifications.csv
+
+# Or use a preset
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
+  --preset coverage-linear --output classifications.csv
+```
+
+### Implementation Notes
+
+**Key Files:**
+- `models/blast.py` - `BlastHit.calculate_coverage()`, `calculate_weighted_score()`, `BlastResult.get_best_hit_weighted()`
+- `models/config.py` - `ScoringConfig.coverage_weight_mode`, `coverage_weight_strength`
+- `core/classification/classifiers/base.py` - Base classifier with coverage weighting
+- `core/classification/classifiers/vectorized.py` - Polars-based vectorized classifier
+- `core/classification/classifiers/parallel.py` - Parallel classifier
+
+**Weighting Modes:**
+- `none` (default): Raw bitscore, backward compatible
+- `linear`: `weight = min + (max - min) * coverage`
+- `log`: `weight = min + (max - min) * log(1 + 9*coverage) / log(10)`
+- `sigmoid`: `weight = min + (max - min) / (1 + exp(-10*(coverage - 0.6)))`
+
+Where `min = 1 - strength`, `max = 1 + strength`, `strength` defaults to 0.5.
+
+**Presets with Coverage Weighting:**
+- `coverage-linear` - Balanced coverage weighting
+- `coverage-strict` - Sigmoid mode, enforces >60% coverage
+- `coverage-gentle` - Log mode, mild preference for higher coverage
+- `gtdb-coverage` - Linear mode with 50% alignment fraction requirement
+
+### Backward Compatibility
+
+- `--alignment` parameter replaces `--blast` (accepts both BLAST and MMseqs2 output)
+- Default `coverage_weight_mode="none"` produces identical results to previous versions
+- Parser supports both 12-column (legacy) and 13-column (with qlen) formats
