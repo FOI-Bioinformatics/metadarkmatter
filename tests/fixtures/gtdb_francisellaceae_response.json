@@ -1,0 +1,424 @@
+{
+  "rows": [
+    {
+      "gid": "GCF_012222825.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Allofrancisella",
+      "gtdbSpecies": "s__Allofrancisella frigidaquae"
+    },
+    {
+      "gid": "GCF_000815225.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Allofrancisella",
+      "gtdbSpecies": "s__Allofrancisella guangzhouensis"
+    },
+    {
+      "gid": "GCF_012222965.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Allofrancisella",
+      "gtdbSpecies": "s__Allofrancisella inopinata"
+    },
+    {
+      "gid": "GCA_028355575.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__CAJXRW01",
+      "gtdbSpecies": "s__CAJXRW01 sp028355575"
+    },
+    {
+      "gid": "GCA_913060525.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__CAJXRW01",
+      "gtdbSpecies": "s__CAJXRW01 sp913060525"
+    },
+    {
+      "gid": "GCA_963582935.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__CAUZSH01",
+      "gtdbSpecies": "s__CAUZSH01 sp963582935"
+    },
+    {
+      "gid": "GCA_963974985.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__CAUZSH01",
+      "gtdbSpecies": "s__CAUZSH01 sp963974985"
+    },
+    {
+      "gid": "GCF_002803295.2",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Caedibacter",
+      "gtdbSpecies": "s__Caedibacter taeniospiralis"
+    },
+    {
+      "gid": "GCF_003574425.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Cysteiniphilum",
+      "gtdbSpecies": "s__Cysteiniphilum halobium"
+    },
+    {
+      "gid": "GCF_003428165.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Cysteiniphilum",
+      "gtdbSpecies": "s__Cysteiniphilum litorale"
+    },
+    {
+      "gid": "GCF_014857925.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Cysteiniphilum",
+      "gtdbSpecies": "s__Cysteiniphilum marinum"
+    },
+    {
+      "gid": "GCF_008711525.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Cysteiniphilum",
+      "gtdbSpecies": "s__Cysteiniphilum sp008711525"
+    },
+    {
+      "gid": "GCA_020629575.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Cysteiniphilum",
+      "gtdbSpecies": "s__Cysteiniphilum sp020629575"
+    },
+    {
+      "gid": "GCA_027621155.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Cysteiniphilum",
+      "gtdbSpecies": "s__Cysteiniphilum sp027621155"
+    },
+    {
+      "gid": "GCF_003574485.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Facilibium",
+      "gtdbSpecies": "s__Facilibium subflavum"
+    },
+    {
+      "gid": "GCF_000379445.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Fangia",
+      "gtdbSpecies": "s__Fangia hongkongensis"
+    },
+    {
+      "gid": "GCF_003428155.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Fastidiosibacter",
+      "gtdbSpecies": "s__Fastidiosibacter lacustris"
+    },
+    {
+      "gid": "GCF_000764555.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella",
+      "gtdbSpecies": "s__Francisella endociliophora"
+    },
+    {
+      "gid": "GCF_002211785.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella",
+      "gtdbSpecies": "s__Francisella halioticida"
+    },
+    {
+      "gid": "GCF_001885235.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella",
+      "gtdbSpecies": "s__Francisella hispaniensis"
+    },
+    {
+      "gid": "GCF_009823375.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella",
+      "gtdbSpecies": "s__Francisella noatunensis"
+    },
+    {
+      "gid": "GCF_003347135.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella",
+      "gtdbSpecies": "s__Francisella opportunistica"
+    },
+    {
+      "gid": "GCF_001042525.2",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella",
+      "gtdbSpecies": "s__Francisella orientalis"
+    },
+    {
+      "gid": "GCF_001653955.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella",
+      "gtdbSpecies": "s__Francisella persica"
+    },
+    {
+      "gid": "GCF_000156715.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella",
+      "gtdbSpecies": "s__Francisella philomiragia"
+    },
+    {
+      "gid": "GCF_019852205.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella",
+      "gtdbSpecies": "s__Francisella philomiragia_B"
+    },
+    {
+      "gid": "GCF_007923265.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella",
+      "gtdbSpecies": "s__Francisella salimarina"
+    },
+    {
+      "gid": "GCA_002095075.2",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella",
+      "gtdbSpecies": "s__Francisella sp002095075"
+    },
+    {
+      "gid": "GCF_008711465.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella",
+      "gtdbSpecies": "s__Francisella sp008711465"
+    },
+    {
+      "gid": "GCF_012224145.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella",
+      "gtdbSpecies": "s__Francisella sp012224145"
+    },
+    {
+      "gid": "GCF_036281795.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella",
+      "gtdbSpecies": "s__Francisella sp036281795"
+    },
+    {
+      "gid": "GCF_041102755.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella",
+      "gtdbSpecies": "s__Francisella sp041102755"
+    },
+    {
+      "gid": "GCF_000833475.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella",
+      "gtdbSpecies": "s__Francisella tularensis"
+    },
+    {
+      "gid": "GCF_001895265.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella",
+      "gtdbSpecies": "s__Francisella uliginis"
+    },
+    {
+      "gid": "GCF_003290445.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella_A",
+      "gtdbSpecies": "s__Francisella_A adeliensis"
+    },
+    {
+      "gid": "GCA_038141505.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Francisella_A",
+      "gtdbSpecies": "s__Francisella_A sp038141505"
+    },
+    {
+      "gid": "GCA_024397935.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__M0027",
+      "gtdbSpecies": "s__M0027 sp006227905"
+    },
+    {
+      "gid": "GCA_021713295.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__M0027",
+      "gtdbSpecies": "s__M0027 sp021713295"
+    },
+    {
+      "gid": "GCA_021713395.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__M0027",
+      "gtdbSpecies": "s__M0027 sp021713395"
+    },
+    {
+      "gid": "GCA_021713415.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__M0027",
+      "gtdbSpecies": "s__M0027 sp021713415"
+    },
+    {
+      "gid": "GCF_003574475.2",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Pseudofrancisella",
+      "gtdbSpecies": "s__Pseudofrancisella aestuarii"
+    },
+    {
+      "gid": "GCF_001880225.1",
+      "gtdbDomain": "d__Bacteria",
+      "gtdbPhylum": "p__Pseudomonadota",
+      "gtdbClass": "c__Gammaproteobacteria",
+      "gtdbOrder": "o__Francisellales",
+      "gtdbFamily": "f__Francisellaceae",
+      "gtdbGenus": "g__Pseudofrancisella",
+      "gtdbSpecies": "s__Pseudofrancisella frigiditurris"
+    }
+  ]
+}

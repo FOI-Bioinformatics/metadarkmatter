@@ -1,0 +1,2762 @@
+"""
+ANI-weighted placement uncertainty algorithm for detecting novel microbial diversity.
+
+This module implements the core classification algorithm that combines BLAST
+alignment scores with ANI (Average Nucleotide Identity) distances to identify
+novel bacterial taxa in environmental metagenomic samples.
+"""
+
+from __future__ import annotations
+
+import multiprocessing as mp
+from collections.abc import Callable, Iterator
+from functools import partial
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, TypeAlias
+
+import numpy as np
+import polars as pl
+
+from metadarkmatter.core.constants import ANI_DEFAULT_UNRELATED, calculate_confidence_score
+from metadarkmatter.core.io_utils import write_dataframe, write_dataframe_append
+
+if TYPE_CHECKING:
+    from metadarkmatter.core.aai_matrix_builder import AAIMatrix
+    from metadarkmatter.core.id_mapping import ContigIdMapping
+
+# Type aliases for complex data structures used in parallel classification
+# HitData = (qseqid, sseqid, pident, bitscore, genome_name)
+HitData: TypeAlias = tuple[str, str, float, float, str]
+# ReadChunk = (read_id, list of hits)
+ReadChunk: TypeAlias = tuple[str, list[HitData]]
+# ClassificationResult dict with standard keys
+ClassificationDict: TypeAlias = dict[str, Any]
+from metadarkmatter.core.parsers import (
+    ANIMatrixParser,
+    BlastResultFast,
+    StreamingBlastParser,
+)
+from metadarkmatter.models.blast import BlastResult
+from metadarkmatter.models.classification import (
+    ReadClassification,
+    TaxonomicCall,
+    TAXONOMIC_TO_DIVERSITY,
+)
+from metadarkmatter.models.config import ScoringConfig
+
+
+class ANIMatrix:
+    """
+    High-performance ANI matrix using NumPy arrays with integer indexing.
+
+    Performance optimization over nested dictionaries:
+    - Memory: 8MB for 1000 genomes vs 150MB with nested dicts (18x reduction)
+    - Lookup: O(1) array access vs O(hash) string lookups (16x faster)
+
+    The matrix stores ANI values as float32, with genome names mapped to
+    integer indices for fast array-based lookups.
+
+    Missing ANI values (0.0 in the matrix) are treated as distant organisms
+    and return the default_ani value (typically 70%) instead of 0.0.
+    """
+
+    __slots__ = ("_ani_array", "_default_ani", "_genome_to_idx", "_genomes", "_num_genomes")
+
+    def __init__(
+        self,
+        ani_dict: dict[str, dict[str, float]],
+        default_ani: float = ANI_DEFAULT_UNRELATED,
+    ) -> None:
+        """
+        Initialize ANI matrix from nested dictionary.
+
+        Converts the nested dictionary to a NumPy array with integer indexing
+        for O(1) lookups during classification.
+
+        Args:
+            ani_dict: Nested dict {genome1: {genome2: ani_value}}
+            default_ani: Default ANI value for missing/uncomputed pairs (default: 70.0).
+                When skani/fastANI cannot compute ANI between distant genomes,
+                the value is stored as 0.0. This parameter specifies what value
+                to return instead, representing the expected ANI for distant
+                organisms within the same family.
+        """
+        self._default_ani = default_ani
+
+        # Sort genomes for consistent indexing
+        self._genomes: tuple[str, ...] = tuple(sorted(ani_dict.keys()))
+        self._num_genomes: int = len(self._genomes)
+
+        # Create genome -> index mapping for O(1) lookups
+        self._genome_to_idx: dict[str, int] = {
+            genome: idx for idx, genome in enumerate(self._genomes)
+        }
+
+        # Build NumPy array: float32 is sufficient for ANI values (0-100)
+        # Memory: 1000 genomes = 1000 * 1000 * 4 bytes = 4 MB
+        self._ani_array: np.ndarray = np.zeros(
+            (self._num_genomes, self._num_genomes),
+            dtype=np.float32,
+        )
+
+        # Fill diagonal with 100.0 (self-ANI)
+        np.fill_diagonal(self._ani_array, 100.0)
+
+        # Populate matrix from dictionary
+        for genome1, inner_dict in ani_dict.items():
+            i = self._genome_to_idx[genome1]
+            for genome2, ani_value in inner_dict.items():
+                if genome2 in self._genome_to_idx:
+                    j = self._genome_to_idx[genome2]
+                    self._ani_array[i, j] = ani_value
+
+    @classmethod
+    def from_file(cls, path: Path, default_ani: float = ANI_DEFAULT_UNRELATED) -> ANIMatrix:
+        """
+        Load ANI matrix from file.
+
+        Args:
+            path: Path to ANI matrix CSV/TSV
+            default_ani: Default ANI value for missing/uncomputed pairs (default: 70.0)
+
+        Returns:
+            ANIMatrix instance
+        """
+        parser = ANIMatrixParser(path)
+        ani_dict = parser.to_dict()
+        return cls(ani_dict, default_ani=default_ani)
+
+    @property
+    def genomes(self) -> set[str]:
+        """Set of genome names in the matrix."""
+        return set(self._genomes)
+
+    def __len__(self) -> int:
+        """Number of genomes in the matrix."""
+        return self._num_genomes
+
+    def get_ani(self, genome1: str, genome2: str) -> float:
+        """
+        Get ANI value between two genomes.
+
+        Uses integer-indexed NumPy array for O(1) access after
+        initial genome name lookup.
+
+        Args:
+            genome1: First genome identifier
+            genome2: Second genome identifier
+
+        Returns:
+            ANI value (0-100). Returns default_ani (typically 70%) for
+            missing/uncomputed pairs where both genomes exist in the matrix.
+            Returns 0.0 only if a genome is not in the matrix at all.
+
+        Note:
+            Returns 100.0 if genome1 == genome2 (diagonal)
+        """
+        # Fast path: same genome
+        if genome1 == genome2:
+            return 100.0
+
+        # Get indices (single dict lookup per genome)
+        i = self._genome_to_idx.get(genome1)
+        if i is None:
+            return 0.0
+
+        j = self._genome_to_idx.get(genome2)
+        if j is None:
+            return 0.0
+
+        # O(1) array access
+        ani_value = float(self._ani_array[i, j])
+
+        # If ANI is 0.0 (not computed by skani/fastANI), return default for distant organisms
+        if ani_value == 0.0:
+            return self._default_ani
+
+        return ani_value
+
+    def get_ani_by_idx(self, idx1: int, idx2: int) -> float:
+        """
+        Get ANI value by pre-computed integer indices.
+
+        Fastest lookup method when genome indices are already known.
+        Used in optimized classification pipelines.
+
+        Args:
+            idx1: First genome index
+            idx2: Second genome index
+
+        Returns:
+            ANI value (0-100)
+        """
+        return float(self._ani_array[idx1, idx2])
+
+    def get_genome_idx(self, genome: str) -> int | None:
+        """
+        Get integer index for a genome name.
+
+        Args:
+            genome: Genome identifier
+
+        Returns:
+            Integer index, or None if genome not found
+        """
+        return self._genome_to_idx.get(genome)
+
+    def has_genome(self, genome: str) -> bool:
+        """Check if genome is present in ANI matrix."""
+        return genome in self._genome_to_idx
+
+    def memory_usage_bytes(self) -> int:
+        """Estimate memory usage in bytes."""
+        # Array memory
+        array_bytes = self._ani_array.nbytes
+        # Index dict overhead (rough estimate)
+        dict_bytes = self._num_genomes * 100  # ~100 bytes per entry
+        return array_bytes + dict_bytes
+
+    def cluster_genomes_by_ani(
+        self,
+        species_threshold: float = 95.0,
+        genus_threshold: float = 80.0,
+    ) -> dict[str, set[str]]:
+        """
+        Cluster genomes by ANI thresholds using single-linkage clustering.
+
+        Genomes are grouped if their ANI exceeds the threshold. This provides
+        phylogenetic context for ambiguous placements without requiring
+        phylogenetic trees.
+
+        Args:
+            species_threshold: ANI threshold for same species (default: 95%)
+            genus_threshold: ANI threshold for same genus (default: 80%)
+
+        Returns:
+            Dictionary mapping each genome to a set of genomes in the same genus
+            based on single-linkage clustering at the genus threshold.
+
+        Note:
+            Uses genus_threshold for clustering. Species-level clusters are
+            subsets within genus clusters.
+        """
+        from scipy.cluster.hierarchy import fcluster, linkage
+        from scipy.spatial.distance import squareform
+
+        if self._num_genomes == 0:
+            return {}
+
+        # Convert ANI to distance (100 - ANI) for hierarchical clustering
+        # Use condensed distance matrix format for scipy
+        distance_matrix = 100.0 - self._ani_array
+
+        # Ensure symmetry and zero diagonal
+        np.fill_diagonal(distance_matrix, 0)
+        distance_matrix = (distance_matrix + distance_matrix.T) / 2
+
+        # Convert to condensed form for scipy
+        condensed = squareform(distance_matrix)
+
+        # Perform single-linkage clustering
+        # Single-linkage: genomes are in same cluster if ANY pair exceeds threshold
+        linkage_matrix = linkage(condensed, method='single')
+
+        # Cut tree at genus distance threshold (100 - genus_threshold)
+        genus_distance = 100.0 - genus_threshold
+        cluster_labels = fcluster(linkage_matrix, genus_distance, criterion='distance')
+
+        # Build genome -> cluster members mapping
+        clusters: dict[int, set[str]] = {}
+        for genome, label in zip(self._genomes, cluster_labels, strict=True):
+            if label not in clusters:
+                clusters[label] = set()
+            clusters[label].add(genome)
+
+        # Return genome -> same-genus genomes mapping
+        genome_to_genus_members: dict[str, set[str]] = {}
+        for genome, label in zip(self._genomes, cluster_labels, strict=True):
+            genome_to_genus_members[genome] = clusters[label]
+
+        return genome_to_genus_members
+
+    def get_genus_cluster_for_genome(
+        self,
+        genome: str,
+        genus_threshold: float = 80.0,
+    ) -> set[str]:
+        """
+        Get all genomes in the same genus cluster as the given genome.
+
+        A faster method for querying genus membership without full clustering.
+
+        Args:
+            genome: Target genome identifier
+            genus_threshold: ANI threshold for same genus (default: 80%)
+
+        Returns:
+            Set of genomes sharing >= genus_threshold ANI with target genome
+        """
+        idx = self._genome_to_idx.get(genome)
+        if idx is None:
+            return {genome}
+
+        # Find all genomes with ANI >= threshold
+        ani_row = self._ani_array[idx]
+        mask = ani_row >= genus_threshold
+        same_genus = {self._genomes[i] for i in np.where(mask)[0]}
+
+        return same_genus
+
+    def count_distinct_genera(
+        self,
+        genomes: list[str],
+        genus_threshold: float = 80.0,
+    ) -> tuple[int, list[set[str]]]:
+        """
+        Count distinct genera among a list of genomes based on ANI.
+
+        Uses transitive closure: if A and B share >80% ANI, and B and C share
+        >80% ANI, then A, B, C are all in the same genus.
+
+        Args:
+            genomes: List of genome identifiers
+            genus_threshold: ANI threshold for same genus (default: 80%)
+
+        Returns:
+            Tuple of (num_distinct_genera, list of genus groups)
+        """
+        if not genomes:
+            return 0, []
+
+        # Build adjacency list based on ANI threshold
+        genome_indices = [self._genome_to_idx.get(g) for g in genomes]
+        valid_genomes = [(g, idx) for g, idx in zip(genomes, genome_indices, strict=True) if idx is not None]
+
+        if not valid_genomes:
+            return len(genomes), [{g} for g in genomes]
+
+        # Union-find for transitive closure
+        parent: dict[str, str] = {g: g for g, _ in valid_genomes}
+
+        def find(x: str) -> str:
+            if parent[x] != x:
+                parent[x] = find(parent[x])
+            return parent[x]
+
+        def union(x: str, y: str) -> None:
+            px, py = find(x), find(y)
+            if px != py:
+                parent[px] = py
+
+        # Check all pairs
+        for i, (g1, idx1) in enumerate(valid_genomes):
+            for g2, idx2 in valid_genomes[i + 1:]:
+                ani = self._ani_array[idx1, idx2]
+                if ani >= genus_threshold:
+                    union(g1, g2)
+
+        # Group by root
+        groups: dict[str, set[str]] = {}
+        for g, _ in valid_genomes:
+            root = find(g)
+            if root not in groups:
+                groups[root] = set()
+            groups[root].add(g)
+
+        # Handle genomes not in ANI matrix
+        missing = [g for g, idx in zip(genomes, genome_indices, strict=True) if idx is None]
+        genus_groups = list(groups.values())
+        for g in missing:
+            genus_groups.append({g})
+
+        return len(genus_groups), genus_groups
+
+
+class ANIWeightedClassifier:
+    """
+    Classifier for detecting novel microbial diversity using ANI-weighted placement.
+
+    Combines BLAST competitive recruitment results with precomputed ANI matrices
+    to calculate novelty index and placement uncertainty metrics, enabling
+    detection of novel species and genera in environmental samples.
+
+    Algorithm:
+        1. For each read, identify top BLAST hit (highest bitscore)
+        2. Calculate Novelty Index (N) = 100 - top_hit_identity
+        3. Find secondary hits within 95% of top bitscore
+        4. Calculate Placement Uncertainty (U) = 100 - max(ANI(top, secondary))
+        5. Classify based on N and U thresholds
+    """
+
+    def __init__(
+        self,
+        ani_matrix: ANIMatrix,
+        aai_matrix: AAIMatrix | None = None,
+        config: ScoringConfig | None = None,
+    ) -> None:
+        """
+        Initialize ANI-weighted classifier.
+
+        Args:
+            ani_matrix: Precomputed ANI matrix for genome comparisons
+            aai_matrix: Optional AAI matrix for genus-level classification.
+                AAI provides more reliable genus-level boundaries than ANI
+                at high divergence (ANI becomes unreliable below ~80%).
+            config: Scoring configuration (uses defaults if None).
+                When alignment_mode is "protein", classification uses wider
+                novelty thresholds appropriate for protein-level identity.
+        """
+        self.ani_matrix = ani_matrix
+        self.aai_matrix = aai_matrix
+        self.config = config or ScoringConfig()
+
+        # Store effective thresholds based on alignment mode
+        # This allows protein mode to use wider novelty thresholds
+        self._effective_thresholds = self.config.get_effective_thresholds()
+
+    def classify_read(self, blast_result: BlastResult) -> ReadClassification | None:
+        """
+        Classify a single read based on its BLAST hits.
+
+        Args:
+            blast_result: BLAST results for one read
+
+        Returns:
+            ReadClassification if classification successful, None if no hits
+        """
+        if not blast_result.hits:
+            return None
+
+        # Get top hit and extract metrics
+        best_hit = blast_result.best_hit
+        if best_hit is None:
+            return None
+
+        # pident is already clamped to [0, 100] by BlastHit validator
+        top_hit_identity = best_hit.pident
+
+        # Novelty Index measures divergence from reference
+        # N = 0 means identical match, N = 100 means no similarity
+        novelty_index = 100.0 - top_hit_identity
+        best_genome = best_hit.genome_name
+
+        # Find second-best hit (to a DIFFERENT genome)
+        second_hit_identity: float | None = None
+        identity_gap: float | None = None
+        for hit in blast_result.hits:
+            if hit.genome_name != best_genome:
+                second_hit_identity = hit.pident
+                # Clamp to 0 - secondary hit can have higher identity than top bitscore hit
+                identity_gap = max(0.0, top_hit_identity - second_hit_identity)
+                break
+
+        # Calculate placement uncertainty and count ambiguous hits in single pass
+        # Uses iterator with early termination for efficiency
+        placement_uncertainty, num_ambiguous_hits = self._calculate_placement_uncertainty(
+            best_genome,
+            blast_result.iter_ambiguous_hits(self.config.bitscore_threshold_pct),
+        )
+
+        # Calculate genus-level uncertainty using lower threshold
+        # This captures hits from other species in the same genus
+        genus_uncertainty, num_genus_hits = self._calculate_genus_uncertainty(
+            best_genome,
+            best_hit.bitscore,
+            iter(blast_result.hits),  # Need fresh iterator
+        )
+
+        # Calculate AAI-based uncertainty for genus-level classification
+        # AAI is more reliable than ANI at high divergence (>20% novelty)
+        aai_uncertainty: float | None = None
+        if (
+            self.aai_matrix is not None
+            and self.config.use_aai_for_genus
+            and novelty_index >= self.config.novelty_novel_genus_min
+        ):
+            # Collect competing genomes from ambiguous hits
+            competing_genomes = [
+                hit.genome_name
+                for hit in blast_result.hits
+                if hit.genome_name != best_genome
+            ]
+            aai_uncertainty = self._calculate_aai_uncertainty(best_genome, competing_genomes)
+
+        # Determine taxonomic classification
+        taxonomic_call = self._classify_by_thresholds(
+            novelty_index,
+            placement_uncertainty,
+            num_ambiguous_hits=num_ambiguous_hits,
+            genus_uncertainty=genus_uncertainty,
+            num_genus_hits=num_genus_hits,
+            identity_gap=identity_gap,
+            aai_uncertainty=aai_uncertainty,
+        )
+
+        # Calculate confidence score using margin-based calculation
+        # Use effective thresholds to account for protein vs nucleotide mode
+        # Scaling parameters are also mode-specific for proper confidence calculation
+        eff = self._effective_thresholds
+        confidence_score = calculate_confidence_score(
+            novelty_index=novelty_index,
+            placement_uncertainty=placement_uncertainty,
+            num_ambiguous_hits=num_ambiguous_hits,
+            identity_gap=identity_gap,
+            top_hit_identity=top_hit_identity,
+            taxonomic_call=taxonomic_call.value,
+            novelty_known_max=eff["novelty_known_max"],
+            novelty_novel_species_max=eff["novelty_novel_species_max"],
+            novelty_novel_genus_max=eff["novelty_novel_genus_max"],
+            uncertainty_confident_max=eff["uncertainty_known_max"],
+            # Mode-specific scaling parameters
+            margin_divisor_known=eff["margin_divisor_known"],
+            margin_divisor_novel_species=eff["margin_divisor_novel_species"],
+            margin_divisor_novel_genus=eff["margin_divisor_novel_genus"],
+            identity_gap_thresholds=eff["identity_gap_thresholds"],
+            identity_score_base=eff["identity_score_base"],
+            identity_score_range=eff["identity_score_range"],
+        )
+
+        return ReadClassification(
+            read_id=blast_result.read_id,
+            best_match_genome=best_genome,
+            top_hit_identity=top_hit_identity,
+            novelty_index=novelty_index,
+            placement_uncertainty=placement_uncertainty,
+            num_ambiguous_hits=num_ambiguous_hits,
+            second_hit_identity=second_hit_identity,
+            identity_gap=identity_gap,
+            genus_uncertainty=genus_uncertainty,
+            num_genus_hits=num_genus_hits,
+            confidence_score=confidence_score,
+            taxonomic_call=taxonomic_call,
+        )
+
+    def _calculate_placement_uncertainty(
+        self,
+        best_genome: str,
+        ambiguous_hits_iter: Iterator,
+    ) -> tuple[float, int]:
+        """
+        Calculate placement uncertainty from ANI values to secondary hits.
+
+        Placement Uncertainty (U) = 100 - max(ANI(top_hit, secondary_hits))
+
+        Performance optimization: Accepts an iterator with early termination
+        and counts hits in a single pass, avoiding list materialization.
+
+        Args:
+            best_genome: Genome identifier for top BLAST hit
+            ambiguous_hits_iter: Iterator of BlastHit objects within bitscore threshold
+
+        Returns:
+            Tuple of (placement_uncertainty, num_ambiguous_hits)
+        """
+        # Process iterator in single pass - collect ANI values and count
+        max_ani = 0.0
+        num_ambiguous_hits = 0
+
+        for hit in ambiguous_hits_iter:
+            num_ambiguous_hits += 1
+            secondary_genome = hit.genome_name
+            if secondary_genome != best_genome:
+                ani = self.ani_matrix.get_ani(best_genome, secondary_genome)
+                if ani > max_ani:
+                    max_ani = ani
+
+        if num_ambiguous_hits <= 1:
+            # Only one genome hit, no uncertainty
+            return 0.0, num_ambiguous_hits
+
+        if max_ani == 0.0:
+            # Genome not in ANI matrix at all - maximum uncertainty
+            # Note: Missing ANI values within the matrix return default_ani (70%)
+            return 100.0, num_ambiguous_hits
+
+        # Uncertainty is inverse of maximum ANI to any competing genome
+        return 100.0 - max_ani, num_ambiguous_hits
+
+    def _calculate_genus_uncertainty(
+        self,
+        best_genome: str,
+        best_bitscore: float,
+        hits_iter: Iterator,
+    ) -> tuple[float | None, int]:
+        """
+        Calculate genus-level uncertainty using lower bitscore threshold.
+
+        Uses genus_bitscore_threshold_pct (default 90%) to capture hits from
+        other species in the same genus that would be missed by the stricter
+        95% threshold. This helps identify reads hitting conserved genes
+        shared across species within the genus.
+
+        Args:
+            best_genome: Genome identifier for top BLAST hit
+            best_bitscore: Bitscore of top hit
+            hits_iter: Iterator of BlastHit objects (all hits for this read)
+
+        Returns:
+            Tuple of (genus_uncertainty, num_genus_hits) where:
+            - genus_uncertainty: 100 - max(ANI) for genus-level hits, or None
+            - num_genus_hits: Number of hits within genus bitscore threshold
+        """
+        genus_bitscore_cutoff = best_bitscore * (
+            self.config.genus_bitscore_threshold_pct / 100.0
+        )
+
+        max_ani = 0.0
+        num_genus_hits = 0
+
+        for hit in hits_iter:
+            if hit.bitscore < genus_bitscore_cutoff:
+                break  # Hits are sorted by bitscore
+            num_genus_hits += 1
+            secondary_genome = hit.genome_name
+            if secondary_genome != best_genome:
+                ani = self.ani_matrix.get_ani(best_genome, secondary_genome)
+                if ani > max_ani:
+                    max_ani = ani
+
+        if num_genus_hits <= 1:
+            # Only one genome hit at genus level
+            return None, num_genus_hits
+
+        if max_ani == 0.0:
+            # Genome not in ANI matrix - maximum uncertainty
+            return 100.0, num_genus_hits
+
+        return 100.0 - max_ani, num_genus_hits
+
+    def _calculate_aai_uncertainty(
+        self,
+        best_genome: str,
+        competing_genomes: list[str],
+    ) -> float | None:
+        """
+        Calculate genus-level uncertainty using AAI matrix.
+
+        AAI provides more reliable genus-level classification than ANI
+        at high divergence. ANI becomes unreliable below approximately 80%
+        identity, while AAI maintains accuracy for genus-level boundaries.
+
+        AAI genus boundaries (Riesco & Trujillo 2024):
+        - AAI > 65%: Same genus (aai_genus_boundary_high)
+        - AAI 58-65%: Genus boundary zone
+        - AAI < 58%: Different genus (aai_genus_boundary_low)
+
+        Args:
+            best_genome: Genome identifier for top BLAST hit
+            competing_genomes: List of genome identifiers from secondary hits
+
+        Returns:
+            AAI-based uncertainty (100 - max AAI), or None if AAI matrix
+            is not available or genome not in matrix.
+        """
+        if self.aai_matrix is None:
+            return None
+
+        if not competing_genomes:
+            return None
+
+        max_aai = 0.0
+        found_any = False
+
+        for secondary_genome in competing_genomes:
+            if secondary_genome != best_genome:
+                aai = self.aai_matrix.get_aai(best_genome, secondary_genome)
+                if aai > 0:
+                    found_any = True
+                    if aai > max_aai:
+                        max_aai = aai
+
+        if not found_any:
+            # No AAI values available for these genomes
+            return None
+
+        # Uncertainty is inverse of maximum AAI
+        return 100.0 - max_aai
+
+    def _classify_by_thresholds(
+        self,
+        novelty_index: float,
+        placement_uncertainty: float,
+        num_ambiguous_hits: int = 1,
+        genus_uncertainty: float | None = None,
+        num_genus_hits: int | None = None,
+        identity_gap: float | None = None,
+        aai_uncertainty: float | None = None,
+    ) -> TaxonomicCall:
+        """
+        Classify read based on novelty and uncertainty thresholds.
+
+        Classification decision tree (evaluated in order):
+
+        +------+-----------------------------------------------+------------------------+
+        | Rule | Condition                                     | Classification         |
+        +------+-----------------------------------------------+------------------------+
+        |  0   | identity_gap < 2% AND multiple hits           | Ambiguous              |
+        |  1   | U >= 5%                                       | Ambiguous              |
+        |  2   | 2% <= U < 5%                                  | Species Boundary       |
+        |  3   | U < 2% AND N < 5%                             | Known Species          |
+        |  4   | U < 2% AND 5% <= N < 20%                      | Novel Species          |
+        |  5   | U < 2% AND 20% <= N <= 25% AND AAI > 65%      | Novel Species (AAI)    |
+        |  5a  | U < 2% AND 20% <= N <= 25% AND AAI 58-65%     | Ambiguous Within Genus |
+        |  5b  | U < 2% AND 20% <= N <= 25% AND AAI < 58%      | Novel Genus            |
+        |  5c  | U < 2% AND 20% <= N <= 25% AND genus_U >= 10% | Ambiguous Within Genus |
+        |  5d  | U < 2% AND 20% <= N <= 25% (no AAI)           | Novel Genus            |
+        |  6   | Otherwise                                     | Unclassified           |
+        +------+-----------------------------------------------+------------------------+
+
+        Threshold basis:
+        - ANI thresholds (Jain et al. 2018): 95-96% ANI = species boundary
+        - AAI thresholds (Riesco & Trujillo 2024): 58-65% AAI = genus boundary
+        - N (novelty) = 100 - pident, so N < 5% means pident > 95%
+        - U (uncertainty) = 100 - max(ANI/AAI between competing genomes)
+
+        AAI provides more reliable genus-level classification than ANI because
+        ANI becomes unreliable below approximately 80% identity.
+
+        To customize thresholds, modify ScoringConfig values. Rules are
+        applied in order; first matching rule determines classification.
+
+        Args:
+            novelty_index: Novelty index value (0-100)
+            placement_uncertainty: Placement uncertainty value (0-100)
+            num_ambiguous_hits: Number of hits within bitscore threshold
+            genus_uncertainty: ANI-based uncertainty for genus-level hits (optional)
+            num_genus_hits: Number of hits within genus bitscore threshold (optional)
+            identity_gap: Gap between best and second-best hit identity (optional)
+            aai_uncertainty: AAI-based uncertainty for genus-level classification (optional).
+                When available and use_aai_for_genus is enabled, this is used instead
+                of ANI-based genus_uncertainty for genus-level decisions.
+
+        Returns:
+            TaxonomicCall classification
+        """
+        cfg = self.config
+        # Use effective thresholds which account for alignment mode (protein vs nucleotide)
+        eff = self._effective_thresholds
+
+        # Rule 0: Identity gap check (before ANI-based uncertainty)
+        # When two hits have nearly identical identity (gap < 2%), the read
+        # cannot be confidently placed regardless of ANI between those genomes.
+        if (
+            identity_gap is not None
+            and num_ambiguous_hits > 1
+            and identity_gap < cfg.identity_gap_ambiguous_max
+        ):
+            return TaxonomicCall.AMBIGUOUS
+
+        # Uncertainty-based checks come first (ANI-based, more biologically meaningful)
+        # High uncertainty indicates conserved region shared within genus
+        # Note: Cross-genera conserved regions are handled in Polars classifier
+        # with ambiguity_scope check
+        if placement_uncertainty >= eff["uncertainty_conserved_min"]:
+            return TaxonomicCall.AMBIGUOUS
+
+        # Moderate uncertainty (2-5%): species boundary zone
+        # Read matches multiple closely related species (95-98% ANI)
+        if placement_uncertainty >= eff["uncertainty_novel_genus_max"]:
+            return TaxonomicCall.SPECIES_BOUNDARY
+
+        # Known species: low novelty, low uncertainty
+        # N < 5% (nucleotide) or N < 10% (protein) means pident > species boundary
+        if (
+            novelty_index < eff["novelty_known_max"]
+            and placement_uncertainty < eff["uncertainty_known_max"]
+        ):
+            return TaxonomicCall.KNOWN_SPECIES
+
+        # Novel species: moderate novelty, low uncertainty
+        # Nucleotide: 5% <= N < 20%; Protein: 10% <= N < 25%
+        if (
+            eff["novelty_novel_species_min"] <= novelty_index < eff["novelty_novel_species_max"]
+            and placement_uncertainty < eff["uncertainty_novel_species_max"]
+        ):
+            return TaxonomicCall.NOVEL_SPECIES
+
+        # Novel genus candidates: check genus-level uncertainty
+        # Nucleotide: 20% <= N <= 25%; Protein: 25% <= N <= 40%
+        if (
+            eff["novelty_novel_genus_min"] <= novelty_index <= eff["novelty_novel_genus_max"]
+            and placement_uncertainty < eff["uncertainty_novel_genus_max"]
+        ):
+            # Use AAI-based classification when available and enabled
+            # AAI is more reliable than ANI at genus-level divergence
+            if aai_uncertainty is not None and cfg.use_aai_for_genus:
+                # AAI thresholds (Riesco & Trujillo 2024):
+                # - aai_uncertainty < 35% (AAI > 65%): Same genus, likely novel species
+                # - aai_uncertainty 35-42% (AAI 58-65%): Genus boundary zone, ambiguous
+                # - aai_uncertainty > 42% (AAI < 58%): Different genus, novel genus
+                aai_genus_uncertainty_low = 100.0 - cfg.aai_genus_boundary_high  # 35%
+                aai_genus_uncertainty_high = 100.0 - cfg.aai_genus_boundary_low   # 42%
+
+                if aai_uncertainty < aai_genus_uncertainty_low:
+                    # High AAI (>65%) indicates same genus despite high novelty
+                    # This read is likely hitting a conserved region within the genus
+                    # Classify as novel species rather than novel genus
+                    return TaxonomicCall.NOVEL_SPECIES
+                elif aai_uncertainty <= aai_genus_uncertainty_high:
+                    # AAI in boundary zone (58-65%), ambiguous genus classification
+                    return TaxonomicCall.AMBIGUOUS_WITHIN_GENUS
+                else:
+                    # Low AAI (<58%) confirms different genus
+                    return TaxonomicCall.NOVEL_GENUS
+
+            # Fallback to ANI-based genus uncertainty when AAI not available
+            # Check for genus-level ambiguity: multiple species hits with low ANI
+            # This catches reads that hit conserved genes shared across species
+            # within the same genus (e.g., hitting F. philomiragia and F. endociliophora
+            # with 88% ANI between them)
+            if (
+                genus_uncertainty is not None
+                and num_genus_hits is not None
+                and num_genus_hits > 1
+                and genus_uncertainty >= cfg.genus_uncertainty_ambiguous_min
+            ):
+                return TaxonomicCall.AMBIGUOUS_WITHIN_GENUS
+
+            return TaxonomicCall.NOVEL_GENUS
+
+        # Default: doesn't fit clear biological categories
+        # Includes: strain variants (N=2-5), or very high divergence (N>25)
+        return TaxonomicCall.UNCLASSIFIED
+
+    def classify_blast_file(
+        self,
+        blast_path: Path,
+    ) -> Iterator[ReadClassification]:
+        """
+        Classify all reads from a BLAST file using streaming.
+
+        Memory-efficient processing for large BLAST result files.
+
+        Args:
+            blast_path: Path to BLAST tabular output
+
+        Yields:
+            ReadClassification objects for each successfully classified read
+        """
+        parser = StreamingBlastParser(blast_path)
+
+        for blast_result in parser.iter_reads():
+            classification = self.classify_read(blast_result)
+            if classification is not None:
+                yield classification
+
+    def classify_to_dataframe(
+        self,
+        blast_path: Path,
+    ) -> pl.DataFrame:
+        """
+        Classify reads and return results as Polars DataFrame.
+
+        Args:
+            blast_path: Path to BLAST tabular output
+
+        Returns:
+            DataFrame with classification results
+        """
+        classifications = list(self.classify_blast_file(blast_path))
+
+        if not classifications:
+            # Return empty DataFrame with correct schema
+            return pl.DataFrame(
+                schema={
+                    "read_id": pl.Utf8,
+                    "best_match_genome": pl.Utf8,
+                    "top_hit_identity": pl.Float64,
+                    "novelty_index": pl.Float64,
+                    "placement_uncertainty": pl.Float64,
+                    "num_ambiguous_hits": pl.Int64,
+                    "second_hit_identity": pl.Float64,
+                    "identity_gap": pl.Float64,
+                    "confidence_score": pl.Float64,
+                    "taxonomic_call": pl.Utf8,
+                    "is_novel": pl.Boolean,
+                }
+            )
+
+        # Convert to list of dicts
+        data = [c.to_dict() for c in classifications]
+
+        return pl.DataFrame(data)
+
+    def write_classifications(
+        self,
+        blast_path: Path,
+        output_path: Path,
+        output_format: str = "csv",
+    ) -> int:
+        """
+        Classify reads and write results to file.
+
+        Args:
+            blast_path: Path to BLAST tabular output
+            output_path: Path for output file
+            output_format: Output format - "csv" or "parquet" (default: "csv")
+                          Parquet is 10x smaller and faster for large datasets.
+
+        Returns:
+            Number of reads classified
+        """
+        df = self.classify_to_dataframe(blast_path)
+        write_dataframe(df, output_path, output_format)
+        return len(df)
+
+    # =========================================================================
+    # High-Performance Classification Methods (Phase 2 Optimizations)
+    # =========================================================================
+    # These methods use lightweight NamedTuples and NumPy ANI lookups
+    # for ~10x faster processing on large BLAST files.
+
+    def classify_read_fast(
+        self,
+        result: BlastResultFast,
+    ) -> dict | None:
+        """
+        Classify a read using lightweight data structures.
+
+        Performance optimizations vs classify_read():
+        - Uses BlastResultFast (NamedTuple) instead of Pydantic model
+        - Pre-extracted genome_name avoids regex in hot path
+        - Returns dict directly, bypassing Pydantic on output
+        - ~10x faster per-read classification
+
+        Args:
+            result: BlastResultFast with pre-extracted genome names
+
+        Returns:
+            Dict with classification results, or None if no hits
+        """
+        if not result.hits:
+            return None
+
+        # Get top hit (hits are pre-sorted by bitscore descending)
+        best_hit = result.hits[0]
+        top_hit_identity = min(100.0, max(0.0, best_hit.pident))  # Clamp
+
+        # Novelty Index: divergence from reference
+        novelty_index = 100.0 - top_hit_identity
+        best_genome = best_hit.genome_name
+
+        # Find second-best hit (to a DIFFERENT genome) for identity gap
+        second_hit_identity: float | None = None
+        identity_gap: float | None = None
+        for hit in result.hits:
+            if hit.genome_name != best_genome:
+                second_hit_identity = hit.pident
+                # Clamp to 0 - secondary hit can have higher identity than top bitscore hit
+                identity_gap = max(0.0, top_hit_identity - second_hit_identity)
+                break
+
+        # Calculate placement uncertainty using pre-extracted genome names
+        bitscore_cutoff = best_hit.bitscore * (self.config.bitscore_threshold_pct / 100.0)
+
+        max_ani = 0.0
+        num_ambiguous_hits = 0
+
+        for hit in result.hits:
+            if hit.bitscore < bitscore_cutoff:
+                break  # Early termination - hits are sorted
+
+            num_ambiguous_hits += 1
+            if hit.genome_name != best_genome:
+                ani = self.ani_matrix.get_ani(best_genome, hit.genome_name)
+                if ani > max_ani:
+                    max_ani = ani
+
+        # Calculate placement uncertainty
+        if num_ambiguous_hits <= 1:
+            placement_uncertainty = 0.0
+        elif max_ani == 0.0:
+            # Genome not in ANI matrix - maximum uncertainty
+            placement_uncertainty = 100.0
+        else:
+            placement_uncertainty = 100.0 - max_ani
+
+        # Calculate AAI-based uncertainty for genus-level classification
+        # Only computed when AAI matrix is available and read is in genus-level novelty range
+        aai_uncertainty: float | None = None
+        if (
+            self.aai_matrix is not None
+            and self.config.use_aai_for_genus
+            and novelty_index >= self.config.novelty_novel_genus_min
+        ):
+            competing_genomes = [
+                hit.genome_name
+                for hit in result.hits
+                if hit.genome_name != best_genome
+            ]
+            aai_uncertainty = self._calculate_aai_uncertainty(best_genome, competing_genomes)
+
+        # Determine classification
+        taxonomic_call = self._classify_by_thresholds(
+            novelty_index,
+            placement_uncertainty,
+            num_ambiguous_hits=num_ambiguous_hits,
+            identity_gap=identity_gap,
+            aai_uncertainty=aai_uncertainty,
+        )
+
+        # Calculate confidence score using effective thresholds
+        # Scaling parameters are mode-specific for proper confidence calculation
+        eff = self._effective_thresholds
+        confidence_score = calculate_confidence_score(
+            novelty_index=novelty_index,
+            placement_uncertainty=placement_uncertainty,
+            num_ambiguous_hits=num_ambiguous_hits,
+            identity_gap=identity_gap,
+            top_hit_identity=top_hit_identity,
+            taxonomic_call=taxonomic_call.value,
+            novelty_known_max=eff["novelty_known_max"],
+            novelty_novel_species_max=eff["novelty_novel_species_max"],
+            novelty_novel_genus_max=eff["novelty_novel_genus_max"],
+            uncertainty_confident_max=eff["uncertainty_known_max"],
+            # Mode-specific scaling parameters
+            margin_divisor_known=eff["margin_divisor_known"],
+            margin_divisor_novel_species=eff["margin_divisor_novel_species"],
+            margin_divisor_novel_genus=eff["margin_divisor_novel_genus"],
+            identity_gap_thresholds=eff["identity_gap_thresholds"],
+            identity_score_base=eff["identity_score_base"],
+            identity_score_range=eff["identity_score_range"],
+        )
+
+        return {
+            "read_id": result.read_id,
+            "best_match_genome": best_genome,
+            "top_hit_identity": top_hit_identity,
+            "novelty_index": novelty_index,
+            "placement_uncertainty": placement_uncertainty,
+            "num_ambiguous_hits": num_ambiguous_hits,
+            "second_hit_identity": second_hit_identity,
+            "identity_gap": identity_gap,
+            "confidence_score": confidence_score,
+            "taxonomic_call": taxonomic_call.value,
+            "is_novel": taxonomic_call in (TaxonomicCall.NOVEL_SPECIES, TaxonomicCall.NOVEL_GENUS),
+        }
+
+    def classify_blast_file_fast(
+        self,
+        blast_path: Path,
+    ) -> Iterator[dict]:
+        """
+        Classify reads using high-performance streaming.
+
+        Performance optimizations vs classify_blast_file():
+        - Uses iter_reads_fast() with NamedTuples (~50x faster object creation)
+        - Vectorized genome extraction in Polars (~100x faster)
+        - Returns dicts instead of Pydantic models
+
+        Args:
+            blast_path: Path to BLAST tabular output
+
+        Yields:
+            Dict with classification results for each read
+        """
+        parser = StreamingBlastParser(blast_path)
+
+        for result in parser.iter_reads_fast():
+            classification = self.classify_read_fast(result)
+            if classification is not None:
+                yield classification
+
+    def classify_to_dataframe_fast(
+        self,
+        blast_path: Path,
+    ) -> pl.DataFrame:
+        """
+        Classify reads and return Polars DataFrame directly.
+
+        This is the fastest method for processing large BLAST files.
+        Bypasses Pydantic on both input and output for maximum performance.
+
+        Performance vs classify_to_dataframe():
+        - ~10x faster for large files (100M+ reads)
+        - ~5x less memory usage
+        - Streaming-compatible
+
+        Args:
+            blast_path: Path to BLAST tabular output
+
+        Returns:
+            DataFrame with classification results
+        """
+        # Collect all classifications for DataFrame construction
+        all_rows: list[dict] = list(self.classify_blast_file_fast(blast_path))
+
+        if not all_rows:
+            # Return empty DataFrame with correct schema
+            return pl.DataFrame(
+                schema={
+                    "read_id": pl.Utf8,
+                    "best_match_genome": pl.Utf8,
+                    "top_hit_identity": pl.Float64,
+                    "novelty_index": pl.Float64,
+                    "placement_uncertainty": pl.Float64,
+                    "num_ambiguous_hits": pl.Int64,
+                    "second_hit_identity": pl.Float64,
+                    "identity_gap": pl.Float64,
+                    "confidence_score": pl.Float64,
+                    "taxonomic_call": pl.Utf8,
+                    "is_novel": pl.Boolean,
+                }
+            )
+
+        return pl.DataFrame(all_rows)
+
+    # =========================================================================
+    # Phase 3: Scalability Optimizations
+    # =========================================================================
+    # These methods enable processing of very large files (100M+ reads)
+    # with bounded memory and parallel execution.
+
+    # Bounds for chunk_size parameters
+    MIN_CHUNK_SIZE = 100
+    MAX_CHUNK_SIZE = 10_000_000
+
+    def stream_to_file_fast(
+        self,
+        blast_path: Path,
+        output_path: Path,
+        output_format: str = "parquet",
+        chunk_size: int = 100_000,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> int:
+        """
+        Stream classification results directly to disk in chunks.
+
+        Memory-efficient processing for very large files. Instead of
+        accumulating all results in memory, writes batches to disk.
+
+        For Parquet output, uses row group batching for optimal compression.
+        For CSV output, appends chunks incrementally.
+
+        Args:
+            blast_path: Path to BLAST tabular output.
+            output_path: Output file path.
+            output_format: 'parquet' or 'csv' (default: parquet).
+            chunk_size: Number of classifications per batch (default: 100K).
+                        Valid range: 100 to 10,000,000.
+            progress_callback: Optional callback(processed, total) for progress.
+
+        Returns:
+            Total number of reads classified.
+
+        Raises:
+            ValueError: If chunk_size is outside valid range.
+
+        Memory usage:
+            Each classification dict uses ~500 bytes. chunk_size=100K uses ~50MB.
+
+        Example:
+            def show_progress(done, total):
+                print(f"Processed {done:,} reads...")
+
+            classifier.stream_to_file_fast(
+                blast_path,
+                output_path,
+                progress_callback=show_progress
+            )
+        """
+        if not self.MIN_CHUNK_SIZE <= chunk_size <= self.MAX_CHUNK_SIZE:
+            msg = (
+                f"chunk_size must be between {self.MIN_CHUNK_SIZE:,} and "
+                f"{self.MAX_CHUNK_SIZE:,}, got {chunk_size:,}"
+            )
+            raise ValueError(msg)
+        total_classified = 0
+        chunk_buffer: list[dict] = []
+        first_chunk = True
+
+        for classification in self.classify_blast_file_fast(blast_path):
+            chunk_buffer.append(classification)
+            total_classified += 1
+
+            if len(chunk_buffer) >= chunk_size:
+                self._write_chunk(
+                    chunk_buffer,
+                    output_path,
+                    output_format,
+                    first_chunk,
+                )
+                first_chunk = False
+                chunk_buffer = []
+
+                if progress_callback:
+                    progress_callback(total_classified, 0)
+
+        # Write remaining data
+        if chunk_buffer:
+            self._write_chunk(
+                chunk_buffer,
+                output_path,
+                output_format,
+                first_chunk,
+            )
+
+        if progress_callback:
+            progress_callback(total_classified, total_classified)
+
+        return total_classified
+
+    def _write_chunk(
+        self,
+        chunk: list[dict],
+        output_path: Path,
+        output_format: str,
+        is_first: bool,
+    ) -> None:
+        """Write a chunk of classifications to file."""
+        df = pl.DataFrame(chunk)
+        write_dataframe_append(df, output_path, output_format, is_first)
+
+
+# =============================================================================
+# Parallel Classification Worker Functions (Module Level for Pickling)
+# =============================================================================
+
+
+def _classify_chunk_worker(
+    chunk_data: list[ReadChunk],
+    ani_array: np.ndarray,
+    genome_to_idx: dict[str, int],
+    config_dict: dict[str, float],
+) -> list[ClassificationDict]:
+    """
+    Worker function for parallel classification.
+
+    Runs in a separate process. Receives raw data and config,
+    performs classification, returns results.
+
+    Args:
+        chunk_data: List of (read_id, hits_data) tuples where hits_data is
+            a list of (qseqid, sseqid, pident, bitscore, genome_name) tuples.
+        ani_array: NumPy ANI matrix (shared memory).
+        genome_to_idx: Genome name to index mapping.
+        config_dict: Scoring configuration as dict.
+
+    Returns:
+        List of classification result dicts with keys:
+            read_id, best_match_genome, top_hit_identity, top_bitscore,
+            competing_genomes, novelty_index, placement_uncertainty,
+            taxonomic_call.
+    """
+    results = []
+
+    # Reconstruct config thresholds (classification boundaries)
+    bitscore_pct = config_dict["bitscore_threshold_pct"]
+    genus_bitscore_pct = config_dict["genus_bitscore_threshold_pct"]
+    novelty_known_max = config_dict["novelty_known_max"]
+    novelty_novel_species_min = config_dict["novelty_novel_species_min"]
+    novelty_novel_species_max = config_dict["novelty_novel_species_max"]
+    novelty_novel_genus_min = config_dict["novelty_novel_genus_min"]
+    novelty_novel_genus_max = config_dict["novelty_novel_genus_max"]
+    uncertainty_known_max = config_dict["uncertainty_known_max"]
+    uncertainty_novel_species_max = config_dict["uncertainty_novel_species_max"]
+    uncertainty_novel_genus_max = config_dict["uncertainty_novel_genus_max"]
+    uncertainty_conserved_min = config_dict["uncertainty_conserved_min"]
+    genus_uncertainty_ambiguous_min = config_dict["genus_uncertainty_ambiguous_min"]
+    default_ani = config_dict["default_ani"]
+    identity_gap_ambiguous_max = config_dict["identity_gap_ambiguous_max"]
+
+    # Confidence score scaling parameters (mode-specific)
+    margin_divisor_known = config_dict["margin_divisor_known"]
+    margin_divisor_novel_species = config_dict["margin_divisor_novel_species"]
+    margin_divisor_novel_genus = config_dict["margin_divisor_novel_genus"]
+    identity_gap_thresholds = config_dict["identity_gap_thresholds"]
+    identity_score_base = config_dict["identity_score_base"]
+    identity_score_range = config_dict["identity_score_range"]
+
+    for read_id, hits_data in chunk_data:
+        if not hits_data:
+            continue
+
+        # Reconstruct hits (already sorted by bitscore)
+        best_hit = hits_data[0]
+        best_pident = best_hit[2]  # pident
+        best_bitscore = best_hit[3]  # bitscore
+        best_genome = best_hit[4]  # genome_name
+
+        top_hit_identity = min(100.0, max(0.0, best_pident))
+        novelty_index = 100.0 - top_hit_identity
+
+        # Find second-best hit (to a DIFFERENT genome) for identity gap
+        second_hit_identity: float | None = None
+        identity_gap: float | None = None
+        for hit in hits_data:
+            if hit[4] != best_genome:  # genome_name
+                second_hit_identity = hit[2]  # pident
+                # Clamp to 0 - secondary hit can have higher identity than top bitscore hit
+                identity_gap = max(0.0, top_hit_identity - second_hit_identity)
+                break
+
+        # Calculate placement uncertainty (95% threshold)
+        bitscore_cutoff = best_bitscore * (bitscore_pct / 100.0)
+        max_ani = 0.0
+        num_ambiguous_hits = 0
+
+        best_idx = genome_to_idx.get(best_genome)
+
+        for hit in hits_data:
+            if hit[3] < bitscore_cutoff:  # bitscore
+                break
+            num_ambiguous_hits += 1
+            secondary_genome = hit[4]  # genome_name
+            if secondary_genome != best_genome:
+                secondary_idx = genome_to_idx.get(secondary_genome)
+                if best_idx is not None and secondary_idx is not None:
+                    ani = float(ani_array[best_idx, secondary_idx])
+                    # Use default_ani for missing values (0.0 means not computed)
+                    if ani == 0.0:
+                        ani = default_ani
+                    if ani > max_ani:
+                        max_ani = ani
+
+        # Calculate genus-level uncertainty (90% threshold)
+        genus_bitscore_cutoff = best_bitscore * (genus_bitscore_pct / 100.0)
+        genus_max_ani = 0.0
+        num_genus_hits = 0
+
+        for hit in hits_data:
+            if hit[3] < genus_bitscore_cutoff:  # bitscore
+                break
+            num_genus_hits += 1
+            secondary_genome = hit[4]  # genome_name
+            if secondary_genome != best_genome:
+                secondary_idx = genome_to_idx.get(secondary_genome)
+                if best_idx is not None and secondary_idx is not None:
+                    ani = float(ani_array[best_idx, secondary_idx])
+                    if ani == 0.0:
+                        ani = default_ani
+                    if ani > genus_max_ani:
+                        genus_max_ani = ani
+
+        # Calculate uncertainties
+        if num_ambiguous_hits <= 1:
+            placement_uncertainty = 0.0
+        elif max_ani == 0.0:
+            # Genome not in ANI matrix at all - maximum uncertainty
+            placement_uncertainty = 100.0
+        else:
+            placement_uncertainty = 100.0 - max_ani
+
+        # Genus uncertainty
+        genus_uncertainty: float | None = None
+        if num_genus_hits > 1:
+            if genus_max_ani == 0.0:
+                genus_uncertainty = 100.0
+            else:
+                genus_uncertainty = 100.0 - genus_max_ani
+
+        # Classify - Rule 0 (identity gap) first, then uncertainty-based checks
+        # Rule 0: Identity gap check - when competing hits have nearly identical
+        # BLAST identity (gap < 2%), the read cannot be confidently placed.
+        if (
+            identity_gap is not None
+            and num_ambiguous_hits > 1
+            and identity_gap < identity_gap_ambiguous_max
+        ):
+            call = "Ambiguous"
+            is_novel = False
+        elif placement_uncertainty >= uncertainty_conserved_min:
+            # High uncertainty - conserved within genus (can't distinguish cross-genera here)
+            call = "Ambiguous"
+            is_novel = False
+        elif placement_uncertainty >= uncertainty_novel_genus_max:
+            # Moderate uncertainty (2-5%): species boundary zone
+            call = "Species Boundary"
+            is_novel = False
+        elif (
+            novelty_index < novelty_known_max
+            and placement_uncertainty < uncertainty_known_max
+        ):
+            call = "Known Species"
+            is_novel = False
+        elif (
+            novelty_novel_species_min <= novelty_index < novelty_novel_species_max
+            and placement_uncertainty < uncertainty_novel_species_max
+        ):
+            call = "Novel Species"
+            is_novel = True
+        elif (
+            novelty_novel_genus_min <= novelty_index <= novelty_novel_genus_max
+            and placement_uncertainty < uncertainty_novel_genus_max
+        ):
+            # Check for genus-level ambiguity
+            if (
+                genus_uncertainty is not None
+                and num_genus_hits > 1
+                and genus_uncertainty >= genus_uncertainty_ambiguous_min
+            ):
+                call = "Ambiguous Within Genus"
+                is_novel = False
+            else:
+                call = "Novel Genus"
+                is_novel = True
+        else:
+            call = "Unclassified"
+            is_novel = False
+
+        # Calculate confidence score using margin-based approach
+        # Pass mode-specific scaling parameters for protein vs nucleotide
+        confidence_score = _calculate_confidence_score_inline(
+            novelty_index=novelty_index,
+            placement_uncertainty=placement_uncertainty,
+            num_ambiguous_hits=num_ambiguous_hits,
+            identity_gap=identity_gap,
+            top_hit_identity=top_hit_identity,
+            taxonomic_call=call,
+            novelty_known_max=novelty_known_max,
+            novelty_novel_species_max=novelty_novel_species_max,
+            novelty_novel_genus_max=novelty_novel_genus_max,
+            uncertainty_confident_max=uncertainty_known_max,
+            # Mode-specific scaling parameters
+            margin_divisor_known=margin_divisor_known,
+            margin_divisor_novel_species=margin_divisor_novel_species,
+            margin_divisor_novel_genus=margin_divisor_novel_genus,
+            identity_gap_thresholds=identity_gap_thresholds,
+            identity_score_base=identity_score_base,
+            identity_score_range=identity_score_range,
+        )
+
+        results.append({
+            "read_id": read_id,
+            "best_match_genome": best_genome,
+            "top_hit_identity": top_hit_identity,
+            "novelty_index": novelty_index,
+            "placement_uncertainty": placement_uncertainty,
+            "num_ambiguous_hits": num_ambiguous_hits,
+            "second_hit_identity": second_hit_identity,
+            "identity_gap": identity_gap,
+            "genus_uncertainty": genus_uncertainty,
+            "num_genus_hits": num_genus_hits,
+            "confidence_score": confidence_score,
+            "taxonomic_call": call,
+            "diversity_status": TAXONOMIC_TO_DIVERSITY[call],
+            "is_novel": is_novel,
+        })
+
+    return results
+
+
+def _calculate_confidence_score_inline(
+    novelty_index: float,
+    placement_uncertainty: float,
+    num_ambiguous_hits: int,
+    identity_gap: float | None,
+    top_hit_identity: float,
+    taxonomic_call: str,
+    novelty_known_max: float,
+    novelty_novel_species_max: float,
+    novelty_novel_genus_max: float,
+    uncertainty_confident_max: float,
+    # Mode-specific scaling parameters (with nucleotide defaults)
+    margin_divisor_known: float = 5.0,
+    margin_divisor_novel_species: float = 7.5,
+    margin_divisor_novel_genus: float = 5.0,
+    identity_gap_thresholds: tuple[float, ...] = (5.0, 2.0, 1.0, 0.5),
+    identity_score_base: float = 70.0,
+    identity_score_range: float = 25.0,
+) -> float:
+    """
+    Inline confidence score calculation for parallel workers.
+
+    Duplicated from constants.calculate_confidence_score to avoid
+    import issues with multiprocessing pickling.
+
+    Supports both nucleotide and protein modes via parameterized scaling factors.
+    """
+    score = 0.0
+
+    # Component 1: Margin from threshold boundaries (0-40 points)
+    margin_score = 0.0
+
+    if taxonomic_call == "Known Species":
+        margin_from_boundary = novelty_known_max - novelty_index
+        margin_score = min(40.0, (margin_from_boundary / margin_divisor_known) * 40.0)
+    elif taxonomic_call == "Novel Species":
+        margin_lower = novelty_index - novelty_known_max
+        margin_upper = novelty_novel_species_max - novelty_index
+        min_margin = min(margin_lower, margin_upper)
+        margin_score = min(40.0, (min_margin / margin_divisor_novel_species) * 40.0)
+    elif taxonomic_call == "Novel Genus":
+        margin_lower = novelty_index - novelty_novel_species_max
+        margin_upper = novelty_novel_genus_max - novelty_index
+        min_margin = min(margin_lower, margin_upper)
+        margin_score = min(40.0, (min_margin / margin_divisor_novel_genus) * 40.0)
+    else:
+        margin_score = 10.0
+
+    if placement_uncertainty < uncertainty_confident_max:
+        uncertainty_margin = uncertainty_confident_max - placement_uncertainty
+        margin_score = min(
+            40.0, margin_score + (uncertainty_margin / uncertainty_confident_max) * 10.0
+        )
+
+    score += max(0.0, margin_score)
+
+    # Component 2: Placement certainty (0-40 points)
+    placement_score = 0.0
+    if num_ambiguous_hits <= 1:
+        placement_score += 20.0
+    elif num_ambiguous_hits <= 3:
+        placement_score += 15.0
+    elif num_ambiguous_hits <= 5:
+        placement_score += 10.0
+    elif num_ambiguous_hits <= 10:
+        placement_score += 5.0
+
+    # Use parameterized identity gap thresholds
+    if identity_gap is not None:
+        gap_high, gap_mid_high, gap_mid, gap_low = identity_gap_thresholds
+        if identity_gap >= gap_high:
+            placement_score += 20.0
+        elif identity_gap >= gap_mid_high:
+            placement_score += 15.0
+        elif identity_gap >= gap_mid:
+            placement_score += 10.0
+        elif identity_gap >= gap_low:
+            placement_score += 5.0
+    else:
+        if num_ambiguous_hits <= 1:
+            placement_score += 20.0
+
+    score += placement_score
+
+    # Component 3: Alignment quality proxy (0-20 points)
+    identity_score = min(
+        20.0,
+        max(0.0, (top_hit_identity - identity_score_base) / identity_score_range * 20.0)
+    )
+    score += identity_score
+
+    return round(min(100.0, max(0.0, score)), 1)
+
+
+class ParallelClassifier:
+    """
+    Parallel classifier for very large BLAST files.
+
+    Uses multiprocessing to distribute classification across CPU cores.
+    Ideal for files with 10M+ reads where single-threaded processing
+    becomes a bottleneck.
+
+    The ANI matrix is shared across processes using shared memory,
+    minimizing memory overhead.
+
+    Example:
+        ani_matrix = ANIMatrix.from_file(ani_path)
+        parallel = ParallelClassifier(ani_matrix, config, num_workers=8)
+        df = parallel.classify_file(blast_path)
+    """
+
+    # Bounds for chunk_size parameter
+    MIN_CHUNK_SIZE = 100
+    MAX_CHUNK_SIZE = 1_000_000
+
+    def __init__(
+        self,
+        ani_matrix: ANIMatrix,
+        config: ScoringConfig | None = None,
+        num_workers: int | None = None,
+        chunk_size: int = 50_000,
+    ) -> None:
+        """
+        Initialize parallel classifier.
+
+        Args:
+            ani_matrix: Precomputed ANI matrix.
+            config: Scoring configuration (uses defaults if None).
+            num_workers: Number of worker processes (default: CPU count - 1).
+            chunk_size: Reads per worker chunk (default: 50K).
+                Valid range: 100 to 1,000,000.
+                Memory usage scales with chunk_size * num_workers.
+                50K reads/chunk * 8 workers ~= 400K reads in memory at once.
+                Each read with 10 hits ~= 1KB, so ~400MB peak memory.
+                Reduce for memory-constrained systems; increase for faster I/O.
+
+        Raises:
+            ValueError: If chunk_size is outside valid range.
+        """
+        if not self.MIN_CHUNK_SIZE <= chunk_size <= self.MAX_CHUNK_SIZE:
+            msg = (
+                f"chunk_size must be between {self.MIN_CHUNK_SIZE:,} and "
+                f"{self.MAX_CHUNK_SIZE:,}, got {chunk_size:,}"
+            )
+            raise ValueError(msg)
+
+        self.ani_matrix = ani_matrix
+        self.config = config or ScoringConfig()
+        self.num_workers = num_workers or max(1, mp.cpu_count() - 1)
+        self.chunk_size = chunk_size
+
+        # Get effective thresholds based on alignment mode (protein vs nucleotide)
+        eff = self.config.get_effective_thresholds()
+
+        # Pre-serialize config for workers using effective thresholds
+        # Includes confidence score scaling parameters for mode-specific scoring
+        self._config_dict = {
+            # Classification thresholds
+            "bitscore_threshold_pct": self.config.bitscore_threshold_pct,
+            "genus_bitscore_threshold_pct": self.config.genus_bitscore_threshold_pct,
+            "novelty_known_max": eff["novelty_known_max"],
+            "novelty_novel_species_min": eff["novelty_novel_species_min"],
+            "novelty_novel_species_max": eff["novelty_novel_species_max"],
+            "novelty_novel_genus_min": eff["novelty_novel_genus_min"],
+            "novelty_novel_genus_max": eff["novelty_novel_genus_max"],
+            "uncertainty_known_max": eff["uncertainty_known_max"],
+            "uncertainty_novel_species_max": eff["uncertainty_novel_species_max"],
+            "uncertainty_novel_genus_max": eff["uncertainty_novel_genus_max"],
+            "uncertainty_conserved_min": eff["uncertainty_conserved_min"],
+            "genus_uncertainty_ambiguous_min": self.config.genus_uncertainty_ambiguous_min,
+            "identity_gap_ambiguous_max": self.config.identity_gap_ambiguous_max,
+            "default_ani": self.ani_matrix._default_ani,
+            # Confidence score scaling parameters (mode-specific)
+            "margin_divisor_known": eff["margin_divisor_known"],
+            "margin_divisor_novel_species": eff["margin_divisor_novel_species"],
+            "margin_divisor_novel_genus": eff["margin_divisor_novel_genus"],
+            "identity_gap_thresholds": eff["identity_gap_thresholds"],
+            "identity_score_base": eff["identity_score_base"],
+            "identity_score_range": eff["identity_score_range"],
+        }
+
+    def _iter_chunks(
+        self,
+        blast_path: Path,
+    ) -> Iterator[list[tuple[str, list[tuple[str, str, float, float, str]]]]]:
+        """Yield chunks of reads lazily to avoid memory accumulation.
+
+        This generator yields chunks on demand rather than materializing
+        all chunks upfront, enabling memory-efficient parallel processing.
+
+        Args:
+            blast_path: Path to BLAST tabular output
+
+        Yields:
+            Lists of (read_id, hits_data) tuples, one chunk at a time
+        """
+        parser = StreamingBlastParser(blast_path)
+        current_chunk: list[tuple[str, list[tuple[str, str, float, float, str]]]] = []
+
+        for result in parser.iter_reads_fast():
+            # Convert to serializable format
+            hits_data = [
+                (h.qseqid, h.sseqid, h.pident, h.bitscore, h.genome_name)
+                for h in result.hits
+            ]
+            current_chunk.append((result.read_id, hits_data))
+
+            if len(current_chunk) >= self.chunk_size:
+                yield current_chunk
+                current_chunk = []
+
+        if current_chunk:
+            yield current_chunk
+
+    def classify_file(
+        self,
+        blast_path: Path,
+        progress_callback: Callable[[int], None] | None = None,
+    ) -> pl.DataFrame:
+        """
+        Classify BLAST file using parallel processing.
+
+        Distributes work across multiple CPU cores for faster processing.
+        Uses lazy chunk iteration to minimize memory usage.
+        Results are collected and returned as a single DataFrame.
+
+        Args:
+            blast_path: Path to BLAST tabular output
+            progress_callback: Optional callback(chunks_completed) for progress
+
+        Returns:
+            DataFrame with classification results
+        """
+        # Process chunks in parallel using lazy iteration
+        all_results: list[dict] = []
+
+        # Get shared data for workers
+        ani_array = self.ani_matrix._ani_array
+        genome_to_idx = self.ani_matrix._genome_to_idx
+
+        # Create worker function with fixed arguments
+        worker_fn = partial(
+            _classify_chunk_worker,
+            ani_array=ani_array,
+            genome_to_idx=genome_to_idx,
+            config_dict=self._config_dict,
+        )
+
+        # Use lazy chunk iteration to avoid memory accumulation
+        # pool.imap() processes chunks as they're yielded by the generator
+        chunk_iter = self._iter_chunks(blast_path)
+
+        with mp.Pool(processes=self.num_workers) as pool:
+            for i, chunk_results in enumerate(pool.imap(worker_fn, chunk_iter)):
+                all_results.extend(chunk_results)
+                if progress_callback:
+                    progress_callback(i + 1)
+
+        if not all_results:
+            return self._empty_dataframe()
+
+        return pl.DataFrame(all_results)
+
+    def stream_to_file(
+        self,
+        blast_path: Path,
+        output_path: Path,
+        output_format: str = "parquet",
+        progress_callback: Callable[[int], None] | None = None,
+    ) -> int:
+        """
+        Classify and stream results to file using parallel processing.
+
+        Combines parallel classification with chunked output for
+        maximum scalability on very large files.
+
+        Args:
+            blast_path: Path to BLAST tabular output
+            output_path: Output file path
+            output_format: 'parquet' or 'csv'
+            progress_callback: Optional callback(chunks_completed)
+
+        Returns:
+            Total reads classified
+        """
+        df = self.classify_file(blast_path, progress_callback)
+        write_dataframe(df, output_path, output_format)
+        return len(df)
+
+    def _empty_dataframe(self) -> pl.DataFrame:
+        """Return empty DataFrame with correct schema."""
+        return pl.DataFrame(
+            schema={
+                "read_id": pl.Utf8,
+                "best_match_genome": pl.Utf8,
+                "top_hit_identity": pl.Float64,
+                "novelty_index": pl.Float64,
+                "placement_uncertainty": pl.Float64,
+                "num_ambiguous_hits": pl.Int64,
+                "second_hit_identity": pl.Float64,
+                "identity_gap": pl.Float64,
+                "confidence_score": pl.Float64,
+                "taxonomic_call": pl.Utf8,
+                "diversity_status": pl.Utf8,
+                "is_novel": pl.Boolean,
+            }
+        )
+
+
+class VectorizedClassifier:
+    """
+    Fully vectorized classifier using Polars for maximum performance.
+
+    Unlike the iterator-based classifiers, this implementation performs
+    all operations in Polars' native Rust backend, avoiding Python loops
+    entirely. This provides automatic parallelization across CPU cores.
+
+    Performance characteristics:
+        - 5-10x faster than classify_to_dataframe_fast() for large files
+        - Uses Polars' internal parallelism (no multiprocessing overhead)
+        - Memory usage: ~1.5x input file size for in-memory operations
+        - For 10M reads with 10 hits each: ~15GB memory
+        - Use ParallelClassifier for memory-constrained systems
+
+    Memory trade-offs:
+        - Loads entire BLAST file into memory for vectorized operations
+        - ANI lookup table: O(n^2) genome pairs, ~8MB for 1000 genomes
+        - Symmetric lookup doubles memory but enables efficient joins
+
+    Example:
+        ani_matrix = ANIMatrix.from_file(ani_path)
+        vectorized = VectorizedClassifier(ani_matrix, config)
+        df = vectorized.classify_file(blast_path)
+    """
+
+    def __init__(
+        self,
+        ani_matrix: ANIMatrix,
+        aai_matrix: AAIMatrix | None = None,
+        config: ScoringConfig | None = None,
+    ) -> None:
+        """
+        Initialize vectorized classifier.
+
+        Args:
+            ani_matrix: Precomputed ANI matrix
+            aai_matrix: Optional AAI matrix for genus-level classification.
+                Note: AAI integration in VectorizedClassifier is currently limited.
+                Use ANIWeightedClassifier for full AAI-based genus classification.
+            config: Scoring configuration (uses defaults if None).
+                When alignment_mode is "protein", classification uses wider
+                novelty thresholds appropriate for protein-level identity.
+        """
+        self.ani_matrix = ani_matrix
+        self.aai_matrix = aai_matrix
+        self.config = config or ScoringConfig()
+
+        # Store effective thresholds based on alignment mode
+        self._effective_thresholds = self.config.get_effective_thresholds()
+
+        # Pre-build ANI lookup DataFrame for efficient joins
+        self._build_ani_lookup()
+
+        # Build AAI lookup if matrix provided
+        if aai_matrix is not None:
+            self._build_aai_lookup()
+        else:
+            self._aai_lookup = None
+            self._aai_lookup_symmetric = None
+
+    def _build_aai_lookup(self) -> None:
+        """
+        Build Polars DataFrame for vectorized AAI lookups.
+
+        Similar to ANI lookup but for genus-level classification.
+        """
+        if self.aai_matrix is None:
+            self._aai_lookup = None
+            self._aai_lookup_symmetric = None
+            return
+
+        n = len(self.aai_matrix._genomes)
+        if n == 0:
+            self._aai_lookup = pl.DataFrame(
+                schema={"genome1": pl.Utf8, "genome2": pl.Utf8, "aai": pl.Float64}
+            )
+            self._aai_lookup_symmetric = self._aai_lookup
+            return
+
+        # Get upper triangle indices using NumPy (vectorized)
+        idx1, idx2 = np.triu_indices(n, k=1)
+
+        # Extract genome names and AAI values using NumPy indexing
+        genomes = np.array(self.aai_matrix._genomes)
+        genome1_arr = genomes[idx1]
+        genome2_arr = genomes[idx2]
+        aai_arr = self.aai_matrix._aai_array[idx1, idx2].copy()
+
+        # Replace missing AAI values (0.0) with default for distant organisms
+        aai_arr[aai_arr == 0.0] = self.aai_matrix._default_aai
+
+        # Build DataFrame directly from NumPy arrays (fast)
+        self._aai_lookup = pl.DataFrame({
+            "genome1": genome1_arr,
+            "genome2": genome2_arr,
+            "aai": aai_arr,
+        })
+
+        # Pre-compute symmetric version for faster joins
+        self._aai_lookup_symmetric = pl.concat([
+            self._aai_lookup,
+            self._aai_lookup.select([
+                pl.col("genome2").alias("genome1"),
+                pl.col("genome1").alias("genome2"),
+                pl.col("aai"),
+            ]),
+        ])
+
+    def _build_ani_lookup(self) -> None:
+        """
+        Build Polars DataFrame for vectorized ANI lookups.
+
+        Optimized using NumPy vectorization instead of Python loops.
+        For 1000 genomes: 0.1s vs 10s with nested loops.
+        """
+        n = len(self.ani_matrix._genomes)
+        if n == 0:
+            self._ani_lookup = pl.DataFrame(
+                schema={"genome1": pl.Utf8, "genome2": pl.Utf8, "ani": pl.Float64}
+            )
+            return
+
+        # Get upper triangle indices using NumPy (vectorized)
+        idx1, idx2 = np.triu_indices(n, k=1)
+
+        # Extract genome names and ANI values using NumPy indexing
+        genomes = np.array(self.ani_matrix._genomes)
+        genome1_arr = genomes[idx1]
+        genome2_arr = genomes[idx2]
+        ani_arr = self.ani_matrix._ani_array[idx1, idx2].copy()
+
+        # Replace missing ANI values (0.0) with default for distant organisms
+        ani_arr[ani_arr == 0.0] = self.ani_matrix._default_ani
+
+        # Build DataFrame directly from NumPy arrays (fast)
+        self._ani_lookup = pl.DataFrame({
+            "genome1": genome1_arr,
+            "genome2": genome2_arr,
+            "ani": ani_arr,
+        })
+
+        # Pre-compute symmetric version for faster joins
+        self._ani_lookup_symmetric = pl.concat([
+            self._ani_lookup,
+            self._ani_lookup.select([
+                pl.col("genome2").alias("genome1"),
+                pl.col("genome1").alias("genome2"),
+                pl.col("ani"),
+            ]),
+        ])
+
+    def classify_file(
+        self,
+        blast_path: Path,
+        id_mapping: ContigIdMapping | None = None,
+    ) -> pl.DataFrame:
+        """
+        Classify BLAST file using fully vectorized Polars operations.
+
+        All operations run in Polars' Rust backend with automatic
+        parallelization. No Python loops involved.
+
+        Args:
+            blast_path: Path to BLAST tabular output
+            id_mapping: Optional ID mapping for external BLAST results.
+                If provided, transforms sseqid values before genome extraction.
+
+        Returns:
+            DataFrame with classification results
+        """
+        from metadarkmatter.core.parsers import (
+            StreamingBlastParser,
+            extract_genome_name_expr,
+        )
+
+        parser = StreamingBlastParser(blast_path)
+
+        # Read all data
+        df = parser.parse_lazy().collect()
+
+        # Apply ID transformation if mapping provided (for external BLAST results)
+        if id_mapping is not None:
+            df = id_mapping.transform_column(df, "sseqid")
+
+        # Apply alignment quality filters (GTDB-compatible)
+        if self.config.min_alignment_length > 0:
+            df = df.filter(pl.col("length") >= self.config.min_alignment_length)
+
+        # Note: alignment fraction filter requires read length which isn't
+        # in standard BLAST output. Use qend - qstart + 1 as proxy.
+        if self.config.min_alignment_fraction > 0:
+            df = df.with_columns([
+                ((pl.col("qend") - pl.col("qstart") + 1) / pl.col("qend")).alias("_approx_af")
+            ]).filter(
+                pl.col("_approx_af") >= self.config.min_alignment_fraction
+            ).drop("_approx_af")
+
+        # Add genome_name column (extracts accession from standardized sseqid)
+        df = df.with_columns([extract_genome_name_expr()])
+
+        if df.is_empty():
+            return self._empty_dataframe()
+
+        # Sort by bitscore DESC, pident DESC, genome_name ASC for deterministic tie-breaking
+        # When multiple hits share max bitscore, this ensures consistent selection
+        df = df.sort(["qseqid", "bitscore", "pident", "genome_name"], descending=[False, True, True, False])
+
+        # Step 1: Find best hit per read (highest bitscore) and collect metrics for confidence
+        best_hits = (
+            df.group_by("qseqid", maintain_order=True)
+            .agg([
+                pl.col("bitscore").max().alias("max_bitscore"),
+                # Second-best bitscore for gap calculation
+                pl.col("bitscore").get(1).alias("second_bitscore"),
+                pl.col("pident")
+                .filter(pl.col("bitscore") == pl.col("bitscore").max())
+                .first()
+                .alias("top_pident"),
+                pl.col("genome_name")
+                .filter(pl.col("bitscore") == pl.col("bitscore").max())
+                .first()
+                .alias("best_genome"),
+                # Alignment length of best hit (for confidence calculation)
+                pl.col("length")
+                .filter(pl.col("bitscore") == pl.col("bitscore").max())
+                .first()
+                .alias("best_alignment_length"),
+                # Approximate alignment fraction (qend proxy for read length)
+                ((pl.col("qend") - pl.col("qstart") + 1) / pl.col("qend"))
+                .filter(pl.col("bitscore") == pl.col("bitscore").max())
+                .first()
+                .alias("alignment_fraction"),
+            ])
+        )
+
+        # Step 2: Calculate bitscore threshold per read
+        threshold_pct = self.config.bitscore_threshold_pct / 100.0
+        best_hits = best_hits.with_columns([
+            (pl.col("max_bitscore") * threshold_pct).alias("bitscore_threshold"),
+        ])
+
+        # Step 3: Join back to find all ambiguous hits
+        df_with_threshold = df.join(
+            best_hits.select(["qseqid", "bitscore_threshold", "best_genome"]),
+            on="qseqid",
+            how="left",
+        )
+
+        # Filter to ambiguous hits only
+        ambiguous = df_with_threshold.filter(
+            pl.col("bitscore") >= pl.col("bitscore_threshold")
+        )
+
+        # Step 4: Count ambiguous hits per read
+        hit_counts = ambiguous.group_by("qseqid").len().rename({"len": "num_ambiguous_hits"})
+
+        # Step 4b: Calculate second_hit_identity (best pident to a DIFFERENT genome)
+        # This is used for identity gap calculation to detect ambiguous placement
+        secondary_hits = df_with_threshold.filter(
+            pl.col("genome_name") != pl.col("best_genome")
+        )
+        if not secondary_hits.is_empty():
+            # Get the best pident to a secondary genome per read
+            second_hit_metrics = (
+                secondary_hits
+                .group_by("qseqid")
+                .agg([
+                    pl.col("pident").max().alias("second_hit_identity"),
+                ])
+            )
+        else:
+            second_hit_metrics = pl.DataFrame({
+                "qseqid": [],
+                "second_hit_identity": [],
+            }).cast({
+                "qseqid": pl.Utf8,
+                "second_hit_identity": pl.Float64,
+            })
+
+        # Step 5: Find max ANI to secondary genomes and calculate phylogenetic context
+        # Get secondary genomes (not the best genome)
+        secondary = ambiguous.filter(pl.col("genome_name") != pl.col("best_genome"))
+
+        # Join with ANI lookup (use pre-computed symmetric table)
+        if not secondary.is_empty() and not self._ani_lookup.is_empty():
+            secondary_with_ani = secondary.join(
+                self._ani_lookup_symmetric,
+                left_on=["best_genome", "genome_name"],
+                right_on=["genome1", "genome2"],
+                how="left",
+            )
+
+            # Max ANI per read (for genome-level placement uncertainty)
+            max_ani_per_read = (
+                secondary_with_ani
+                .group_by("qseqid")
+                .agg(pl.col("ani").max().fill_null(0.0).alias("max_ani"))
+            )
+
+            # Step 5b: Calculate phylogenetic context metrics
+            # Count secondary genomes and their ANI relationship to best genome
+            genus_threshold = 80.0  # Same genus if ANI >= 80%
+            species_threshold = 95.0  # Same species if ANI >= 95%
+
+            phylo_metrics = (
+                secondary_with_ani
+                .group_by("qseqid")
+                .agg([
+                    # Count distinct secondary genomes
+                    pl.col("genome_name").n_unique().alias("num_secondary_genomes"),
+                    # Count genomes in same genus as best hit (ANI >= 80%)
+                    pl.col("ani").filter(pl.col("ani") >= genus_threshold).count().alias("same_genus_count"),
+                    # Count genomes in same species as best hit (ANI >= 95%)
+                    pl.col("ani").filter(pl.col("ani") >= species_threshold).count().alias("same_species_count"),
+                    # Min ANI to secondary genomes (used for genus uncertainty)
+                    pl.col("ani").min().fill_null(0.0).alias("min_ani_secondary"),
+                ])
+            )
+        else:
+            max_ani_per_read = pl.DataFrame({"qseqid": [], "max_ani": []}).cast({
+                "qseqid": pl.Utf8, "max_ani": pl.Float64
+            })
+            phylo_metrics = pl.DataFrame({
+                "qseqid": [],
+                "num_secondary_genomes": [],
+                "same_genus_count": [],
+                "same_species_count": [],
+                "min_ani_secondary": [],
+            }).cast({
+                "qseqid": pl.Utf8,
+                "num_secondary_genomes": pl.UInt32,
+                "same_genus_count": pl.UInt32,
+                "same_species_count": pl.UInt32,
+                "min_ani_secondary": pl.Float64,
+            })
+
+        # Step 6: Combine all metrics
+        result = (
+            best_hits
+            .join(hit_counts, on="qseqid", how="left")
+            .join(max_ani_per_read, on="qseqid", how="left")
+            .join(phylo_metrics, on="qseqid", how="left")
+            .join(second_hit_metrics, on="qseqid", how="left")
+            .with_columns([
+                pl.col("num_ambiguous_hits").fill_null(1),
+                pl.col("max_ani").fill_null(0.0),
+                pl.col("num_secondary_genomes").fill_null(0).cast(pl.Int64),
+                pl.col("same_genus_count").fill_null(0).cast(pl.Int64),
+                pl.col("same_species_count").fill_null(0).cast(pl.Int64),
+                pl.col("min_ani_secondary").fill_null(0.0),
+                # Fill nulls for confidence calculation inputs
+                pl.col("second_bitscore").fill_null(0.0),
+                pl.col("best_alignment_length").fill_null(0).cast(pl.Int64),
+                pl.col("alignment_fraction").fill_null(0.0),
+                # Second hit identity defaults to null (no secondary genome)
+                pl.col("second_hit_identity"),
+            ])
+        )
+
+        # Step 7: Calculate metrics
+        # Use effective thresholds for protein vs nucleotide mode
+        cfg = self.config
+        eff = self._effective_thresholds
+        result = result.with_columns([
+            # Clamp pident
+            pl.col("top_pident").clip(0.0, 100.0).alias("top_hit_identity"),
+        ]).with_columns([
+            # Novelty index
+            (100.0 - pl.col("top_hit_identity")).alias("novelty_index"),
+            # Identity gap: difference between best hit and second-best hit to DIFFERENT genome
+            # Null if no secondary genome exists
+            pl.when(pl.col("second_hit_identity").is_not_null())
+            .then(pl.col("top_hit_identity") - pl.col("second_hit_identity"))
+            .otherwise(pl.lit(None))
+            .alias("identity_gap"),
+            # Placement uncertainty (genome-level)
+            pl.when(pl.col("num_ambiguous_hits") <= 1)
+            .then(0.0)
+            .when(pl.col("max_ani") == 0.0)
+            .then(100.0)
+            .otherwise(100.0 - pl.col("max_ani"))
+            .alias("placement_uncertainty"),
+            # Genus uncertainty: based on min ANI to secondary genomes
+            # Low genus_uncertainty = all ambiguous hits in same genus
+            # High genus_uncertainty = hits span multiple genera
+            pl.when(pl.col("num_secondary_genomes") == 0)
+            .then(0.0)  # No secondary genomes = no genus uncertainty
+            .when(pl.col("min_ani_secondary") == 0.0)
+            .then(100.0)  # No ANI data = max uncertainty
+            .otherwise(100.0 - pl.col("min_ani_secondary"))
+            .alias("genus_uncertainty"),
+            # Number of competing genera: secondary genomes NOT in same genus as best hit
+            # If all secondary genomes are in same genus (ANI >= 80%), competing_genera = 0
+            (pl.col("num_secondary_genomes") - pl.col("same_genus_count"))
+            .clip(0, None)
+            .alias("num_competing_genera"),
+        ]).with_columns([
+            # Ambiguity scope: categorizes the phylogenetic scope of ambiguous hits
+            # within_species: all secondary hits share >= 95% ANI with best genome
+            # within_genus: all secondary hits share >= 80% ANI with best genome
+            # across_genera: some secondary hits are from different genera
+            pl.when(pl.col("num_secondary_genomes") == 0)
+            .then(pl.lit("unambiguous"))  # Single genome hit
+            .when(pl.col("same_species_count") == pl.col("num_secondary_genomes"))
+            .then(pl.lit("within_species"))  # All hits same species (strain variants)
+            .when(pl.col("same_genus_count") == pl.col("num_secondary_genomes"))
+            .then(pl.lit("within_genus"))  # All hits same genus, confident genus call
+            .otherwise(pl.lit("across_genera"))  # Hits span genera (conserved gene?)
+            .alias("ambiguity_scope"),
+        ])
+
+        # Step 7b: Calculate confidence score (0-100)
+        # Integrates multiple quality factors:
+        # 1. Alignment quality (0-40 pts): length and coverage
+        # 2. Placement certainty (0-40 pts): bitscore gap and hit count
+        # 3. Phylogenetic context (0-20 pts): scope of ambiguity
+        result = result.with_columns([
+            # Bitscore gap: (best - second) / best * 100
+            # Higher gap = more confident (single clear hit vs many similar hits)
+            pl.when(pl.col("second_bitscore") == 0.0)
+            .then(100.0)  # Only one hit = max gap
+            .otherwise(
+                ((pl.col("max_bitscore") - pl.col("second_bitscore")) / pl.col("max_bitscore") * 100.0)
+                .clip(0.0, 100.0)
+            )
+            .alias("_bitscore_gap_pct"),
+        ]).with_columns([
+            # Component 1: Alignment quality score (0-40 points)
+            # - Length: log-scaled, 100bp=20, 300bp=30, 500bp=35, 1000bp=40
+            # - Fraction: linear, 0.5=20, 1.0=40
+            (
+                # Length component (0-40): log2(length/25) clamped to [0, 40]
+                (pl.col("best_alignment_length").cast(pl.Float64).log(2.0) - 4.64)  # log2(25) ≈ 4.64
+                .clip(0.0, 5.32)  # log2(1000/25) ≈ 5.32
+                * (40.0 / 5.32)  # Scale to 0-40
+            ).alias("_alignment_length_score"),
+            # Fraction component (0-40): linear scaling
+            (pl.col("alignment_fraction") * 40.0).clip(0.0, 40.0).alias("_alignment_frac_score"),
+        ]).with_columns([
+            # Combined alignment quality: average of length and fraction scores
+            ((pl.col("_alignment_length_score") + pl.col("_alignment_frac_score")) / 2.0)
+            .alias("_alignment_quality"),
+        ]).with_columns([
+            # Component 2: Placement certainty score (0-40 points)
+            # - Bitscore gap: 0-20 pts (0%=0, 5%=10, 10%+=20)
+            # - Hit count penalty: 1 hit=20, 2-5 hits=15, 6-10 hits=10, >10 hits=5
+            (
+                (pl.col("_bitscore_gap_pct") / 5.0).clip(0.0, 20.0)  # Gap score (0-20)
+                + pl.when(pl.col("num_ambiguous_hits") <= 1).then(20.0)
+                  .when(pl.col("num_ambiguous_hits") <= 5).then(15.0)
+                  .when(pl.col("num_ambiguous_hits") <= 10).then(10.0)
+                  .otherwise(5.0)  # Hit count score (5-20)
+            ).alias("_placement_certainty"),
+        ]).with_columns([
+            # Component 3: Phylogenetic context score (0-20 points)
+            # Rewards biologically expected ambiguity patterns
+            pl.when(pl.col("ambiguity_scope") == "unambiguous").then(20.0)
+            .when(pl.col("ambiguity_scope") == "within_species").then(18.0)  # Strain variation expected
+            .when(pl.col("ambiguity_scope") == "within_genus").then(12.0)  # Genus confident
+            .otherwise(5.0)  # across_genera = low confidence
+            .alias("_phylo_context"),
+        ]).with_columns([
+            # Final confidence score: sum of all components (0-100)
+            (
+                pl.col("_alignment_quality")
+                + pl.col("_placement_certainty")
+                + pl.col("_phylo_context")
+            ).clip(0.0, 100.0).round(1).alias("confidence_score"),
+        ])
+
+        # Step 8: Apply classification thresholds
+        # Rule 0 (identity gap) comes first - when competing hits have nearly identical
+        # BLAST identity (gap < 2%), the read cannot be confidently placed.
+        # Uncertainty-based checks come next (ANI-based, more biologically meaningful)
+        result = result.with_columns([
+            # Rule 0: Identity gap check (before all other rules)
+            # When two hits have nearly identical identity (gap < 2%), the read
+            # cannot be confidently placed regardless of ANI between those genomes.
+            pl.when(
+                (pl.col("identity_gap").is_not_null())
+                & (pl.col("num_ambiguous_hits") > 1)
+                & (pl.col("identity_gap") < cfg.identity_gap_ambiguous_max)
+            )
+            .then(pl.lit("Ambiguous"))
+            # Conserved Region: high uncertainty AND hits span multiple genera
+            # This indicates a conserved gene present across genera (e.g., 16S, housekeeping)
+            .when(
+                (pl.col("placement_uncertainty") >= eff["uncertainty_conserved_min"])
+                & (pl.col("ambiguity_scope") == "across_genera")
+            )
+            .then(pl.lit("Conserved Region"))
+            # High uncertainty but NOT across genera = conserved within genus
+            .when(pl.col("placement_uncertainty") >= eff["uncertainty_conserved_min"])
+            .then(pl.lit("Ambiguous"))
+            # Moderate uncertainty (2-5%): species boundary zone
+            # Read matches multiple closely related species (95-98% ANI)
+            .when(pl.col("placement_uncertainty") >= eff["uncertainty_novel_genus_max"])
+            .then(pl.lit("Species Boundary"))
+            .when(
+                (pl.col("novelty_index") < eff["novelty_known_max"])
+                & (pl.col("placement_uncertainty") < eff["uncertainty_known_max"])
+            )
+            .then(pl.lit("Known Species"))
+            .when(
+                (pl.col("novelty_index") >= eff["novelty_novel_species_min"])
+                & (pl.col("novelty_index") < eff["novelty_novel_species_max"])
+                & (pl.col("placement_uncertainty") < eff["uncertainty_novel_species_max"])
+            )
+            .then(pl.lit("Novel Species"))
+            .when(
+                (pl.col("novelty_index") >= eff["novelty_novel_genus_min"])
+                & (pl.col("novelty_index") <= eff["novelty_novel_genus_max"])
+                & (pl.col("placement_uncertainty") < eff["uncertainty_novel_genus_max"])
+                # Check genus-level ambiguity: if genus_uncertainty >= threshold,
+                # this indicates hits to multiple species with low ANI
+                & (
+                    (pl.col("genus_uncertainty") < cfg.genus_uncertainty_ambiguous_min)
+                    | (pl.col("num_secondary_genomes") <= 0)
+                )
+            )
+            .then(pl.lit("Novel Genus"))
+            # Genus-level ambiguous: high novelty but competing species within genus
+            .when(
+                (pl.col("novelty_index") >= eff["novelty_novel_genus_min"])
+                & (pl.col("novelty_index") <= eff["novelty_novel_genus_max"])
+                & (pl.col("placement_uncertainty") < eff["uncertainty_novel_genus_max"])
+                & (pl.col("genus_uncertainty") >= cfg.genus_uncertainty_ambiguous_min)
+                & (pl.col("num_secondary_genomes") > 0)
+            )
+            .then(pl.lit("Ambiguous Within Genus"))
+            .otherwise(pl.lit("Unclassified"))
+            .alias("taxonomic_call")
+        ])
+
+        # Add diversity_status, is_novel, and low_confidence flags
+        result = result.with_columns([
+            pl.col("taxonomic_call").replace(TAXONOMIC_TO_DIVERSITY).alias("diversity_status"),
+            pl.col("taxonomic_call").is_in(["Novel Species", "Novel Genus"]).alias("is_novel"),
+            # Low confidence flag: indicates borderline classification quality
+            # Useful for downstream filtering without changing the classification
+            (pl.col("confidence_score") < cfg.confidence_threshold).alias("low_confidence"),
+        ])
+
+        # Select and rename final columns
+        # Note: num_competing_genera removed (redundant with ambiguity_scope)
+        return result.select([
+            pl.col("qseqid").alias("read_id"),
+            pl.col("best_genome").alias("best_match_genome"),
+            "top_hit_identity",
+            "novelty_index",
+            "placement_uncertainty",
+            "genus_uncertainty",
+            "ambiguity_scope",
+            "num_ambiguous_hits",
+            "second_hit_identity",
+            "identity_gap",
+            "confidence_score",
+            "taxonomic_call",
+            "diversity_status",
+            "is_novel",
+            "low_confidence",
+        ])
+
+    def _empty_dataframe(self) -> pl.DataFrame:
+        """Return empty DataFrame with correct schema."""
+        return pl.DataFrame(
+            schema={
+                "read_id": pl.Utf8,
+                "best_match_genome": pl.Utf8,
+                "top_hit_identity": pl.Float64,
+                "novelty_index": pl.Float64,
+                "placement_uncertainty": pl.Float64,
+                "genus_uncertainty": pl.Float64,
+                "ambiguity_scope": pl.Utf8,
+                "num_ambiguous_hits": pl.Int64,
+                "second_hit_identity": pl.Float64,
+                "identity_gap": pl.Float64,
+                "confidence_score": pl.Float64,
+                "taxonomic_call": pl.Utf8,
+                "diversity_status": pl.Utf8,
+                "is_novel": pl.Boolean,
+                "low_confidence": pl.Boolean,
+            }
+        )
+
+    def _classify_partition(self, df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Classify a partition of BLAST hits.
+
+        Internal method that processes a subset of data.
+        Used by streaming methods to process in chunks.
+
+        Args:
+            df: DataFrame with BLAST hits (must have genome_name column)
+
+        Returns:
+            DataFrame with classification results
+        """
+        if df.is_empty():
+            return self._empty_dataframe()
+
+        # Sort for deterministic tie-breaking when multiple hits share max bitscore
+        df = df.sort(["qseqid", "bitscore", "pident", "genome_name"], descending=[False, True, True, False])
+
+        # Step 1: Find best hit per read
+        best_hits = (
+            df.group_by("qseqid", maintain_order=True)
+            .agg([
+                pl.col("bitscore").max().alias("max_bitscore"),
+                pl.col("pident").filter(
+                    pl.col("bitscore") == pl.col("bitscore").max()
+                ).first().alias("top_pident"),
+                pl.col("genome_name").filter(
+                    pl.col("bitscore") == pl.col("bitscore").max()
+                ).first().alias("best_genome"),
+            ])
+        )
+
+        # Step 2: Bitscore threshold
+        threshold_pct = self.config.bitscore_threshold_pct / 100.0
+        best_hits = best_hits.with_columns([
+            (pl.col("max_bitscore") * threshold_pct).alias("bitscore_threshold"),
+        ])
+
+        # Step 3: Find ambiguous hits
+        df_with_threshold = df.join(
+            best_hits.select(["qseqid", "bitscore_threshold", "best_genome"]),
+            on="qseqid",
+            how="left",
+        )
+        ambiguous = df_with_threshold.filter(
+            pl.col("bitscore") >= pl.col("bitscore_threshold")
+        )
+
+        # Step 4: Count ambiguous hits
+        hit_counts = ambiguous.group_by("qseqid").len().rename({"len": "num_ambiguous_hits"})
+
+        # Step 4b: Calculate second_hit_identity (best pident to a DIFFERENT genome)
+        secondary_all = df_with_threshold.filter(
+            pl.col("genome_name") != pl.col("best_genome")
+        )
+        if not secondary_all.is_empty():
+            second_hit_metrics = (
+                secondary_all
+                .group_by("qseqid")
+                .agg([
+                    pl.col("pident").max().alias("second_hit_identity"),
+                ])
+            )
+        else:
+            second_hit_metrics = pl.DataFrame({
+                "qseqid": [],
+                "second_hit_identity": [],
+            }).cast({
+                "qseqid": pl.Utf8,
+                "second_hit_identity": pl.Float64,
+            })
+
+        # Step 5: Find max ANI to secondary genomes
+        secondary = ambiguous.filter(pl.col("genome_name") != pl.col("best_genome"))
+
+        has_ani_lookup = (
+            hasattr(self, '_ani_lookup_symmetric')
+            and not self._ani_lookup_symmetric.is_empty()
+        )
+        if not secondary.is_empty() and has_ani_lookup:
+            secondary_with_ani = secondary.join(
+                self._ani_lookup_symmetric,
+                left_on=["best_genome", "genome_name"],
+                right_on=["genome1", "genome2"],
+                how="left",
+            )
+            max_ani_per_read = (
+                secondary_with_ani
+                .group_by("qseqid")
+                .agg(pl.col("ani").max().fill_null(0.0).alias("max_ani"))
+            )
+        else:
+            max_ani_per_read = pl.DataFrame({"qseqid": [], "max_ani": []}).cast({
+                "qseqid": pl.Utf8, "max_ani": pl.Float64
+            })
+
+        # Step 6: Combine metrics
+        result = (
+            best_hits
+            .join(hit_counts, on="qseqid", how="left")
+            .join(max_ani_per_read, on="qseqid", how="left")
+            .join(second_hit_metrics, on="qseqid", how="left")
+            .with_columns([
+                pl.col("num_ambiguous_hits").fill_null(1),
+                pl.col("max_ani").fill_null(0.0),
+                pl.col("second_hit_identity"),
+            ])
+        )
+
+        # Step 7: Calculate metrics and classify
+        # Use effective thresholds for protein vs nucleotide mode
+        eff = self._effective_thresholds
+        result = (
+            result
+            .with_columns([
+                pl.col("top_pident").clip(0.0, 100.0).alias("top_hit_identity"),
+            ])
+            .with_columns([
+                (100.0 - pl.col("top_hit_identity")).alias("novelty_index"),
+                pl.when(pl.col("num_ambiguous_hits") <= 1)
+                .then(0.0)
+                .when(pl.col("max_ani") == 0.0)
+                .then(100.0)
+                .otherwise(100.0 - pl.col("max_ani"))
+                .alias("placement_uncertainty"),
+                # Identity gap: difference between best hit and second-best hit to DIFFERENT genome
+                pl.when(pl.col("second_hit_identity").is_not_null())
+                .then(pl.col("top_hit_identity") - pl.col("second_hit_identity"))
+                .otherwise(pl.lit(None))
+                .alias("identity_gap"),
+            ])
+            .with_columns([
+                # Uncertainty-based checks first (ANI-based, more biologically meaningful)
+                # High uncertainty - conserved within genus (no ambiguity_scope in fast mode)
+                pl.when(pl.col("placement_uncertainty") >= eff["uncertainty_conserved_min"])
+                .then(pl.lit("Ambiguous"))
+                # Moderate uncertainty (2-5%): species boundary zone
+                .when(pl.col("placement_uncertainty") >= eff["uncertainty_novel_genus_max"])
+                .then(pl.lit("Species Boundary"))
+                .when(
+                    (pl.col("novelty_index") < eff["novelty_known_max"])
+                    & (pl.col("placement_uncertainty") < eff["uncertainty_known_max"])
+                )
+                .then(pl.lit("Known Species"))
+                .when(
+                    (pl.col("novelty_index") >= eff["novelty_novel_species_min"])
+                    & (pl.col("novelty_index") < eff["novelty_novel_species_max"])
+                    & (pl.col("placement_uncertainty") < eff["uncertainty_novel_species_max"])
+                )
+                .then(pl.lit("Novel Species"))
+                .when(
+                    (pl.col("novelty_index") >= eff["novelty_novel_genus_min"])
+                    & (pl.col("novelty_index") <= eff["novelty_novel_genus_max"])
+                    & (pl.col("placement_uncertainty") < eff["uncertainty_novel_genus_max"])
+                )
+                .then(pl.lit("Novel Genus"))
+                .otherwise(pl.lit("Unclassified"))
+                .alias("taxonomic_call")
+            ])
+            .with_columns([
+                pl.col("taxonomic_call").replace(TAXONOMIC_TO_DIVERSITY).alias("diversity_status"),
+                pl.col("taxonomic_call").is_in(["Novel Species", "Novel Genus"]).alias("is_novel")
+            ])
+        )
+
+        return result.select([
+            pl.col("qseqid").alias("read_id"),
+            pl.col("best_genome").alias("best_match_genome"),
+            "top_hit_identity",
+            "novelty_index",
+            "placement_uncertainty",
+            "num_ambiguous_hits",
+            "second_hit_identity",
+            "identity_gap",
+            "taxonomic_call",
+            "diversity_status",
+            "is_novel",
+        ])
+
+    def stream_to_file(
+        self,
+        blast_path: Path,
+        output_path: Path,
+        output_format: str = "parquet",
+        partition_size: int = 5_000_000,
+        progress_callback: Callable[[int, int, float], None] | None = None,
+    ) -> int:
+        """
+        Stream classification results to file for very large BLAST files.
+
+        Processes the input file in partitions to maintain bounded memory
+        usage. Suitable for files with 100M+ alignments.
+
+        Memory usage: ~2GB per 5M alignments partition (default).
+
+        Args:
+            blast_path: Path to BLAST tabular output
+            output_path: Output file path
+            output_format: 'parquet' or 'csv'
+            partition_size: Number of alignments per partition (default: 5M)
+            progress_callback: Optional callback(rows_processed, total_reads, elapsed_secs)
+
+        Returns:
+            Total number of reads classified
+
+        Example:
+            vectorized = VectorizedClassifier(ani_matrix, config)
+
+            def progress(rows, reads, elapsed):
+                print(f"Processed {rows:,} rows -> {reads:,} reads in {elapsed:.1f}s")
+
+            total = vectorized.stream_to_file(
+                blast_path, output_path,
+                progress_callback=progress
+            )
+        """
+        import time
+
+        from metadarkmatter.core.parsers import extract_genome_name_expr
+
+        start_time = time.time()
+        total_reads = 0
+        total_rows = 0
+        first_partition = True
+
+        # Use batched reading for streaming
+        reader = pl.read_csv_batched(
+            blast_path,
+            separator="\t",
+            has_header=False,
+            new_columns=[
+                "qseqid", "sseqid", "pident", "length", "mismatch",
+                "gapopen", "qstart", "qend", "sstart", "send", "evalue", "bitscore"
+            ],
+            batch_size=partition_size,
+        )
+
+        # Track reads across partitions to handle boundary cases
+        pending_reads: dict[str, list] = {}
+
+        while True:
+            batches = reader.next_batches(1)
+            if batches is None or len(batches) == 0:
+                break
+
+            partition_df = batches[0]
+            if partition_df.is_empty():
+                break
+
+            total_rows += len(partition_df)
+
+            # Add genome_name column
+            partition_df = partition_df.with_columns([extract_genome_name_expr()])
+
+            # Get unique reads in this partition
+            partition_reads = set(partition_df["qseqid"].unique().to_list())
+
+            # Find reads that are complete (not the last read which may span partitions)
+            if partition_df.height > 0:
+                last_read = partition_df["qseqid"][-1]
+                complete_reads = partition_reads - {last_read}
+
+                # Filter to complete reads only
+                if complete_reads:
+                    complete_df = partition_df.filter(pl.col("qseqid").is_in(complete_reads))
+
+                    # Add any pending data from previous partition
+                    for read_id in list(pending_reads.keys()):
+                        if read_id in complete_reads:
+                            pending_data = pending_reads.pop(read_id)
+                            pending_df = pl.DataFrame(pending_data)
+                            complete_df = pl.concat([complete_df, pending_df])
+
+                    # Classify this partition
+                    if not complete_df.is_empty():
+                        result_df = self._classify_partition(complete_df)
+                        total_reads += len(result_df)
+
+                        # Write results
+                        self._write_partition(
+                            result_df, output_path, output_format, first_partition
+                        )
+                        first_partition = False
+
+                # Save incomplete reads for next partition
+                incomplete_df = partition_df.filter(pl.col("qseqid") == last_read)
+                if not incomplete_df.is_empty():
+                    if last_read not in pending_reads:
+                        pending_reads[last_read] = []
+                    pending_reads[last_read].extend(incomplete_df.to_dicts())
+
+            if progress_callback:
+                elapsed = time.time() - start_time
+                progress_callback(total_rows, total_reads, elapsed)
+
+        # Process any remaining pending reads
+        if pending_reads:
+            remaining_data = []
+            for rows in pending_reads.values():
+                remaining_data.extend(rows)
+
+            if remaining_data:
+                remaining_df = pl.DataFrame(remaining_data)
+                result_df = self._classify_partition(remaining_df)
+                total_reads += len(result_df)
+                self._write_partition(
+                    result_df, output_path, output_format, first_partition
+                )
+
+        if progress_callback:
+            elapsed = time.time() - start_time
+            progress_callback(total_rows, total_reads, elapsed)
+
+        return total_reads
+
+    def _write_partition(
+        self,
+        df: pl.DataFrame,
+        output_path: Path,
+        output_format: str,
+        is_first: bool,
+    ) -> None:
+        """Write a partition of results to file."""
+        write_dataframe_append(df, output_path, output_format, is_first)
+
+
+class SparseANIMatrix:
+    """
+    Sparse ANI matrix for very large genome sets (10K+ genomes).
+
+    For genome databases with 10K+ genomes, a dense matrix becomes
+    impractical (10K x 10K = 100M cells = 400MB). This sparse
+    representation stores only non-zero ANI values.
+
+    Memory comparison (10K genomes):
+    - Dense: 400 MB
+    - Sparse (5% density): ~20 MB
+
+    Falls back to default ANI value (70.0) for missing pairs,
+    which is typical for distantly related genomes.
+    """
+
+    __slots__ = ("_ani_sparse", "_default_ani", "_genome_to_idx", "_genomes")
+
+    def __init__(
+        self,
+        ani_dict: dict[str, dict[str, float]],
+        default_ani: float = 70.0,
+        min_ani: float = 75.0,
+    ) -> None:
+        """
+        Initialize sparse ANI matrix.
+
+        Args:
+            ani_dict: Nested dict {genome1: {genome2: ani_value}}
+            default_ani: Default ANI for missing pairs (default: 70.0)
+            min_ani: Minimum ANI to store; below this, use default (default: 75.0)
+        """
+        self._genomes: tuple[str, ...] = tuple(sorted(ani_dict.keys()))
+        self._genome_to_idx: dict[str, int] = {
+            g: i for i, g in enumerate(self._genomes)
+        }
+        self._default_ani = default_ani
+
+        # Store only significant ANI values as (i, j) -> ani
+        self._ani_sparse: dict[tuple[int, int], float] = {}
+
+        for genome1, inner_dict in ani_dict.items():
+            i = self._genome_to_idx[genome1]
+            for genome2, ani_value in inner_dict.items():
+                if genome2 in self._genome_to_idx and ani_value >= min_ani:
+                    j = self._genome_to_idx[genome2]
+                    # Store only upper triangle (symmetric)
+                    key = (min(i, j), max(i, j))
+                    self._ani_sparse[key] = ani_value
+
+    @classmethod
+    def from_file(cls, path: Path, **kwargs: Any) -> SparseANIMatrix:
+        """Load sparse ANI matrix from file."""
+        parser = ANIMatrixParser(path)
+        ani_dict = parser.to_dict()
+        return cls(ani_dict, **kwargs)
+
+    def __len__(self) -> int:
+        """Number of genomes."""
+        return len(self._genomes)
+
+    @property
+    def genomes(self) -> set[str]:
+        """Set of genome names."""
+        return set(self._genomes)
+
+    def get_ani(self, genome1: str, genome2: str) -> float:
+        """Get ANI between two genomes."""
+        if genome1 == genome2:
+            return 100.0
+
+        i = self._genome_to_idx.get(genome1)
+        j = self._genome_to_idx.get(genome2)
+
+        if i is None or j is None:
+            return self._default_ani
+
+        key = (min(i, j), max(i, j))
+        return self._ani_sparse.get(key, self._default_ani)
+
+    def has_genome(self, genome: str) -> bool:
+        """Check if genome exists."""
+        return genome in self._genome_to_idx
+
+    def memory_usage_bytes(self) -> int:
+        """Estimate memory usage."""
+        # Each entry: 2 ints (16 bytes) + 1 float (8 bytes) + dict overhead (~50 bytes)
+        sparse_bytes = len(self._ani_sparse) * 74
+        # Genome index dict
+        index_bytes = len(self._genomes) * 100
+        return sparse_bytes + index_bytes
+
+    def density(self) -> float:
+        """Calculate matrix density (fraction of non-default values)."""
+        n = len(self._genomes)
+        total_possible = n * (n - 1) // 2  # Upper triangle
+        if total_possible == 0:
+            return 0.0
+        return len(self._ani_sparse) / total_possible

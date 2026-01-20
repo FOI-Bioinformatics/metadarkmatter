@@ -1,0 +1,68 @@
+# Metadarkmatter Default Configuration
+#
+# This file documents the default settings for the ANI-weighted placement pipeline.
+# NOTE: CLI commands use their own defaults (shown below). This file is for reference
+# and can be used as a template for custom configurations.
+#
+# To use a config file in the future, implement --config option in CLI commands.
+
+# Project settings
+project_name: "metadarkmatter_analysis"
+output_dir: "./results"
+num_threads: 4
+verbose: false
+
+# Scoring thresholds for classification
+# Based on literature: 95% ANI = prokaryotic species boundary (Jain et al. 2018)
+scoring:
+  # Percentage of top bitscore for identifying ambiguous hits
+  bitscore_threshold_pct: 95.0
+
+  # Novelty index thresholds (N = 100 - percent identity)
+  # N < 5%: Known Species (pident > 95%, same species)
+  # 5% <= N <= 15%: Novel Species (pident 85-95%)
+  # 15% <= N <= 25%: Novel Genus (pident 75-85%)
+  novelty_known_max: 5.0            # Maximum for known species (CLI default)
+  novelty_novel_species_min: 5.0    # Minimum for novel species
+  novelty_novel_species_max: 15.0   # Maximum for novel species
+  novelty_novel_genus_min: 15.0     # Minimum for novel genus
+  novelty_novel_genus_max: 25.0     # Maximum for novel genus
+
+  # Placement uncertainty thresholds (U = 100 - ANI between competing genomes)
+  # U < 2%: Confident placement (competitors share > 98% ANI)
+  # 2% <= U < 5%: Ambiguous (competitors at species boundary)
+  # U >= 5%: Conserved region (competitors are different species)
+  uncertainty_known_max: 2.0             # Maximum for known species (CLI default)
+  uncertainty_novel_species_max: 2.0     # Maximum for novel species (CLI default)
+  uncertainty_novel_genus_max: 2.0       # Maximum for novel genus
+  uncertainty_conserved_min: 5.0         # Minimum for conserved region
+
+# BLAST configuration (for 'blast align' command)
+# Optimized for detecting divergent sequences (75-95% identity) in metagenomic dark matter
+# while maintaining specificity to avoid false positives
+blast:
+  word_size: 7              # Smaller = more sensitive for divergent sequences
+  evalue: 1e-5              # Balances sensitivity for 75%+ identity with specificity
+  max_target_seqs: 500      # High value ensures complete competitive alignment for uncertainty
+  perc_identity: null       # No minimum identity filter by default
+  task: "blastn"            # Standard nucleotide BLAST
+  threads: 4
+  outfmt: "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore"
+
+# Bowtie2 configuration (for 'map reads' command)
+# Optimized for detecting divergent sequences in metagenomic dark matter
+bowtie2:
+  threads: 4
+  mode: "local"                  # Local alignment for partial matches
+  very_sensitive: true           # Maximizes sensitivity for 75-95% identity sequences
+  max_alignments: 500            # High value captures all competing hits for uncertainty
+
+# Kraken2 configuration (for 'kraken2 classify' command)
+kraken2:
+  threads: 4
+  confidence: 0.0           # No confidence threshold by default
+
+# ANI computation (for 'ani compute' command)
+ani:
+  threads: 4
+  backend: "auto"           # Auto-detect: prefers skani over fastANI
