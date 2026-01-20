@@ -11,15 +11,15 @@ pip install metadarkmatter
 ## Quick Start
 
 ```bash
-# Classify BLAST results using ANI-weighted placement
+# Classify alignment results using ANI-weighted placement
 metadarkmatter score classify \
-    --blast results.blast.tsv.gz \
+    --alignment results.blast.tsv.gz \
     --ani ani_matrix.csv \
     --output classifications.csv
 
 # Batch process multiple files
 metadarkmatter score batch \
-    --blast-dir ./blast_results/ \
+    --alignment-dir ./blast_results/ \
     --ani ani_matrix.csv \
     --output-dir ./classifications/
 ```
@@ -368,13 +368,13 @@ The `score` subcommand performs ANI-weighted placement classification on BLAST r
 
 ### `metadarkmatter score classify`
 
-Classify metagenomic reads from a single BLAST file.
+Classify metagenomic reads from an alignment file (BLAST or MMseqs2).
 
 #### Required Options
 
 | Option | Short | Type | Description |
 |--------|-------|------|-------------|
-| `--blast` | `-b` | PATH | Path to BLAST tabular output file (.tsv or .tsv.gz) |
+| `--alignment` | `-b` | PATH | Path to alignment file (.tsv or .tsv.gz) - accepts BLAST or MMseqs2 tabular format |
 | `--ani` | `-a` | PATH | Path to ANI matrix file (CSV or TSV) |
 | `--output` | `-o` | PATH | Output path for classification results |
 
@@ -389,6 +389,19 @@ Classify metagenomic reads from a single BLAST file.
 | `--verbose` | `-v` | FLAG | False | Enable verbose output |
 | `--quiet` | `-q` | FLAG | False | Suppress progress output (for scripting) |
 | `--dry-run` | | FLAG | False | Validate inputs without processing |
+
+#### Coverage Weighting Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--coverage-weight-mode` | TEXT | none | Coverage weighting mode: 'none', 'linear', 'log', 'sigmoid' |
+| `--coverage-weight-strength` | FLOAT | 0.5 | Coverage weight strength (0.0-1.0) |
+
+**Coverage Weighting Modes:**
+- `none` (default): Use raw bitscore for hit selection
+- `linear`: Gradual penalty for low coverage
+- `log`: Rewards any coverage, diminishing returns
+- `sigmoid`: Sharp threshold around 60% coverage
 
 #### Alignment Mode
 
@@ -414,7 +427,7 @@ Protein thresholds are wider because amino acid sequences diverge more slowly th
 **Basic Classification**
 ```bash
 metadarkmatter score classify \
-    --blast sample.blast.tsv.gz \
+    --alignment sample.blast.tsv.gz \
     --ani genomes.ani.csv \
     --output sample_classifications.csv
 ```
@@ -422,7 +435,7 @@ metadarkmatter score classify \
 **With Summary and Parallel Processing**
 ```bash
 metadarkmatter score classify \
-    --blast sample.blast.tsv.gz \
+    --alignment sample.blast.tsv.gz \
     --ani genomes.ani.csv \
     --output sample_classifications.parquet \
     --summary sample_summary.json \
@@ -430,10 +443,20 @@ metadarkmatter score classify \
     --parallel
 ```
 
+**Coverage-Weighted Classification**
+```bash
+metadarkmatter score classify \
+    --alignment sample.blast.tsv.gz \
+    --ani genomes.ani.csv \
+    --output sample_classifications.csv \
+    --coverage-weight-mode linear \
+    --coverage-weight-strength 0.5
+```
+
 **Dry Run to Validate Inputs**
 ```bash
 metadarkmatter score classify \
-    --blast sample.blast.tsv.gz \
+    --alignment sample.blast.tsv.gz \
     --ani genomes.ani.csv \
     --output sample_classifications.csv \
     --dry-run
@@ -442,7 +465,7 @@ metadarkmatter score classify \
 **Quiet Mode for Scripts**
 ```bash
 metadarkmatter score classify \
-    --blast sample.blast.tsv.gz \
+    --alignment sample.blast.tsv.gz \
     --ani genomes.ani.csv \
     --output sample_classifications.csv \
     --quiet
@@ -451,7 +474,7 @@ metadarkmatter score classify \
 **Protein Mode (for BLASTX output)**
 ```bash
 metadarkmatter score classify \
-    --blast sample.blastx.tsv.gz \
+    --alignment sample.blastx.tsv.gz \
     --ani genomes.ani.csv \
     --output sample_classifications.csv \
     --alignment-mode protein \
@@ -462,13 +485,13 @@ metadarkmatter score classify \
 
 ### `metadarkmatter score batch`
 
-Batch classify multiple BLAST files in a directory.
+Batch classify multiple alignment files in a directory.
 
 #### Required Options
 
 | Option | Short | Type | Description |
 |--------|-------|------|-------------|
-| `--blast-dir` | `-b` | PATH | Directory containing BLAST result files |
+| `--alignment-dir` | `-b` | PATH | Directory containing alignment files (BLAST or MMseqs2) |
 | `--ani` | `-a` | PATH | Path to ANI matrix file (CSV or TSV) |
 | `--output-dir` | `-o` | PATH | Output directory for classification results |
 
@@ -476,11 +499,13 @@ Batch classify multiple BLAST files in a directory.
 
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
-| `--pattern` | `-p` | TEXT | *.blast.tsv.gz | Glob pattern for BLAST files |
+| `--pattern` | `-p` | TEXT | *.blast.tsv.gz | Glob pattern for alignment files |
 | `--bitscore-threshold` | | FLOAT | 95.0 | Percentage of top bitscore for ambiguous hits |
 | `--format` | `-f` | TEXT | csv | Output format: 'csv' or 'parquet' |
 | `--workers` | `-w` | INT | CPU-1 | Number of worker processes |
 | `--verbose` | `-v` | FLAG | False | Enable verbose output |
+| `--coverage-weight-mode` | | TEXT | none | Coverage weighting mode |
+| `--coverage-weight-strength` | | FLOAT | 0.5 | Coverage weight strength (0.0-1.0) |
 
 #### Processing Mode Options
 
@@ -494,7 +519,7 @@ Batch classify multiple BLAST files in a directory.
 **Basic Batch Processing**
 ```bash
 metadarkmatter score batch \
-    --blast-dir ./blast_results/ \
+    --alignment-dir ./blast_results/ \
     --ani genomes.ani.csv \
     --output-dir ./classifications/
 ```
@@ -502,7 +527,7 @@ metadarkmatter score batch \
 **Custom Pattern with Parquet Output**
 ```bash
 metadarkmatter score batch \
-    --blast-dir ./blast_results/ \
+    --alignment-dir ./blast_results/ \
     --ani genomes.ani.csv \
     --output-dir ./classifications/ \
     --pattern "*.tsv" \
@@ -510,22 +535,32 @@ metadarkmatter score batch \
     --parallel
 ```
 
+**With Coverage Weighting**
+```bash
+metadarkmatter score batch \
+    --alignment-dir ./blast_results/ \
+    --ani genomes.ani.csv \
+    --output-dir ./classifications/ \
+    --coverage-weight-mode linear \
+    --parallel
+```
+
 ---
 
 ## Input File Formats
 
-### BLAST Tabular Format
+### Alignment Tabular Format
 
-Standard BLAST `-outfmt 6` format with 12 columns:
+Both BLAST and MMseqs2 produce compatible tabular output. The standard format includes 13 columns:
 
 ```
-qseqid  sseqid  pident  length  mismatch  gapopen  qstart  qend  sstart  send  evalue  bitscore
+qseqid  sseqid  pident  length  mismatch  gapopen  qstart  qend  sstart  send  evalue  bitscore  qlen
 ```
 
 | Column | Description | Example |
 |--------|-------------|---------|
 | qseqid | Query sequence ID | read_001 |
-| sseqid | Subject sequence ID | GCF_000123456.1_ASM123v1_genomic |
+| sseqid | Subject sequence ID | GCF_000123456.1\|contig1 |
 | pident | Percent identity | 98.5 |
 | length | Alignment length | 150 |
 | mismatch | Number of mismatches | 2 |
@@ -536,6 +571,9 @@ qseqid  sseqid  pident  length  mismatch  gapopen  qstart  qend  sstart  send  e
 | send | Subject end position | 1150 |
 | evalue | E-value | 1e-80 |
 | bitscore | Bit score | 280 |
+| qlen | Query sequence length | 150 |
+
+**Note:** The `qlen` column (column 13) is used for coverage-weighted hit selection. Older 12-column output (without qlen) is still supported - coverage is estimated from qend in this case.
 
 ### ANI Matrix Format
 

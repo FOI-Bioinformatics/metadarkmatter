@@ -356,6 +356,75 @@ metadarkmatter/
 
 ## Advanced Features
 
+### Coverage-Weighted Hit Selection
+
+By default, hit selection uses raw bitscore to identify the best alignment. For datasets where short conserved domains (e.g., 16S rRNA fragments) may dominate over longer alignments spanning more of the read, coverage-weighted scoring provides a way to prioritize hits that cover more of the query sequence.
+
+**When to Use:**
+- Reads contain conserved domains that align with high identity but low coverage
+- Short high-identity hits (50bp) are outranking longer moderate-identity hits (280bp)
+- You want to weight alignment quality by how much of the read was aligned
+
+**Basic Usage:**
+```bash
+# Enable coverage weighting with linear mode
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
+    --coverage-weight-mode linear --output classifications.csv
+
+# Use a preset with coverage weighting
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
+    --preset coverage-linear --output classifications.csv
+```
+
+**Coverage Weighting Modes:**
+
+| Mode | Formula | Behavior |
+|------|---------|----------|
+| `none` | `weighted_score = bitscore` | Default, no coverage adjustment |
+| `linear` | `weight = min + (max - min) × coverage` | Gradual penalty for low coverage |
+| `log` | `weight = min + (max - min) × log(1 + 9×coverage) / log(10)` | Rewards any coverage, diminishing returns |
+| `sigmoid` | `weight = min + (max - min) / (1 + exp(-10×(coverage - 0.6)))` | Sharp threshold around 60% coverage |
+
+Where:
+- `coverage = (qend - qstart + 1) / qlen`
+- `min = 1.0 - strength`, `max = 1.0 + strength`
+- `strength` controls magnitude (default 0.5, range 0.0-1.0)
+
+**Example:**
+
+```
+Read length: 300bp
+Hit A: 98% identity, 50bp aligned, bitscore=200 (coverage=0.17)
+Hit B: 92% identity, 280bp aligned, bitscore=180 (coverage=0.93)
+
+With mode="none" (default): Hit A wins (bitscore 200 > 180)
+With mode="linear", strength=0.5:
+  - Hit A weighted: 200 × 0.58 = 116
+  - Hit B weighted: 180 × 0.97 = 174
+  Hit B wins (weighted 174 > 116)
+```
+
+**Coverage Weighting Presets:**
+
+| Preset | Mode | Strength | Description |
+|--------|------|----------|-------------|
+| `coverage-linear` | linear | 0.5 | Balanced coverage weighting |
+| `coverage-strict` | sigmoid | 0.7 | Enforces >60% coverage threshold |
+| `coverage-gentle` | log | 0.3 | Mild preference for higher coverage |
+| `gtdb-coverage` | linear | 0.5 | GTDB-style with 50% alignment fraction |
+
+**CLI Parameters:**
+
+```bash
+# Explicit parameters
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
+    --coverage-weight-mode linear \
+    --coverage-weight-strength 0.5 \
+    --output classifications.csv
+```
+
+**Note:** The `--alignment` parameter accepts both BLAST and MMseqs2 tabular output (identical 13-column format with qlen).
+
 ### Performance Modes
 
 For large datasets, use appropriate processing mode:

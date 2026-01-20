@@ -126,6 +126,15 @@ Metadarkmatter automatically tracks species metadata throughout the pipeline:
 - Extract candidate reads with `score extract-novel` for targeted assembly
 - Literature-backed thresholds based on 95-96% ANI species boundary
 
+### Coverage-Weighted Hit Selection
+
+Optional feature to prioritize alignments spanning larger portions of reads:
+
+- **Problem solved**: Short conserved domains (e.g., 16S rRNA) with high identity can dominate over longer, more informative alignments
+- **Solution**: Weight bitscore by alignment coverage to favor hits that explain more of the read
+- **Modes**: Linear, logarithmic, or sigmoid weighting functions
+- **Usage**: `--coverage-weight-mode linear` in `score classify`
+
 ### Performance
 
 **Classification Performance** (BLAST results → classifications):
