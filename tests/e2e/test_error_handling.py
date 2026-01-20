@@ -170,7 +170,7 @@ class TestInvalidArguments:
 
         result = e2e_runner.invoke(app, [
             "score", "classify",
-            "--blast", str(blast_path),
+            "--alignment", str(blast_path),
             "--ani", str(ani_path),
             "--output", str(e2e_temp_dir / "error.csv"),
             "--fast",
@@ -230,7 +230,7 @@ class TestBatchErrorHandling:
 
         CLIAssertions.assert_failure(result)
         CLIAssertions.assert_output_contains(
-            result, "No BLAST files found", case_sensitive=False
+            result, "No alignment files found", case_sensitive=False
         )
 
 

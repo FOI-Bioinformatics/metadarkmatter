@@ -208,6 +208,32 @@ class ScoringConfig(BaseModel):
         ),
     )
 
+    # Coverage weighting for hit selection
+    # Prioritizes longer alignments over short conserved domains
+    coverage_weight_mode: Literal["none", "linear", "log", "sigmoid"] = Field(
+        default="none",
+        description=(
+            "Coverage weighting mode for hit selection. "
+            "'none' uses raw bitscore (default, backward compatible). "
+            "'linear' increases weight linearly with coverage. "
+            "'log' provides diminishing returns for increasing coverage. "
+            "'sigmoid' applies sharp threshold around 60% coverage."
+        ),
+    )
+
+    coverage_weight_strength: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Coverage weight strength (0.0-1.0). "
+            "Controls magnitude of coverage effect on scoring. "
+            "Weight range = [1-strength, 1+strength]. "
+            "At strength=0.5: weights range from 0.5x to 1.5x. "
+            "Has no effect when coverage_weight_mode='none'."
+        ),
+    )
+
     # AAI (Average Amino Acid Identity) thresholds for genus-level classification
     # Based on Riesco & Trujillo 2024: 58-65% AAI genus boundary
     # AAI is more reliable than ANI for genus-level decisions because
@@ -276,6 +302,14 @@ class ScoringConfig(BaseModel):
             msg = (
                 f"uncertainty_novel_species_max ({self.uncertainty_novel_species_max}) "
                 f"must be <= uncertainty_novel_genus_max ({self.uncertainty_novel_genus_max})"
+            )
+            raise ValueError(msg)
+
+        # Coverage weighting validation
+        if self.coverage_weight_mode != "none" and self.coverage_weight_strength == 0.0:
+            msg = (
+                "coverage_weight_strength cannot be 0.0 when coverage_weight_mode is enabled. "
+                "Set coverage_weight_mode='none' or increase coverage_weight_strength > 0.0."
             )
             raise ValueError(msg)
 

@@ -103,10 +103,31 @@ class StreamingBlastParser:
     while maintaining low memory usage, suitable for HPC environments.
 
     Expected BLAST format (-outfmt 6):
-    qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore
+    qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore [qlen]
+
+    Note: qlen is optional for backward compatibility. Files with 12 columns (old format)
+    or 13 columns (new format with qlen) are both supported.
     """
 
+    # Schema for new 13-column format (with qlen)
     BLAST_SCHEMA: ClassVar[dict[str, pl.DataType]] = {
+        "qseqid": pl.Utf8,
+        "sseqid": pl.Utf8,
+        "pident": pl.Float64,
+        "length": pl.Int64,
+        "mismatch": pl.Int64,
+        "gapopen": pl.Int64,
+        "qstart": pl.Int64,
+        "qend": pl.Int64,
+        "sstart": pl.Int64,
+        "send": pl.Int64,
+        "evalue": pl.Float64,
+        "bitscore": pl.Float64,
+        "qlen": pl.Int64,
+    }
+
+    # Schema for old 12-column format (without qlen)
+    BLAST_SCHEMA_LEGACY: ClassVar[dict[str, pl.DataType]] = {
         "qseqid": pl.Utf8,
         "sseqid": pl.Utf8,
         "pident": pl.Float64,
@@ -122,6 +143,7 @@ class StreamingBlastParser:
     }
 
     COLUMN_NAMES: ClassVar[list[str]] = list(BLAST_SCHEMA.keys())
+    COLUMN_NAMES_LEGACY: ClassVar[list[str]] = list(BLAST_SCHEMA_LEGACY.keys())
 
     # Bounds for chunk_size parameter
     MIN_CHUNK_SIZE = 100  # Minimum for reasonable performance (allows testing)
@@ -156,6 +178,15 @@ class StreamingBlastParser:
         self.chunk_size = chunk_size
         self._validate_path()
 
+        # Detect format and set appropriate schema
+        num_cols = self._detect_column_count()
+        if num_cols == 13:
+            self.schema = self.BLAST_SCHEMA
+            self.column_names = self.COLUMN_NAMES
+        else:  # 12 columns (legacy format)
+            self.schema = self.BLAST_SCHEMA_LEGACY
+            self.column_names = self.COLUMN_NAMES_LEGACY
+
     def _validate_path(self) -> None:
         """Ensure BLAST file exists."""
         if not self.blast_path.exists():
@@ -165,6 +196,50 @@ class StreamingBlastParser:
     def _is_gzipped(self) -> bool:
         """Check if file is gzip compressed."""
         return self.blast_path.suffix == ".gz"
+
+    def _detect_column_count(self) -> int:
+        """
+        Detect number of columns by reading first non-comment line.
+
+        Returns:
+            Number of tab-separated columns (12 or 13)
+
+        Raises:
+            ValueError: If file is empty or has unexpected column count
+        """
+        import gzip
+
+        # Open file (handle gzip if needed)
+        if self._is_gzipped():
+            file_handle = gzip.open(self.blast_path, "rt")
+        else:
+            file_handle = self.blast_path.open("r")
+
+        try:
+            for line in file_handle:
+                # Skip comment lines
+                if line.startswith("#"):
+                    continue
+
+                # Count columns
+                fields = line.strip().split("\t")
+                num_cols = len(fields)
+
+                if num_cols not in (12, 13):
+                    msg = (
+                        f"Unexpected BLAST format: expected 12 or 13 columns, "
+                        f"got {num_cols} in {self.blast_path}"
+                    )
+                    raise ValueError(msg)
+
+                return num_cols
+
+            # No data lines found
+            msg = f"BLAST file contains no data lines: {self.blast_path}"
+            raise ValueError(msg)
+
+        finally:
+            file_handle.close()
 
     def parse_lazy(self) -> pl.LazyFrame:
         """
@@ -188,8 +263,8 @@ class StreamingBlastParser:
             self.blast_path,
             separator="\t",
             has_header=False,
-            new_columns=self.COLUMN_NAMES,
-            schema_overrides=self.BLAST_SCHEMA,
+            new_columns=self.column_names,
+            schema_overrides=self.schema,
             comment_prefix="#",
             ignore_errors=False,
         )
@@ -230,12 +305,12 @@ class StreamingBlastParser:
         pending_hits: dict[str, list[dict]] = {}
 
         # Use Polars batch reader for true streaming
+        # Note: schema_overrides removed due to Polars 1.37 incompatibility with batched reader
         reader = pl.read_csv_batched(
             self.blast_path,
             separator="\t",
             has_header=False,
-            new_columns=self.COLUMN_NAMES,
-            schema_overrides=self.BLAST_SCHEMA,
+            new_columns=self.column_names,
             comment_prefix="#",
             batch_size=self.chunk_size,
         )
@@ -308,6 +383,7 @@ class StreamingBlastParser:
                 send=row["send"],
                 evalue=row["evalue"],
                 bitscore=row["bitscore"],
+                qlen=row.get("qlen"),  # Optional for backward compatibility
             )
             for row in hit_rows
         )
@@ -354,12 +430,12 @@ class StreamingBlastParser:
         """
         pending_hits: dict[str, list[BlastHitFast]] = {}
 
+        # Note: schema_overrides removed due to Polars 1.37 incompatibility with batched reader
         reader = pl.read_csv_batched(
             self.blast_path,
             separator="\t",
             has_header=False,
-            new_columns=self.COLUMN_NAMES,
-            schema_overrides=self.BLAST_SCHEMA,
+            new_columns=self.column_names,
             comment_prefix="#",
             batch_size=self.chunk_size,
         )
@@ -684,12 +760,12 @@ def iter_blast_chunks(
     """
     parser = StreamingBlastParser(blast_path, chunk_size=chunk_size)
 
+    # Note: schema_overrides removed due to Polars 1.37 incompatibility with batched reader
     reader = pl.read_csv_batched(
         blast_path,
         separator="\t",
         has_header=False,
-        new_columns=parser.COLUMN_NAMES,
-        schema_overrides=parser.BLAST_SCHEMA,
+        new_columns=parser.column_names,
         comment_prefix="#",
         batch_size=chunk_size,
     )

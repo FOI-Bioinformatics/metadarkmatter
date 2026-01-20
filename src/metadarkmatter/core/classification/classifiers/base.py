@@ -71,12 +71,18 @@ class ANIWeightedClassifier:
         # This allows protein mode to use wider novelty thresholds
         self._effective_thresholds = self.config.get_effective_thresholds()
 
-    def classify_read(self, blast_result: BlastResult) -> ReadClassification | None:
+    def classify_read(
+        self,
+        blast_result: BlastResult,
+        read_length: int | None = None,
+    ) -> ReadClassification | None:
         """
         Classify a single read based on its BLAST hits.
 
         Args:
             blast_result: BLAST results for one read
+            read_length: Optional explicit read length for coverage calculation.
+                         If None, uses qlen from hits or qend as proxy.
 
         Returns:
             ReadClassification if classification successful, None if no hits
@@ -84,8 +90,26 @@ class ANIWeightedClassifier:
         if not blast_result.hits:
             return None
 
-        # Get top hit and extract metrics
-        best_hit = blast_result.best_hit
+        # Determine read_length for coverage calculation if not provided
+        if read_length is None and self.config.coverage_weight_mode != "none":
+            # Try to get qlen from first hit, otherwise use qend as proxy
+            first_hit = blast_result.hits[0]
+            if first_hit.qlen is not None:
+                read_length = first_hit.qlen
+            else:
+                # Use max qend as conservative proxy for read length
+                read_length = max(hit.qend for hit in blast_result.hits)
+
+        # Get top hit using coverage-weighted scoring
+        if self.config.coverage_weight_mode != "none" and read_length is not None:
+            best_hit = blast_result.get_best_hit_weighted(
+                read_length=read_length,
+                mode=self.config.coverage_weight_mode,
+                strength=self.config.coverage_weight_strength,
+            )
+        else:
+            best_hit = blast_result.best_hit
+
         if best_hit is None:
             return None
 
@@ -109,9 +133,21 @@ class ANIWeightedClassifier:
 
         # Calculate placement uncertainty and count ambiguous hits in single pass
         # Uses iterator with early termination for efficiency
+        if self.config.coverage_weight_mode != "none" and read_length is not None:
+            ambiguous_hits_iter = blast_result.iter_ambiguous_hits_weighted(
+                read_length=read_length,
+                mode=self.config.coverage_weight_mode,
+                strength=self.config.coverage_weight_strength,
+                threshold_pct=self.config.bitscore_threshold_pct,
+            )
+        else:
+            ambiguous_hits_iter = blast_result.iter_ambiguous_hits(
+                self.config.bitscore_threshold_pct
+            )
+
         placement_uncertainty, num_ambiguous_hits = self._calculate_placement_uncertainty(
             best_genome,
-            blast_result.iter_ambiguous_hits(self.config.bitscore_threshold_pct),
+            ambiguous_hits_iter,
         )
 
         # Calculate genus-level uncertainty using lower threshold

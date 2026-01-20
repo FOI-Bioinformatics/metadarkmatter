@@ -676,13 +676,11 @@ class TestVectorizedClassifier:
         assert len(df) == num_classified
 
     def test_empty_blast_file(self, ani_matrix, default_scoring_config, empty_blast_file):
-        """Should handle empty BLAST file - Polars raises NoDataError."""
-        import polars
-
+        """Should raise ValueError for empty BLAST file during parsing."""
         vectorized = VectorizedClassifier(ani_matrix, config=default_scoring_config)
 
-        # Polars raises NoDataError for empty CSV files
-        with pytest.raises(polars.exceptions.NoDataError):
+        # Parser raises ValueError during column detection for empty files
+        with pytest.raises(ValueError, match="no data lines"):
             vectorized.classify_file(empty_blast_file)
 
 

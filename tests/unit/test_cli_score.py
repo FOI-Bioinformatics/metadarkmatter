@@ -16,8 +16,8 @@ from metadarkmatter.cli.main import app
 class TestScoreClassifyValidation:
     """Tests for score classify command argument validation."""
 
-    def test_classify_requires_blast_file(self, cli_runner, temp_ani_file, temp_dir):
-        """Test that --blast argument is required."""
+    def test_classify_requires_alignment_file(self, cli_runner, temp_ani_file, temp_dir):
+        """Test that --alignment argument is required."""
         output = temp_dir / "output.csv"
         result = cli_runner.invoke(
             app,
@@ -31,7 +31,7 @@ class TestScoreClassifyValidation:
             ],
         )
         assert result.exit_code != 0
-        assert "--blast" in result.stdout or "blast" in result.stdout.lower()
+        assert "--alignment" in result.output or "alignment" in result.output.lower()
 
     def test_classify_requires_ani_file(self, cli_runner, temp_blast_file, temp_dir):
         """Test that --ani argument is required."""
@@ -41,14 +41,14 @@ class TestScoreClassifyValidation:
             [
                 "score",
                 "classify",
-                "--blast",
+                "--alignment",
                 str(temp_blast_file),
                 "--output",
                 str(output),
             ],
         )
         assert result.exit_code != 0
-        assert "--ani" in result.stdout or "ani" in result.stdout.lower()
+        assert "--ani" in result.output or "ani" in result.output.lower()
 
     def test_classify_missing_blast_file(self, cli_runner, temp_ani_file, temp_dir):
         """Test error handling for non-existent BLAST file."""
@@ -58,7 +58,7 @@ class TestScoreClassifyValidation:
             [
                 "score",
                 "classify",
-                "--blast",
+                "--alignment",
                 str(temp_dir / "nonexistent.blast.tsv"),
                 "--ani",
                 str(temp_ani_file),
@@ -67,7 +67,7 @@ class TestScoreClassifyValidation:
             ],
         )
         assert result.exit_code != 0
-        assert "not found" in result.stdout.lower() or "does not exist" in result.stdout.lower()
+        assert "not found" in result.output.lower() or "does not exist" in result.output.lower()
 
     def test_classify_missing_ani_file(self, cli_runner, temp_blast_file, temp_dir):
         """Test error handling for non-existent ANI file."""
@@ -77,7 +77,7 @@ class TestScoreClassifyValidation:
             [
                 "score",
                 "classify",
-                "--blast",
+                "--alignment",
                 str(temp_blast_file),
                 "--ani",
                 str(temp_dir / "nonexistent.ani.csv"),
@@ -86,7 +86,7 @@ class TestScoreClassifyValidation:
             ],
         )
         assert result.exit_code != 0
-        assert "not found" in result.stdout.lower() or "does not exist" in result.stdout.lower()
+        assert "not found" in result.output.lower() or "does not exist" in result.output.lower()
 
     def test_classify_empty_blast_file(self, cli_runner, empty_blast_file, temp_ani_file, temp_dir):
         """Test handling of empty BLAST file."""
@@ -96,7 +96,7 @@ class TestScoreClassifyValidation:
             [
                 "score",
                 "classify",
-                "--blast",
+                "--alignment",
                 str(empty_blast_file),
                 "--ani",
                 str(temp_ani_file),
@@ -105,7 +105,7 @@ class TestScoreClassifyValidation:
             ],
         )
         # Should either fail with error or succeed with warning
-        assert result.exit_code != 0 or "empty" in result.stdout.lower()
+        assert result.exit_code != 0 or "empty" in result.output.lower()
 
     def test_classify_invalid_threshold(self, cli_runner, temp_blast_file, temp_ani_file, temp_dir):
         """Test validation of threshold values."""
@@ -115,7 +115,7 @@ class TestScoreClassifyValidation:
             [
                 "score",
                 "classify",
-                "--blast",
+                "--alignment",
                 str(temp_blast_file),
                 "--ani",
                 str(temp_ani_file),
@@ -135,7 +135,7 @@ class TestScoreClassifyValidation:
             [
                 "score",
                 "classify",
-                "--blast",
+                "--alignment",
                 str(temp_blast_file),
                 "--ani",
                 str(temp_ani_file),
@@ -166,7 +166,7 @@ class TestScoreClassifyOptions:
             [
                 "score",
                 "classify",
-                "--blast",
+                "--alignment",
                 str(temp_blast_file),
                 "--ani",
                 str(temp_ani_file),
@@ -177,7 +177,7 @@ class TestScoreClassifyOptions:
             ],
         )
         # Should succeed or at least not crash on argument parsing
-        assert result.exit_code == 0 or "error" not in result.stdout.lower()
+        assert result.exit_code == 0 or "error" not in result.output.lower()
 
     def test_classify_parallel_mode(
         self,
@@ -193,7 +193,7 @@ class TestScoreClassifyOptions:
             [
                 "score",
                 "classify",
-                "--blast",
+                "--alignment",
                 str(temp_blast_file),
                 "--ani",
                 str(temp_ani_file),
@@ -202,7 +202,7 @@ class TestScoreClassifyOptions:
                 str(output),
             ],
         )
-        assert result.exit_code == 0 or "error" not in result.stdout.lower()
+        assert result.exit_code == 0 or "error" not in result.output.lower()
 
     def test_classify_custom_preset(
         self,
@@ -218,7 +218,7 @@ class TestScoreClassifyOptions:
             [
                 "score",
                 "classify",
-                "--blast",
+                "--alignment",
                 str(temp_blast_file),
                 "--ani",
                 str(temp_ani_file),
@@ -228,7 +228,7 @@ class TestScoreClassifyOptions:
                 str(output),
             ],
         )
-        assert result.exit_code == 0 or "error" not in result.stdout.lower()
+        assert result.exit_code == 0 or "error" not in result.output.lower()
 
 
 class TestScoreExtractNovel:
@@ -247,7 +247,7 @@ class TestScoreExtractNovel:
             ],
         )
         assert result.exit_code != 0
-        assert "--classifications" in result.stdout or "classifications" in result.stdout.lower()
+        assert "--classifications" in result.output or "classifications" in result.output.lower()
 
     def test_extract_novel_missing_file(self, cli_runner, temp_dir):
         """Test error handling for non-existent classification file."""
@@ -286,7 +286,7 @@ class TestScoreExtractNovel:
                 str(output),
             ],
         )
-        assert result.exit_code == 0 or "error" not in result.stdout.lower()
+        assert result.exit_code == 0 or "error" not in result.output.lower()
 
     def test_extract_novel_genus_only(
         self,
@@ -309,7 +309,7 @@ class TestScoreExtractNovel:
                 str(output),
             ],
         )
-        assert result.exit_code == 0 or "error" not in result.stdout.lower()
+        assert result.exit_code == 0 or "error" not in result.output.lower()
 
     def test_extract_novel_with_read_ids(
         self,
@@ -333,7 +333,7 @@ class TestScoreExtractNovel:
                 str(output_ids),
             ],
         )
-        assert result.exit_code == 0 or "error" not in result.stdout.lower()
+        assert result.exit_code == 0 or "error" not in result.output.lower()
 
     def test_extract_novel_custom_threshold(
         self,
@@ -356,14 +356,14 @@ class TestScoreExtractNovel:
                 str(output),
             ],
         )
-        assert result.exit_code == 0 or "error" not in result.stdout.lower()
+        assert result.exit_code == 0 or "error" not in result.output.lower()
 
 
 class TestScoreBatch:
     """Tests for score batch command."""
 
     def test_batch_requires_input_dir(self, cli_runner, temp_dir):
-        """Test that --input-dir argument is required."""
+        """Test that --alignment-dir argument is required."""
         output_dir = temp_dir / "batch_output"
         result = cli_runner.invoke(
             app,
@@ -384,7 +384,7 @@ class TestScoreBatch:
             [
                 "score",
                 "batch",
-                "--input-dir",
+                "--alignment-dir",
                 str(temp_dir / "nonexistent"),
                 "--output-dir",
                 str(output_dir),
@@ -402,11 +402,11 @@ class TestScoreBatch:
             [
                 "score",
                 "batch",
-                "--input-dir",
+                "--alignment-dir",
                 str(input_dir),
                 "--output-dir",
                 str(output_dir),
             ],
         )
         # Should either warn or fail gracefully
-        assert result.exit_code != 0 or "no files" in result.stdout.lower()
+        assert result.exit_code != 0 or "no files" in result.output.lower()

@@ -125,7 +125,7 @@ def run_classify(
 
         args = [
             "score", "classify",
-            "--blast", str(blast),
+            "--alignment", str(blast),
             "--ani", str(ani),
             "--output", str(output_path),
             "--format", output_format,
@@ -183,7 +183,7 @@ def run_batch(
 
         args = [
             "score", "batch",
-            "--blast-dir", str(blast_dir),
+            "--alignment-dir", str(blast_dir),
             "--ani", str(ani),
             "--output-dir", str(output_dir),
             "--pattern", pattern,

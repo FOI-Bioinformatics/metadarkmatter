@@ -23,6 +23,7 @@ from metadarkmatter.core.ani_matrix_builder import (
     parse_skani_output,
     validate_ani_coverage,
 )
+from metadarkmatter.core.parsers import StreamingBlastParser
 from metadarkmatter.external import ToolExecutionError
 
 
@@ -452,24 +453,13 @@ def validate(
 
     try:
         # Read BLAST output and extract genome names from subject IDs
+        # Auto-detect column count for backward compatibility (12 or 13 columns)
+        parser = StreamingBlastParser(blast)
         sample_df = pl.scan_csv(
             blast,
             separator="\t",
             has_header=False,
-            new_columns=[
-                "qseqid",
-                "sseqid",
-                "pident",
-                "length",
-                "mismatch",
-                "gapopen",
-                "qstart",
-                "qend",
-                "sstart",
-                "send",
-                "evalue",
-                "bitscore",
-            ],
+            new_columns=parser.column_names,
             n_rows=sample_rows,
         ).collect()
 

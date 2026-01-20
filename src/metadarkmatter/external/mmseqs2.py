@@ -55,7 +55,7 @@ class MMseqs2(ExternalTool):
     TOOL_NAME: ClassVar[str] = "mmseqs"
     INSTALL_HINT: ClassVar[str] = "conda install -c bioconda mmseqs2"
 
-    # BLAST-compatible output format (12 columns)
+    # BLAST-compatible output format (13 columns, including qlen)
     # This ensures compatibility with existing parsers and classifiers
     BLAST_FORMAT_COLUMNS = (
         "query",
@@ -70,6 +70,7 @@ class MMseqs2(ExternalTool):
         "tend",
         "evalue",
         "bits",
+        "qlen",
     )
 
     def build_command(

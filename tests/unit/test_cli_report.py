@@ -29,7 +29,7 @@ class TestReportGenerateValidation:
             ],
         )
         assert result.exit_code != 0
-        assert "--classifications" in result.stdout or "classifications" in result.stdout.lower()
+        assert "--classifications" in result.output or "classifications" in result.output.lower()
 
     def test_generate_missing_input_file(self, cli_runner, temp_dir):
         """Test error handling for non-existent classification file."""
@@ -46,7 +46,7 @@ class TestReportGenerateValidation:
             ],
         )
         assert result.exit_code != 0
-        assert "not found" in result.stdout.lower() or "does not exist" in result.stdout.lower()
+        assert "not found" in result.output.lower() or "does not exist" in result.output.lower()
 
     def test_generate_with_basic_input(
         self,
@@ -68,7 +68,7 @@ class TestReportGenerateValidation:
             ],
         )
         # Should succeed
-        assert result.exit_code == 0 or "error" not in result.stdout.lower()
+        assert result.exit_code == 0 or "error" not in result.output.lower()
         # Output file should be created
         if result.exit_code == 0:
             assert output.exists()
@@ -96,7 +96,7 @@ class TestReportGenerateValidation:
                 str(output),
             ],
         )
-        assert result.exit_code == 0 or "error" not in result.stdout.lower()
+        assert result.exit_code == 0 or "error" not in result.output.lower()
 
     def test_generate_with_ani_matrix(
         self,
@@ -120,7 +120,7 @@ class TestReportGenerateValidation:
                 str(output),
             ],
         )
-        assert result.exit_code == 0 or "error" not in result.stdout.lower()
+        assert result.exit_code == 0 or "error" not in result.output.lower()
 
     def test_generate_with_all_options(
         self,
@@ -147,7 +147,7 @@ class TestReportGenerateValidation:
                 str(output),
             ],
         )
-        assert result.exit_code == 0 or "error" not in result.stdout.lower()
+        assert result.exit_code == 0 or "error" not in result.output.lower()
 
     def test_generate_missing_ani_file(
         self,
@@ -246,7 +246,7 @@ class TestReportMulti:
             ],
         )
         # Should warn about no files found
-        assert result.exit_code != 0 or "no files" in result.stdout.lower()
+        assert result.exit_code != 0 or "no files" in result.output.lower()
 
     def test_multi_with_single_file(
         self,
@@ -276,7 +276,7 @@ class TestReportMulti:
             ],
         )
         # Should succeed or warn about single sample
-        assert result.exit_code == 0 or "single" in result.stdout.lower()
+        assert result.exit_code == 0 or "single" in result.output.lower()
 
     def test_multi_with_multiple_files(
         self,
@@ -309,7 +309,7 @@ class TestReportMulti:
                 str(output),
             ],
         )
-        assert result.exit_code == 0 or "error" not in result.stdout.lower()
+        assert result.exit_code == 0 or "error" not in result.output.lower()
         # Output should be created
         if result.exit_code == 0:
             assert output.exists()
@@ -344,7 +344,7 @@ class TestReportMulti:
                 str(output),
             ],
         )
-        assert result.exit_code == 0 or "error" not in result.stdout.lower()
+        assert result.exit_code == 0 or "error" not in result.output.lower()
 
 
 class TestReportOutputValidation:

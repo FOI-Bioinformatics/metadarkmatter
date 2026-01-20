@@ -420,10 +420,10 @@ def align_reads(
     # Build BLAST command
     blastn = BlastN()
 
-    # Output format: standard tabular with all 12 columns
+    # Output format: standard tabular with all 13 columns (including qlen)
     outfmt = (
         "6 qseqid sseqid pident length mismatch gapopen "
-        "qstart qend sstart send evalue bitscore"
+        "qstart qend sstart send evalue bitscore qlen"
     )
 
     # Handle gzipped query input (BLASTN doesn't support gzip directly)

@@ -15,32 +15,63 @@ import pytest
 from metadarkmatter.external.mmseqs2 import MMseqs2
 
 
+def _generate_random_sequence(length: int, seed: int) -> str:
+    """Generate a random DNA sequence for testing."""
+    import random
+    rng = random.Random(seed)
+    return "".join(rng.choice("ATCG") for _ in range(length))
+
+
 @pytest.fixture
 def test_fasta(tmp_path: Path) -> Path:
-    """Create a small test FASTA file."""
+    """Create a test FASTA file with realistic sequence lengths.
+
+    MMseqs2 requires longer sequences (>50bp) to find alignments reliably.
+    """
     fasta_path = tmp_path / "test_genomes.fasta"
-    fasta_content = """>GCF_000001|contig1
-ATCGATCGATCGATCGATCGATCG
->GCF_000002|contig1
-GCTAGCTAGCTAGCTAGCTAGCTA
->GCF_000003|contig1
-TTAATTAATTAATTAATTAATTAA
+
+    # Generate 500bp sequences with different seeds for diversity
+    seq1 = _generate_random_sequence(500, seed=1)
+    seq2 = _generate_random_sequence(500, seed=2)
+    seq3 = _generate_random_sequence(500, seed=3)
+
+    # Use proper RefSeq format with version numbers for genome name extraction
+    fasta_content = f""">GCF_000001.1|contig1
+{seq1}
+>GCF_000002.1|contig1
+{seq2}
+>GCF_000003.1|contig1
+{seq3}
 """
     fasta_path.write_text(fasta_content)
     return fasta_path
 
 
 @pytest.fixture
-def test_query(tmp_path: Path) -> Path:
-    """Create a small test query file."""
+def test_query(tmp_path: Path, test_fasta: Path) -> Path:
+    """Create test query reads that are subsequences of the genomes.
+
+    Creates 150bp reads from each genome to ensure alignment hits.
+    """
+    # Read the test genome sequences
+    content = test_fasta.read_text()
+    seqs = {}
+    current_id = None
+    for line in content.strip().split("\n"):
+        if line.startswith(">"):
+            current_id = line[1:].split("|")[0]
+            seqs[current_id] = ""
+        else:
+            seqs[current_id] += line
+
     query_path = tmp_path / "test_query.fasta"
-    query_content = """>read1
-ATCGATCGATCGATCG
->read2
-GCTAGCTAGCTAGCTA
->read3
-TTAATTAATTAATTAA
-"""
+
+    # Create reads from positions 50-200 (150bp) of each genome
+    query_content = ""
+    for i, (genome_id, seq) in enumerate(seqs.items(), 1):
+        read_seq = seq[50:200]  # 150bp read
+        query_content += f">read{i}\n{read_seq}\n"
+
     query_path.write_text(query_content)
     return query_path
 
@@ -58,11 +89,11 @@ class TestMMseqs2Integration:
         mmseqs = MMseqs2()
         db_path = tmp_path / "test_db"
 
-        # Create database
+        # Create database - let MMseqs2 auto-detect database type
+        # Note: Explicitly passing dbtype=1 causes issues with nucleotide search
         mmseqs.create_database(
             input_fasta=test_fasta,
             database=db_path,
-            dbtype=1,  # nucleotide
             timeout=60.0,
         )
 
@@ -79,7 +110,7 @@ class TestMMseqs2Integration:
         mmseqs.create_database(
             input_fasta=test_fasta,
             database=db_path,
-            dbtype=1,
+            # Note: Omit dbtype to let MMseqs2 auto-detect (--dbtype 1 causes search issues)
             timeout=60.0,
         )
 
@@ -102,13 +133,13 @@ class TestMMseqs2Integration:
         lines = output_path.read_text().strip().split("\n")
         assert len(lines) > 0, "Should have at least one alignment"
 
-        # Check first line has 12 columns (BLAST format)
+        # Check first line has 13 columns (BLAST format with qlen)
         first_line = lines[0]
         columns = first_line.split("\t")
-        assert len(columns) == 12, f"Expected 12 columns, got {len(columns)}"
+        assert len(columns) == 13, f"Expected 13 columns, got {len(columns)}"
 
         # Validate column types
-        qseqid, sseqid, pident, length, mismatch, gapopen, qstart, qend, sstart, send, evalue, bitscore = columns
+        qseqid, sseqid, pident, length, mismatch, gapopen, qstart, qend, sstart, send, evalue, bitscore, qlen = columns
 
         # Query and subject IDs should be strings
         assert qseqid.startswith("read"), f"Query ID should start with 'read', got {qseqid}"
@@ -125,10 +156,12 @@ class TestMMseqs2Integration:
         int(send)      # subject end position
         float(evalue)  # E-value
         float(bitscore)  # bit score
+        int(qlen)      # query length
 
         # Validate ranges
         assert 0 <= float(pident) <= 100, "pident should be 0-100"
         assert float(bitscore) > 0, "bitscore should be positive"
+        assert int(qlen) > 0, "qlen should be positive"
 
     def test_parser_compatibility(self, tmp_path: Path, test_fasta: Path, test_query: Path):
         """Should be parseable by StreamingBlastParser."""
@@ -141,7 +174,7 @@ class TestMMseqs2Integration:
         mmseqs.create_database(
             input_fasta=test_fasta,
             database=db_path,
-            dbtype=1,
+            # Note: Omit dbtype to let MMseqs2 auto-detect (--dbtype 1 causes search issues)
             timeout=60.0,
         )
 
@@ -178,7 +211,11 @@ class TestMMseqs2Integration:
         assert hit.genome_name.startswith("GCF_"), "Genome name should be extracted"
 
     def test_compressed_output(self, tmp_path: Path, test_fasta: Path, test_query: Path):
-        """Should handle gzipped output correctly."""
+        """Should handle gzipped output correctly when compressed manually.
+
+        Note: MMseqs2 doesn't compress output directly; compression is handled
+        by our CLI wrapper. This test verifies the parser can read gzipped files.
+        """
         mmseqs = MMseqs2()
 
         # Create database
@@ -186,29 +223,35 @@ class TestMMseqs2Integration:
         mmseqs.create_database(
             input_fasta=test_fasta,
             database=db_path,
-            dbtype=1,
+            # Note: Omit dbtype to let MMseqs2 auto-detect (--dbtype 1 causes search issues)
             timeout=60.0,
         )
 
-        # Run search with gzipped output
-        output_path = tmp_path / "results.tsv.gz"
+        # Run search with uncompressed output
+        raw_output = tmp_path / "results.tsv"
         mmseqs.search(
             query=test_query,
             database=db_path,
-            output=output_path,
+            output=raw_output,
             threads=1,
             timeout=60.0,
         )
 
+        # Manually compress to test parser's gzip handling
+        compressed_path = tmp_path / "results.tsv.gz"
+        with raw_output.open("rb") as f_in:
+            with gzip.open(compressed_path, "wb") as f_out:
+                f_out.write(f_in.read())
+
         # Verify compressed output exists
-        assert output_path.exists(), "Compressed output should exist"
+        assert compressed_path.exists(), "Compressed output should exist"
 
         # Verify can decompress and parse
-        with gzip.open(output_path, "rt") as f:
+        with gzip.open(compressed_path, "rt") as f:
             lines = f.read().strip().split("\n")
             assert len(lines) > 0, "Should have results in compressed file"
             columns = lines[0].split("\t")
-            assert len(columns) == 12, "Should have 12 columns"
+            assert len(columns) == 13, "Should have 13 columns (with qlen)"
 
     def test_sensitivity_parameter(self, tmp_path: Path, test_fasta: Path, test_query: Path):
         """Should respect sensitivity parameter."""
@@ -219,7 +262,7 @@ class TestMMseqs2Integration:
         mmseqs.create_database(
             input_fasta=test_fasta,
             database=db_path,
-            dbtype=1,
+            # Note: Omit dbtype to let MMseqs2 auto-detect (--dbtype 1 causes search issues)
             timeout=60.0,
         )
 
@@ -266,7 +309,7 @@ class TestMMseqs2Integration:
         mmseqs.create_database(
             input_fasta=test_fasta,
             database=db_path,
-            dbtype=1,
+            # Note: Omit dbtype to let MMseqs2 auto-detect (--dbtype 1 causes search issues)
             timeout=60.0,
         )
 
@@ -354,7 +397,7 @@ class TestMMseqs2vsBlastComparison:
         mmseqs.create_database(
             input_fasta=test_fasta,
             database=mmseqs_db,
-            dbtype=1,
+            # Note: Omit dbtype to let MMseqs2 auto-detect (--dbtype 1 causes search issues)
             timeout=60.0,
         )
 

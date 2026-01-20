@@ -277,14 +277,10 @@ class TestStreamingBlastParser:
         assert stats["total_hits"] > 0
 
     def test_empty_file_handling(self, empty_blast_file):
-        """Should raise NoDataError for empty BLAST file."""
-        import polars
-
-        parser = StreamingBlastParser(empty_blast_file)
-
-        # Polars raises NoDataError for empty CSV files
-        with pytest.raises(polars.exceptions.NoDataError):
-            list(parser.iter_reads())
+        """Should raise ValueError for empty BLAST file during initialization."""
+        # Parser now raises ValueError during column detection
+        with pytest.raises(ValueError, match="no data lines"):
+            StreamingBlastParser(empty_blast_file)
 
     def test_custom_chunk_size(self, temp_blast_file):
         """Should respect custom chunk_size parameter."""
