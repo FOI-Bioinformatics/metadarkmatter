@@ -107,50 +107,6 @@ The thresholds are based on established prokaryotic taxonomy:
 
 ---
 
-## Prerequisites
-
-### Software Installation
-
-```bash
-# Python 3.11+ required
-python --version
-
-# Install metadarkmatter
-pip install metadarkmatter
-# Or from source: pip install -e /path/to/metadarkmatter
-```
-
-### External Software Dependencies
-
-Metadarkmatter requires several external bioinformatics tools:
-
-**Required tools** (install all):
-```bash
-conda install -c bioconda kraken2 krakentools blast skani
-```
-
-| Tool | Purpose |
-|------|---------|
-| Kraken2 | Taxonomic classification of reads |
-| KrakenTools | Extract reads by taxid |
-| BLAST+ | Nucleotide alignment (blastn) |
-| skani | Fast ANI computation |
-
-**Optional tools**:
-```bash
-# MMseqs2 - only for datasets >100K reads
-conda install -c bioconda mmseqs2
-
-# seqtk - only for assembly workflows
-conda install -c bioconda seqtk
-
-# fastANI - alternative to skani for ANI computation
-conda install -c bioconda fastani
-```
-
-**Note:** BLAST accepts FASTQ files directly (automatic conversion), so seqtk is only needed for specialized workflows.
-
-```bash
 
 ### Data Requirements
 
