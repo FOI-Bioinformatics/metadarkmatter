@@ -11,6 +11,7 @@ import re
 from collections.abc import Iterator
 from typing import ClassVar, Self
 
+import numpy as np
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
@@ -35,6 +36,7 @@ class BlastHit(BaseModel):
         send: End position in subject
         evalue: Expectation value
         bitscore: Bit score
+        qlen: Query sequence length (optional, None for backward compatibility)
     """
 
     qseqid: str = Field(description="Query sequence ID (read ID)")
@@ -49,6 +51,11 @@ class BlastHit(BaseModel):
     send: int = Field(ge=1, description="Subject end position")
     evalue: float = Field(ge=0, description="Expectation value")
     bitscore: float = Field(ge=0, description="Bit score")
+    qlen: int | None = Field(
+        default=None,
+        ge=1,
+        description="Query sequence length (optional, for accurate coverage calculation)",
+    )
 
     @field_validator("pident", mode="before")
     @classmethod
@@ -112,6 +119,62 @@ class BlastHit(BaseModel):
             raise ValueError(msg)
         return self
 
+    def calculate_coverage(self, read_length: int | None = None) -> float:
+        """
+        Calculate alignment coverage as fraction of read length.
+
+        Args:
+            read_length: Explicit read length. If None, uses qlen if available,
+                         otherwise falls back to qend proxy.
+
+        Returns:
+            Coverage fraction between 0.0 and 1.0
+
+        Raises:
+            ValueError: If effective read length is <= 0
+        """
+        # Determine effective read length
+        if read_length is not None:
+            effective_length = read_length
+        elif self.qlen is not None:
+            effective_length = self.qlen
+        else:
+            effective_length = self.qend
+
+        if effective_length <= 0:
+            msg = f"Effective read length must be positive, got {effective_length}"
+            raise ValueError(msg)
+
+        coverage = (self.qend - self.qstart + 1) / effective_length
+        return min(1.0, max(0.0, coverage))
+
+    def calculate_weighted_score(
+        self,
+        read_length: int | None = None,
+        mode: str = "none",
+        strength: float = 0.5,
+    ) -> float:
+        """
+        Calculate coverage-weighted bitscore.
+
+        Args:
+            read_length: Explicit read length (if None, uses qlen or qend proxy)
+            mode: Weighting mode ("none", "linear", "log", "sigmoid")
+            strength: Weight strength parameter (0.0-1.0)
+
+        Returns:
+            Weighted bitscore (unmodified if mode="none")
+
+        Raises:
+            ValueError: If mode is unknown or read_length invalid
+        """
+        if mode == "none":
+            return self.bitscore
+
+        coverage = self.calculate_coverage(read_length)
+        weight = _calculate_coverage_weight(coverage, mode, strength)
+        return self.bitscore * weight
+
     model_config = {"frozen": True}
 
     @classmethod
@@ -120,7 +183,7 @@ class BlastHit(BaseModel):
         Parse a single line from BLAST tabular output.
 
         Expected format (outfmt 6):
-        qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore
+        qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore [qlen]
 
         Args:
             line: Tab-delimited BLAST output line
@@ -129,11 +192,11 @@ class BlastHit(BaseModel):
             Parsed BlastHit instance
 
         Raises:
-            ValueError: If line format is invalid
+            ValueError: If line format is invalid (must be 12 or 13 fields)
         """
         fields = line.strip().split("\t")
-        if len(fields) != 12:
-            msg = f"Expected 12 fields in BLAST line, got {len(fields)}"
+        if len(fields) not in (12, 13):
+            msg = f"Expected 12 or 13 fields in BLAST line, got {len(fields)}"
             raise ValueError(msg)
 
         return cls(
@@ -149,7 +212,40 @@ class BlastHit(BaseModel):
             send=int(fields[9]),
             evalue=float(fields[10]),
             bitscore=float(fields[11]),
+            qlen=int(fields[12]) if len(fields) == 13 else None,
         )
+
+
+def _calculate_coverage_weight(coverage: float, mode: str, strength: float) -> float:
+    """
+    Calculate coverage weight for given mode and strength.
+
+    Args:
+        coverage: Coverage fraction (0.0-1.0)
+        mode: Weighting mode ("linear", "log", "sigmoid")
+        strength: Weight strength parameter (0.0-1.0)
+
+    Returns:
+        Coverage weight multiplier
+
+    Raises:
+        ValueError: If mode is unknown
+    """
+    min_weight = 1.0 - strength
+    max_weight = 1.0 + strength
+    weight_range = max_weight - min_weight
+
+    if mode == "linear":
+        normalized = coverage
+    elif mode == "log":
+        normalized = np.log(1 + 9 * coverage) / np.log(10)
+    elif mode == "sigmoid":
+        normalized = 1.0 / (1.0 + np.exp(-10.0 * (coverage - 0.6)))
+    else:
+        msg = f"Unknown coverage weight mode: {mode}"
+        raise ValueError(msg)
+
+    return min_weight + weight_range * normalized
 
 
 class BlastResult(BaseModel):
@@ -252,6 +348,78 @@ class BlastResult(BaseModel):
             List of hits with bitscore >= (top_bitscore * threshold_pct / 100)
         """
         return list(self.iter_ambiguous_hits(threshold_pct))
+
+    def get_best_hit_weighted(
+        self,
+        read_length: int | None = None,
+        mode: str = "none",
+        strength: float = 0.5,
+    ) -> BlastHit | None:
+        """
+        Get best hit using coverage-weighted scoring.
+
+        Args:
+            read_length: Explicit read length (if None, uses qlen or qend proxy)
+            mode: Weighting mode ("none", "linear", "log", "sigmoid")
+            strength: Weight strength parameter (0.0-1.0)
+
+        Returns:
+            BlastHit with highest weighted score, or None if no hits
+        """
+        if not self.hits:
+            return None
+
+        if mode == "none":
+            return self.best_hit
+
+        # Calculate weighted scores for all hits
+        weighted_hits = [
+            (hit, hit.calculate_weighted_score(read_length, mode, strength))
+            for hit in self.hits
+        ]
+
+        # Sort by weighted score descending, then by pident descending as tiebreaker
+        weighted_hits.sort(key=lambda x: (x[1], x[0].pident), reverse=True)
+
+        return weighted_hits[0][0]
+
+    def iter_ambiguous_hits_weighted(
+        self,
+        read_length: int | None = None,
+        mode: str = "none",
+        strength: float = 0.5,
+        threshold_pct: float = 95.0,
+    ) -> Iterator[BlastHit]:
+        """
+        Iterate over hits within threshold of top weighted bitscore.
+
+        Args:
+            read_length: Explicit read length (if None, uses qlen or qend proxy)
+            mode: Weighting mode ("none", "linear", "log", "sigmoid")
+            strength: Weight strength parameter (0.0-1.0)
+            threshold_pct: Percentage of top weighted bitscore (default: 95%)
+
+        Yields:
+            BlastHit objects with weighted score >= (top_weighted * threshold_pct / 100)
+        """
+        if not self.hits:
+            return
+
+        if mode == "none":
+            yield from self.iter_ambiguous_hits(threshold_pct)
+            return
+
+        best_hit = self.get_best_hit_weighted(read_length, mode, strength)
+        if not best_hit:
+            return
+
+        top_weighted = best_hit.calculate_weighted_score(read_length, mode, strength)
+        cutoff = top_weighted * (threshold_pct / 100.0)
+
+        for hit in self.hits:
+            weighted_score = hit.calculate_weighted_score(read_length, mode, strength)
+            if weighted_score >= cutoff:
+                yield hit
 
     def sorted_by_bitscore(self) -> BlastResult:
         """

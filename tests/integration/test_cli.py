@@ -214,10 +214,11 @@ class TestMainCLI:
         """Running without arguments should show help/usage message."""
         result = runner.invoke(app, [])
 
-        # With no_args_is_help=True, Typer shows help and exits with 0
-        assert result.exit_code == 0
+        # With no_args_is_help=True, Typer shows help (exit code may be 0 or 2
+        # depending on Typer version)
+        assert result.exit_code in (0, 2)
         # Help/usage info should be in output
-        assert "Usage:" in result.stdout or "score" in result.stdout
+        assert "Usage:" in result.output or "score" in result.output
 
     def test_help_flag(self):
         """--help should display help text."""
@@ -250,7 +251,7 @@ class TestScoreClassifyCommand:
 
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(output_path),
         ])
@@ -272,7 +273,7 @@ class TestScoreClassifyCommand:
 
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(output_path),
             "--summary", str(summary_path),
@@ -294,7 +295,7 @@ class TestScoreClassifyCommand:
 
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(output_path),
             "--format", "csv",
@@ -313,7 +314,7 @@ class TestScoreClassifyCommand:
 
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(output_path),
             "--format", "parquet",
@@ -332,7 +333,7 @@ class TestScoreClassifyCommand:
 
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(output_path),
             "--fast",
@@ -350,7 +351,7 @@ class TestScoreClassifyCommand:
 
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(output_path),
             "--parallel",
@@ -368,7 +369,7 @@ class TestScoreClassifyCommand:
 
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(output_path),
             "--streaming",
@@ -387,7 +388,7 @@ class TestScoreClassifyCommand:
 
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(output_path),
             "--streaming",
@@ -408,7 +409,7 @@ class TestScoreClassifyCommand:
 
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(output_path),
             "--bitscore-threshold", "90.0",
@@ -423,7 +424,7 @@ class TestScoreClassifyCommand:
 
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(output_path),
             "--verbose",
@@ -439,7 +440,7 @@ class TestScoreClassifyCommand:
 
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(output_path),
         ])
@@ -456,7 +457,7 @@ class TestScoreClassifyCommand:
 
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(output_path),
             "--summary", str(summary_path),
@@ -485,7 +486,7 @@ class TestScoreClassifyErrors:
         """Should error if BLAST file doesn't exist."""
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", "/nonexistent/path/blast.tsv",
+            "--alignment", "/nonexistent/path/blast.tsv",
             "--ani", str(cli_ani_file),
             "--output", str(temp_dir / "out.csv"),
         ])
@@ -496,7 +497,7 @@ class TestScoreClassifyErrors:
         """Should error if ANI file doesn't exist."""
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", "/nonexistent/path/ani.csv",
             "--output", str(temp_dir / "out.csv"),
         ])
@@ -507,7 +508,7 @@ class TestScoreClassifyErrors:
         """Should error for invalid --format value."""
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(temp_dir / "out.csv"),
             "--format", "invalid_format",
@@ -522,7 +523,7 @@ class TestScoreClassifyErrors:
         """Should error for bitscore threshold outside 0-100."""
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(temp_dir / "out.csv"),
             "--bitscore-threshold", "150.0",
@@ -532,7 +533,7 @@ class TestScoreClassifyErrors:
 
     def test_missing_required_options(self, temp_dir):
         """Should error if required options are missing."""
-        # Missing --blast
+        # Missing --alignment
         result = runner.invoke(app, [
             "score", "classify",
             "--ani", str(temp_dir / "ani.csv"),
@@ -555,7 +556,7 @@ class TestScoreClassifyErrors:
 
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(invalid_ani),
             "--output", str(temp_dir / "out.csv"),
         ])
@@ -568,7 +569,7 @@ class TestScoreClassifyErrors:
         """Should error when --fast and --parallel are both specified."""
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(temp_dir / "out.csv"),
             "--fast",
@@ -584,7 +585,7 @@ class TestScoreClassifyErrors:
         """Should error when --fast and --streaming are both specified."""
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(temp_dir / "out.csv"),
             "--fast",
@@ -600,7 +601,7 @@ class TestScoreClassifyErrors:
         """Should error when all three modes are specified."""
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(temp_dir / "out.csv"),
             "--fast",
@@ -638,7 +639,7 @@ class TestScoreClassifyErrors:
 
         result = runner.invoke(app, [
             "score", "classify",
-            "--blast", str(blast_path),
+            "--alignment", str(blast_path),
             "--ani", str(ani_path),
             "--output", str(temp_dir / "out.csv"),
             "--verbose",
@@ -664,7 +665,7 @@ class TestScoreBatchCommand:
 
         result = runner.invoke(app, [
             "score", "batch",
-            "--blast-dir", str(cli_blast_dir),
+            "--alignment-dir", str(cli_blast_dir),
             "--ani", str(cli_ani_file),
             "--output-dir", str(output_dir),
             "--pattern", "*.blast.tsv",
@@ -683,7 +684,7 @@ class TestScoreBatchCommand:
 
         result = runner.invoke(app, [
             "score", "batch",
-            "--blast-dir", str(cli_blast_dir),
+            "--alignment-dir", str(cli_blast_dir),
             "--ani", str(cli_ani_file),
             "--output-dir", str(output_dir),
             "--pattern", "*.blast.tsv",
@@ -702,7 +703,7 @@ class TestScoreBatchCommand:
 
         result = runner.invoke(app, [
             "score", "batch",
-            "--blast-dir", str(cli_blast_dir),
+            "--alignment-dir", str(cli_blast_dir),
             "--ani", str(cli_ani_file),
             "--output-dir", str(output_dir),
             "--pattern", "*.blast.tsv",
@@ -726,7 +727,7 @@ class TestScoreBatchCommand:
 
         result = runner.invoke(app, [
             "score", "batch",
-            "--blast-dir", str(cli_blast_dir),
+            "--alignment-dir", str(cli_blast_dir),
             "--ani", str(cli_ani_file),
             "--output-dir", str(output_dir),
             "--pattern", "*.blast.tsv",
@@ -742,7 +743,7 @@ class TestScoreBatchCommand:
 
         result = runner.invoke(app, [
             "score", "batch",
-            "--blast-dir", str(cli_blast_dir),
+            "--alignment-dir", str(cli_blast_dir),
             "--ani", str(cli_ani_file),
             "--output-dir", str(output_dir),
             "--pattern", "*.blast.tsv",
@@ -758,7 +759,7 @@ class TestScoreBatchCommand:
 
         result = runner.invoke(app, [
             "score", "batch",
-            "--blast-dir", str(cli_blast_dir),
+            "--alignment-dir", str(cli_blast_dir),
             "--ani", str(cli_ani_file),
             "--output-dir", str(output_dir),
             "--pattern", "*.nonexistent",
@@ -766,7 +767,7 @@ class TestScoreBatchCommand:
 
         # Should exit with error code 1 (not silent success)
         assert result.exit_code == 1
-        assert "No BLAST files found" in result.stdout
+        assert "No alignment files found" in result.stdout
         assert "Suggestions" in result.stdout  # Helpful guidance included
 
     def test_batch_custom_pattern(self, temp_dir, cli_ani_file):
@@ -800,7 +801,7 @@ class TestScoreBatchCommand:
 
         result = runner.invoke(app, [
             "score", "batch",
-            "--blast-dir", str(blast_dir),
+            "--alignment-dir", str(blast_dir),
             "--ani", str(cli_ani_file),
             "--output-dir", str(output_dir),
             "--pattern", "*.custom.tsv",
@@ -815,7 +816,7 @@ class TestScoreBatchCommand:
 
         result = runner.invoke(app, [
             "score", "batch",
-            "--blast-dir", str(cli_blast_dir),
+            "--alignment-dir", str(cli_blast_dir),
             "--ani", str(cli_ani_file),
             "--output-dir", str(output_dir),
             "--pattern", "*.blast.tsv",
@@ -838,7 +839,7 @@ class TestScoreBatchErrors:
         """Should error if blast-dir doesn't exist."""
         result = runner.invoke(app, [
             "score", "batch",
-            "--blast-dir", "/nonexistent/directory",
+            "--alignment-dir", "/nonexistent/directory",
             "--ani", str(cli_ani_file),
             "--output-dir", str(temp_dir / "output"),
         ])
@@ -849,7 +850,7 @@ class TestScoreBatchErrors:
         """Should error if ANI file doesn't exist."""
         result = runner.invoke(app, [
             "score", "batch",
-            "--blast-dir", str(cli_blast_dir),
+            "--alignment-dir", str(cli_blast_dir),
             "--ani", "/nonexistent/ani.csv",
             "--output-dir", str(temp_dir / "output"),
         ])
@@ -860,7 +861,7 @@ class TestScoreBatchErrors:
         """Should error for invalid --format value."""
         result = runner.invoke(app, [
             "score", "batch",
-            "--blast-dir", str(cli_blast_dir),
+            "--alignment-dir", str(cli_blast_dir),
             "--ani", str(cli_ani_file),
             "--output-dir", str(temp_dir / "output"),
             "--format", "invalid",
@@ -883,7 +884,7 @@ class TestCLIOutputValidation:
 
         runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(output_path),
         ])
@@ -912,7 +913,7 @@ class TestCLIOutputValidation:
 
         runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(output_path),
         ])
@@ -938,7 +939,7 @@ class TestCLIOutputValidation:
 
         runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(output_path),
         ])
@@ -956,7 +957,7 @@ class TestCLIOutputValidation:
 
         runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(output_path),
         ])
@@ -974,7 +975,7 @@ class TestCLIOutputValidation:
 
         runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(output_path),
         ])
@@ -997,7 +998,7 @@ class TestCLIOutputValidation:
 
         runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(output_path),
             "--summary", str(summary_path),
@@ -1032,7 +1033,7 @@ class TestCLIOutputValidation:
         # Generate CSV
         runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(csv_path),
             "--format", "csv",
@@ -1041,7 +1042,7 @@ class TestCLIOutputValidation:
         # Generate Parquet
         runner.invoke(app, [
             "score", "classify",
-            "--blast", str(cli_blast_file),
+            "--alignment", str(cli_blast_file),
             "--ani", str(cli_ani_file),
             "--output", str(parquet_path),
             "--format", "parquet",

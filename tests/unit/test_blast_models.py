@@ -211,16 +211,17 @@ class TestBlastHitFromLine:
         with pytest.raises(ValueError) as exc_info:
             BlastHit.from_blast_line(line)
 
-        assert "12 fields" in str(exc_info.value)
+        assert "12 or 13 fields" in str(exc_info.value)
 
     def test_parse_line_too_many_fields(self):
-        """Should raise ValueError for lines with too many fields."""
-        line = "read_001\tGCF_000123456.1\t98.5\t150\t2\t0\t1\t150\t1000\t1150\t1e-50\t250.0\textra"
+        """Should raise ValueError for lines with too many fields (14+)."""
+        # 14 fields (more than 13 allowed)
+        line = "read_001\tGCF_000123456.1\t98.5\t150\t2\t0\t1\t150\t1000\t1150\t1e-50\t250.0\t200\textra"
 
         with pytest.raises(ValueError) as exc_info:
             BlastHit.from_blast_line(line)
 
-        assert "12 fields" in str(exc_info.value)
+        assert "12 or 13 fields" in str(exc_info.value)
 
     def test_parse_line_invalid_number(self):
         """Should raise error for non-numeric fields."""

@@ -116,6 +116,9 @@ class ParallelClassifier:
             "identity_gap_thresholds": eff["identity_gap_thresholds"],
             "identity_score_base": eff["identity_score_base"],
             "identity_score_range": eff["identity_score_range"],
+            # Coverage weighting parameters
+            "coverage_weight_mode": self.config.coverage_weight_mode,
+            "coverage_weight_strength": self.config.coverage_weight_strength,
         }
 
     def _iter_chunks(

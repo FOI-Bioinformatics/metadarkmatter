@@ -177,6 +177,42 @@ class VectorizedClassifier:
             ]),
         ])
 
+    def _coverage_weight_expr(
+        self,
+        coverage_col: pl.Expr,
+        mode: str,
+        strength: float,
+    ) -> pl.Expr:
+        """
+        Generate Polars expression for coverage weighting.
+
+        Args:
+            coverage_col: Polars expression for coverage values (0.0-1.0)
+            mode: Weighting mode ("linear", "log", "sigmoid")
+            strength: Weight strength parameter (0.0-1.0)
+
+        Returns:
+            Polars expression that calculates coverage weight multiplier
+
+        Raises:
+            ValueError: If mode is unknown
+        """
+        min_weight = 1.0 - strength
+        max_weight = 1.0 + strength
+        weight_range = max_weight - min_weight
+
+        if mode == "linear":
+            normalized = coverage_col
+        elif mode == "log":
+            normalized = (1.0 + 9.0 * coverage_col).log() / np.log(10)
+        elif mode == "sigmoid":
+            normalized = 1.0 / (1.0 + (-10.0 * (coverage_col - 0.6)).exp())
+        else:
+            msg = f"Unknown coverage weight mode: {mode}"
+            raise ValueError(msg)
+
+        return min_weight + weight_range * normalized
+
     def classify_file(
         self,
         blast_path: Path,
@@ -229,54 +265,91 @@ class VectorizedClassifier:
         if df.is_empty():
             return self._empty_dataframe()
 
-        # Sort by bitscore DESC, pident DESC, genome_name ASC for deterministic tie-breaking
-        # When multiple hits share max bitscore, this ensures consistent selection
-        df = df.sort(["qseqid", "bitscore", "pident", "genome_name"], descending=[False, True, True, False])
+        # Add read_length column for coverage calculation
+        # Use qlen if available, otherwise fall back to qend as proxy
+        if "qlen" in df.columns:
+            df = df.with_columns([
+                pl.when(pl.col("qlen").is_not_null())
+                .then(pl.col("qlen"))
+                .otherwise(pl.col("qend"))
+                .alias("read_length")
+            ])
+        else:
+            df = df.with_columns([
+                pl.col("qend").alias("read_length")
+            ])
 
-        # Step 1: Find best hit per read (highest bitscore) and collect metrics for confidence
+        # Calculate coverage and weighted score if enabled
+        if self.config.coverage_weight_mode != "none":
+            df = df.with_columns([
+                ((pl.col("qend") - pl.col("qstart") + 1) / pl.col("read_length"))
+                .clip(0.0, 1.0)
+                .alias("coverage"),
+            ]).with_columns([
+                self._coverage_weight_expr(
+                    pl.col("coverage"),
+                    self.config.coverage_weight_mode,
+                    self.config.coverage_weight_strength,
+                ).alias("coverage_weight"),
+            ]).with_columns([
+                (pl.col("bitscore") * pl.col("coverage_weight")).alias("weighted_bitscore"),
+            ])
+        else:
+            # No weighting - use raw bitscore
+            df = df.with_columns([
+                pl.col("bitscore").alias("weighted_bitscore"),
+            ])
+
+        # Sort by weighted_bitscore DESC, pident DESC, genome_name ASC for deterministic tie-breaking
+        # When multiple hits share max weighted_bitscore, this ensures consistent selection
+        df = df.sort(["qseqid", "weighted_bitscore", "pident", "genome_name"], descending=[False, True, True, False])
+
+        # Step 1: Find best hit per read (highest weighted_bitscore) and collect metrics for confidence
         best_hits = (
             df.group_by("qseqid", maintain_order=True)
             .agg([
+                pl.col("weighted_bitscore").max().alias("max_weighted_bitscore"),
+                # Keep original max_bitscore for compatibility
                 pl.col("bitscore").max().alias("max_bitscore"),
-                # Second-best bitscore for gap calculation
-                pl.col("bitscore").get(1).alias("second_bitscore"),
+                # Second-best weighted_bitscore for gap calculation
+                pl.col("weighted_bitscore").get(1).alias("second_weighted_bitscore"),
                 pl.col("pident")
-                .filter(pl.col("bitscore") == pl.col("bitscore").max())
+                .filter(pl.col("weighted_bitscore") == pl.col("weighted_bitscore").max())
                 .first()
                 .alias("top_pident"),
                 pl.col("genome_name")
-                .filter(pl.col("bitscore") == pl.col("bitscore").max())
+                .filter(pl.col("weighted_bitscore") == pl.col("weighted_bitscore").max())
                 .first()
                 .alias("best_genome"),
                 # Alignment length of best hit (for confidence calculation)
                 pl.col("length")
-                .filter(pl.col("bitscore") == pl.col("bitscore").max())
+                .filter(pl.col("weighted_bitscore") == pl.col("weighted_bitscore").max())
                 .first()
                 .alias("best_alignment_length"),
                 # Approximate alignment fraction (qend proxy for read length)
                 ((pl.col("qend") - pl.col("qstart") + 1) / pl.col("qend"))
-                .filter(pl.col("bitscore") == pl.col("bitscore").max())
+                .filter(pl.col("weighted_bitscore") == pl.col("weighted_bitscore").max())
                 .first()
                 .alias("alignment_fraction"),
             ])
         )
 
-        # Step 2: Calculate bitscore threshold per read
+        # Step 2: Calculate weighted_bitscore threshold per read
         threshold_pct = self.config.bitscore_threshold_pct / 100.0
         best_hits = best_hits.with_columns([
-            (pl.col("max_bitscore") * threshold_pct).alias("bitscore_threshold"),
+            (pl.col("max_weighted_bitscore") * threshold_pct).alias("weighted_bitscore_threshold"),
         ])
 
         # Step 3: Join back to find all ambiguous hits
         df_with_threshold = df.join(
-            best_hits.select(["qseqid", "bitscore_threshold", "best_genome"]),
+            best_hits.select(["qseqid", "weighted_bitscore_threshold", "best_genome"]),
             on="qseqid",
             how="left",
         )
 
         # Filter to ambiguous hits only
         ambiguous = df_with_threshold.filter(
-            pl.col("bitscore") >= pl.col("bitscore_threshold")
+            pl.col("weighted_bitscore") >= pl.col("weighted_bitscore_threshold")
         )
 
         # Step 4: Count ambiguous hits per read
@@ -377,7 +450,7 @@ class VectorizedClassifier:
                 pl.col("same_species_count").fill_null(0).cast(pl.Int64),
                 pl.col("min_ani_secondary").fill_null(0.0),
                 # Fill nulls for confidence calculation inputs
-                pl.col("second_bitscore").fill_null(0.0),
+                pl.col("second_weighted_bitscore").fill_null(0.0),
                 pl.col("best_alignment_length").fill_null(0).cast(pl.Int64),
                 pl.col("alignment_fraction").fill_null(0.0),
                 # Second hit identity defaults to null (no secondary genome)
@@ -445,10 +518,10 @@ class VectorizedClassifier:
         result = result.with_columns([
             # Bitscore gap: (best - second) / best * 100
             # Higher gap = more confident (single clear hit vs many similar hits)
-            pl.when(pl.col("second_bitscore") == 0.0)
+            pl.when(pl.col("second_weighted_bitscore") == 0.0)
             .then(100.0)  # Only one hit = max gap
             .otherwise(
-                ((pl.col("max_bitscore") - pl.col("second_bitscore")) / pl.col("max_bitscore") * 100.0)
+                ((pl.col("max_bitscore") - pl.col("second_weighted_bitscore")) / pl.col("max_bitscore") * 100.0)
                 .clip(0.0, 100.0)
             )
             .alias("_bitscore_gap_pct"),
@@ -627,37 +700,71 @@ class VectorizedClassifier:
         if df.is_empty():
             return self._empty_dataframe()
 
-        # Sort for deterministic tie-breaking when multiple hits share max bitscore
-        df = df.sort(["qseqid", "bitscore", "pident", "genome_name"], descending=[False, True, True, False])
+        # Add read_length column for coverage calculation
+        if "qlen" in df.columns:
+            df = df.with_columns([
+                pl.when(pl.col("qlen").is_not_null())
+                .then(pl.col("qlen"))
+                .otherwise(pl.col("qend"))
+                .alias("read_length")
+            ])
+        else:
+            df = df.with_columns([
+                pl.col("qend").alias("read_length")
+            ])
+
+        # Calculate coverage and weighted score if enabled
+        if self.config.coverage_weight_mode != "none":
+            df = df.with_columns([
+                ((pl.col("qend") - pl.col("qstart") + 1) / pl.col("read_length"))
+                .clip(0.0, 1.0)
+                .alias("coverage"),
+            ]).with_columns([
+                self._coverage_weight_expr(
+                    pl.col("coverage"),
+                    self.config.coverage_weight_mode,
+                    self.config.coverage_weight_strength,
+                ).alias("coverage_weight"),
+            ]).with_columns([
+                (pl.col("bitscore") * pl.col("coverage_weight")).alias("weighted_bitscore"),
+            ])
+        else:
+            df = df.with_columns([
+                pl.col("bitscore").alias("weighted_bitscore"),
+            ])
+
+        # Sort for deterministic tie-breaking when multiple hits share max weighted_bitscore
+        df = df.sort(["qseqid", "weighted_bitscore", "pident", "genome_name"], descending=[False, True, True, False])
 
         # Step 1: Find best hit per read
         best_hits = (
             df.group_by("qseqid", maintain_order=True)
             .agg([
+                pl.col("weighted_bitscore").max().alias("max_weighted_bitscore"),
                 pl.col("bitscore").max().alias("max_bitscore"),
                 pl.col("pident").filter(
-                    pl.col("bitscore") == pl.col("bitscore").max()
+                    pl.col("weighted_bitscore") == pl.col("weighted_bitscore").max()
                 ).first().alias("top_pident"),
                 pl.col("genome_name").filter(
-                    pl.col("bitscore") == pl.col("bitscore").max()
+                    pl.col("weighted_bitscore") == pl.col("weighted_bitscore").max()
                 ).first().alias("best_genome"),
             ])
         )
 
-        # Step 2: Bitscore threshold
+        # Step 2: Weighted bitscore threshold
         threshold_pct = self.config.bitscore_threshold_pct / 100.0
         best_hits = best_hits.with_columns([
-            (pl.col("max_bitscore") * threshold_pct).alias("bitscore_threshold"),
+            (pl.col("max_weighted_bitscore") * threshold_pct).alias("weighted_bitscore_threshold"),
         ])
 
         # Step 3: Find ambiguous hits
         df_with_threshold = df.join(
-            best_hits.select(["qseqid", "bitscore_threshold", "best_genome"]),
+            best_hits.select(["qseqid", "weighted_bitscore_threshold", "best_genome"]),
             on="qseqid",
             how="left",
         )
         ambiguous = df_with_threshold.filter(
-            pl.col("bitscore") >= pl.col("bitscore_threshold")
+            pl.col("weighted_bitscore") >= pl.col("weighted_bitscore_threshold")
         )
 
         # Step 4: Count ambiguous hits
@@ -838,14 +945,15 @@ class VectorizedClassifier:
         first_partition = True
 
         # Use batched reading for streaming
+        # Detect column count from file (12 for legacy, 13 for new format with qlen)
+        from metadarkmatter.core.parsers import StreamingBlastParser
+        parser = StreamingBlastParser(blast_path)
+
         reader = pl.read_csv_batched(
             blast_path,
             separator="\t",
             has_header=False,
-            new_columns=[
-                "qseqid", "sseqid", "pident", "length", "mismatch",
-                "gapopen", "qstart", "qend", "sstart", "send", "evalue", "bitscore"
-            ],
+            new_columns=parser.column_names,
             batch_size=partition_size,
         )
 

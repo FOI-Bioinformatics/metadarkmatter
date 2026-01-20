@@ -115,7 +115,7 @@ class TestDryRunMode:
 
         result = e2e_runner.invoke(app, [
             "score", "classify",
-            "--blast", str(blast_path),
+            "--alignment", str(blast_path),
             "--ani", str(ani_path),
             "--output", str(e2e_temp_dir / "dry_run.csv"),
             "--dry-run",
@@ -123,7 +123,7 @@ class TestDryRunMode:
 
         CLIAssertions.assert_success(result)
         CLIAssertions.assert_output_contains(result, "DRY RUN")
-        CLIAssertions.assert_output_contains(result, "BLAST File")
+        CLIAssertions.assert_output_contains(result, "Alignment File")
         CLIAssertions.assert_output_contains(result, "ANI Matrix")
         CLIAssertions.assert_output_contains(result, "Genome Coverage")
         CLIAssertions.assert_output_contains(result, "Validation complete")
@@ -142,7 +142,7 @@ class TestDryRunMode:
 
         result = e2e_runner.invoke(app, [
             "score", "classify",
-            "--blast", str(blast_path),
+            "--alignment", str(blast_path),
             "--ani", str(ani_path),
             "--output", str(output_path),
             "--dry-run",
@@ -164,7 +164,7 @@ class TestDryRunMode:
 
         result = e2e_runner.invoke(app, [
             "score", "classify",
-            "--blast", str(blast_path),
+            "--alignment", str(blast_path),
             "--ani", str(ani_path),
             "--output", str(e2e_temp_dir / "dry_run.csv"),
             "--dry-run",
@@ -187,7 +187,7 @@ class TestDryRunMode:
 
         result = e2e_runner.invoke(app, [
             "score", "classify",
-            "--blast", str(blast_path),
+            "--alignment", str(blast_path),
             "--ani", str(ani_path),
             "--output", str(e2e_temp_dir / "dry_run.csv"),
             "--parallel",
@@ -215,7 +215,7 @@ class TestQuietMode:
 
         result = e2e_runner.invoke(app, [
             "score", "classify",
-            "--blast", str(blast_path),
+            "--alignment", str(blast_path),
             "--ani", str(ani_path),
             "--output", str(e2e_temp_dir / "quiet.csv"),
             "--quiet",
@@ -241,7 +241,7 @@ class TestQuietMode:
 
         result = e2e_runner.invoke(app, [
             "score", "classify",
-            "--blast", str(blast_path),
+            "--alignment", str(blast_path),
             "--ani", str(ani_path),
             "--output", str(output_path),
             "--quiet",
@@ -260,7 +260,7 @@ class TestQuietMode:
 
         result = e2e_runner.invoke(app, [
             "score", "classify",
-            "--blast", str(e2e_temp_dir / "nonexistent.blast.tsv"),
+            "--alignment", str(e2e_temp_dir / "nonexistent.blast.tsv"),
             "--ani", str(e2e_temp_dir / "nonexistent.ani.csv"),
             "--output", str(e2e_temp_dir / "quiet.csv"),
             "--quiet",
@@ -284,7 +284,7 @@ class TestQuietMode:
 
         result = e2e_runner.invoke(app, [
             "score", "classify",
-            "--blast", str(blast_path),
+            "--alignment", str(blast_path),
             "--ani", str(ani_path),
             "--output", str(output_path),
             "--summary", str(summary_path),

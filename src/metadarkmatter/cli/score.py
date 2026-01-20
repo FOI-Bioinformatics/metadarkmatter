@@ -38,7 +38,7 @@ from metadarkmatter.core.ani_placement import (
 from metadarkmatter.core.id_mapping import ContigIdMapping
 from metadarkmatter.core.io_utils import read_dataframe, write_dataframe
 from metadarkmatter.core.metadata import GenomeMetadata
-from metadarkmatter.core.parsers import extract_genome_name_expr
+from metadarkmatter.core.parsers import StreamingBlastParser, extract_genome_name_expr
 from metadarkmatter.models.classification import TaxonomicSummary
 from metadarkmatter.models.config import ScoringConfig
 
@@ -108,6 +108,34 @@ THRESHOLD_PRESETS: dict[str, ScoringConfig] = {
         min_alignment_fraction=0.5,
     ),
     "default": ScoringConfig(),
+    # Coverage-weighted presets
+    # These prioritize longer alignments over short conserved domains
+    "coverage-linear": ScoringConfig(
+        coverage_weight_mode="linear",
+        coverage_weight_strength=0.5,
+    ),
+    "coverage-strict": ScoringConfig(
+        coverage_weight_mode="sigmoid",
+        coverage_weight_strength=0.7,
+        novelty_known_max=4.0,
+        novelty_novel_species_min=4.0,
+        novelty_novel_species_max=15.0,
+        novelty_novel_genus_min=15.0,
+        novelty_novel_genus_max=25.0,
+        uncertainty_known_max=1.5,
+        uncertainty_novel_species_max=1.5,
+        uncertainty_novel_genus_max=1.5,
+    ),
+    "coverage-gentle": ScoringConfig(
+        coverage_weight_mode="log",
+        coverage_weight_strength=0.3,
+    ),
+    "gtdb-coverage": ScoringConfig(
+        coverage_weight_mode="linear",
+        coverage_weight_strength=0.5,
+        min_alignment_length=100,
+        min_alignment_fraction=0.5,
+    ),
 }
 
 
@@ -181,15 +209,13 @@ def validate_ani_genome_coverage(
     Returns:
         Tuple of (matched_count, total_genomes, coverage_pct, missing_genomes)
     """
-    # Read sample of BLAST file
+    # Read sample of BLAST file (auto-detect column count for backward compatibility)
+    parser = StreamingBlastParser(blast_path)
     sample_df = pl.scan_csv(
         blast_path,
         separator="\t",
         has_header=False,
-        new_columns=[
-            "qseqid", "sseqid", "pident", "length", "mismatch",
-            "gapopen", "qstart", "qend", "sstart", "send", "evalue", "bitscore"
-        ],
+        new_columns=parser.column_names,
         n_rows=sample_rows,
     ).with_columns(
         extract_genome_name_expr()
@@ -298,11 +324,10 @@ console = Console()
 
 @app.command(name="classify")
 def classify(
-    blast: Path = typer.Option(
+    alignment: Path = typer.Option(
         ...,
-        "--blast",
-        "-b",
-        help="Path to BLAST tabular output file (.tsv or .tsv.gz)",
+        "--alignment",
+        help="Path to alignment file (BLAST or MMseqs2 tabular format, .tsv or .tsv.gz)",
         exists=True,
         dir_okay=False,
     ),
@@ -372,7 +397,11 @@ def classify(
         help=(
             "Use predefined threshold preset: 'gtdb-strict' (95% ANI, AF>=50%), "
             "'gtdb-relaxed' (97% ANI), 'conservative' (96% ANI), "
-            "'literature-strict' (96% ANI, 1.5% uncertainty, high confidence), or 'default'"
+            "'literature-strict' (96% ANI, 1.5% uncertainty, high confidence), "
+            "'coverage-linear' (linear coverage weighting), "
+            "'coverage-strict' (sigmoid coverage weighting, stricter thresholds), "
+            "'coverage-gentle' (log coverage weighting), "
+            "'gtdb-coverage' (GTDB + linear coverage weighting), or 'default'"
         ),
     ),
     alignment_mode: str = typer.Option(
@@ -397,6 +426,25 @@ def classify(
         help=(
             "Minimum fraction of read aligned (like GTDB's AF). "
             "Set to 0.5 for GTDB-compatible filtering. Default 0.0 = no filter."
+        ),
+        min=0.0,
+        max=1.0,
+    ),
+    coverage_weight_mode: str = typer.Option(
+        "none",
+        "--coverage-weight-mode",
+        help=(
+            "Coverage weighting mode for hit selection: 'none' (default, raw bitscore), "
+            "'linear' (gradual weight increase), 'log' (diminishing returns), "
+            "'sigmoid' (sharp 60%% threshold). Prioritizes longer alignments over short conserved domains."
+        ),
+    ),
+    coverage_weight_strength: float = typer.Option(
+        0.5,
+        "--coverage-weight-strength",
+        help=(
+            "Coverage weight strength (0.0-1.0). Controls magnitude of coverage effect. "
+            "Weight range = [1-strength, 1+strength]. At 0.5: weights range 0.5x to 1.5x."
         ),
         min=0.0,
         max=1.0,
@@ -454,14 +502,14 @@ def classify(
     Example:
 
         metadarkmatter score classify \\
-            --blast results.blast.tsv.gz \\
+            --alignment results.blast.tsv.gz \\
             --ani ani_matrix.csv \\
             --output classifications.csv \\
             --summary summary.json
 
         # With species-level aggregation (requires genome_metadata.tsv):
         metadarkmatter score classify \\
-            --blast results.blast.tsv.gz \\
+            --alignment results.blast.tsv.gz \\
             --ani ani_matrix.csv \\
             --metadata genome_metadata.tsv \\
             --output classifications.csv \\
@@ -469,35 +517,35 @@ def classify(
 
         # External BLAST results - auto-generate ID mapping from genomes:
         metadarkmatter score classify \\
-            --blast external_results.blast.tsv.gz \\
+            --alignment external_results.blast.tsv.gz \\
             --ani ani_matrix.csv \\
             --genomes genomes/ \\
             --output classifications.csv
 
         # External BLAST results - use pre-computed ID mapping:
         metadarkmatter score classify \\
-            --blast external_results.blast.tsv.gz \\
+            --alignment external_results.blast.tsv.gz \\
             --ani ani_matrix.csv \\
             --id-mapping id_mapping.tsv \\
             --output classifications.csv
 
         # Use Parquet for 10x smaller files and faster I/O:
         metadarkmatter score classify \\
-            --blast results.blast.tsv.gz \\
+            --alignment results.blast.tsv.gz \\
             --ani ani_matrix.csv \\
             --output classifications.parquet \\
             --format parquet
 
         # Use GTDB-compatible settings (95% ANI, AF >= 50%):
         metadarkmatter score classify \\
-            --blast results.blast.tsv.gz \\
+            --alignment results.blast.tsv.gz \\
             --ani ani_matrix.csv \\
             --preset gtdb-strict \\
             --output classifications.csv
 
         # Custom alignment quality filters:
         metadarkmatter score classify \\
-            --blast results.blast.tsv.gz \\
+            --alignment results.blast.tsv.gz \\
             --ani ani_matrix.csv \\
             --min-alignment-length 150 \\
             --min-alignment-fraction 0.5 \\
@@ -531,8 +579,8 @@ def classify(
         out.print(f"[dim]Processing mode: {processing_mode.value}[/dim]")
 
     # Validate inputs
-    if not blast.exists():
-        console.print(f"[red]Error: BLAST file not found: {blast}[/red]")
+    if not alignment.exists():
+        console.print(f"[red]Error: Alignment file not found: {alignment}[/red]")
         raise typer.Exit(code=1) from None
 
     if not ani.exists():
@@ -543,14 +591,14 @@ def classify(
     if dry_run:
         console.print("[bold cyan]DRY RUN MODE[/bold cyan] - Validating inputs only\n")
 
-        # Show BLAST file info
-        blast_size = blast.stat().st_size
-        console.print(f"[bold]BLAST File:[/bold] {blast}")
-        console.print(f"  Size: {blast_size / 1024 / 1024:.1f} MB")
+        # Show alignment file info
+        alignment_size = alignment.stat().st_size
+        console.print(f"[bold]Alignment File:[/bold] {alignment}")
+        console.print(f"  Size: {alignment_size / 1024 / 1024:.1f} MB")
 
         # Count lines (estimate reads)
         try:
-            with blast.open("rb") as f:
+            with alignment.open("rb") as f:
                 line_count = sum(1 for _ in f)
             console.print(f"  Alignments: ~{line_count:,}")
         except Exception:
@@ -568,7 +616,7 @@ def classify(
         # Show genome coverage
         try:
             matched, total, coverage_pct, missing = validate_ani_genome_coverage(
-                blast, ani_matrix
+                alignment, ani_matrix
             )
             console.print("\n[bold]Genome Coverage:[/bold]")
             console.print(f"  Matched: {matched}/{total} ({coverage_pct:.1f}%)")
@@ -625,7 +673,7 @@ def classify(
         config = THRESHOLD_PRESETS[preset_lower]
         out.print(f"[dim]Using preset: {preset_lower}[/dim]")
         # Override bitscore threshold and alignment mode if explicitly provided
-        if bitscore_threshold != 95.0 or alignment_mode_lower != "nucleotide":
+        if bitscore_threshold != 95.0 or alignment_mode_lower != "nucleotide" or coverage_weight_mode != "none":
             config = ScoringConfig(
                 alignment_mode=alignment_mode_lower,
                 bitscore_threshold_pct=bitscore_threshold,
@@ -640,6 +688,8 @@ def classify(
                 uncertainty_conserved_min=config.uncertainty_conserved_min,
                 min_alignment_length=config.min_alignment_length,
                 min_alignment_fraction=config.min_alignment_fraction,
+                coverage_weight_mode=coverage_weight_mode,
+                coverage_weight_strength=coverage_weight_strength,
             )
     else:
         config = ScoringConfig(
@@ -647,6 +697,8 @@ def classify(
             bitscore_threshold_pct=bitscore_threshold,
             min_alignment_length=min_alignment_length,
             min_alignment_fraction=min_alignment_fraction,
+            coverage_weight_mode=coverage_weight_mode,
+            coverage_weight_strength=coverage_weight_strength,
         )
 
     # Log alignment filter settings if non-default
@@ -754,10 +806,10 @@ def classify(
 
         out.print(f"[green]Loaded ID mapping with {len(contig_mapping):,} entries[/green]\n")
 
-    # Early validation: check genome coverage between BLAST file and ANI matrix
+    # Early validation: check genome coverage between alignment file and ANI matrix
     try:
         matched, total, coverage_pct, missing = validate_ani_genome_coverage(
-            blast, ani_matrix
+            alignment, ani_matrix
         )
 
         if verbose:
@@ -822,7 +874,7 @@ def classify(
                 refresh_per_second=2,
             ) as progress:
                 # Estimate total rows from file size (rough: ~100 bytes per alignment)
-                file_size = blast.stat().st_size
+                file_size = alignment.stat().st_size
                 estimated_rows = file_size // 100
                 task = progress.add_task(
                     "Classifying reads (streaming)...",
@@ -839,7 +891,7 @@ def classify(
                     )
 
                 num_classified = vectorized.stream_to_file(
-                    blast_path=blast,
+                    blast_path=alignment,
                     output_path=output,
                     output_format=output_format,
                     progress_callback=streaming_progress,
@@ -857,7 +909,7 @@ def classify(
                     total=None,
                 )
                 vectorized = VectorizedClassifier(ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config)
-                classification_df = vectorized.classify_file(blast, id_mapping=contig_mapping)
+                classification_df = vectorized.classify_file(alignment, id_mapping=contig_mapping)
 
             num_classified = _finalize_classification(
                 classification_df, genome_metadata, output, output_format
@@ -878,7 +930,7 @@ def classify(
             ) as progress:
                 progress.add_task(description="Classifying reads (fast mode)...", total=None)
                 classifier = ANIWeightedClassifier(ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config)
-                classification_df = classifier.classify_to_dataframe_fast(blast)
+                classification_df = classifier.classify_to_dataframe_fast(alignment)
 
             num_classified = _finalize_classification(
                 classification_df, genome_metadata, output, output_format
@@ -899,7 +951,7 @@ def classify(
             ) as progress:
                 progress.add_task(description="Classifying reads...", total=None)
                 classifier = ANIWeightedClassifier(ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config)
-                classification_df = classifier.classify_to_dataframe(blast)
+                classification_df = classifier.classify_to_dataframe(alignment)
 
             num_classified = _finalize_classification(
                 classification_df, genome_metadata, output, output_format
@@ -971,11 +1023,11 @@ def classify(
 
 @app.command(name="batch")
 def batch(
-    blast_dir: Path = typer.Option(
+    alignment_dir: Path = typer.Option(
         ...,
-        "--blast-dir",
+        "--alignment-dir",
         "-b",
-        help="Directory containing BLAST result files",
+        help="Directory containing alignment files (BLAST or MMseqs2 tabular format)",
         exists=True,
         file_okay=False,
     ),
@@ -1008,8 +1060,9 @@ def batch(
         None,
         "--preset",
         help=(
-            "Use predefined threshold preset: 'gtdb-strict', "
-            "'gtdb-relaxed', 'conservative', or 'default'"
+            "Use predefined threshold preset: 'gtdb-strict', 'gtdb-relaxed', "
+            "'conservative', 'literature-strict', 'coverage-linear', "
+            "'coverage-strict', 'coverage-gentle', 'gtdb-coverage', or 'default'"
         ),
     ),
     alignment_mode: str = typer.Option(
@@ -1030,6 +1083,21 @@ def batch(
         0.0,
         "--min-alignment-fraction",
         help="Minimum fraction of read aligned (GTDB uses 0.5)",
+        min=0.0,
+        max=1.0,
+    ),
+    coverage_weight_mode: str = typer.Option(
+        "none",
+        "--coverage-weight-mode",
+        help=(
+            "Coverage weighting mode: 'none' (default), 'linear', 'log', or 'sigmoid'. "
+            "Prioritizes longer alignments over short conserved domains."
+        ),
+    ),
+    coverage_weight_strength: float = typer.Option(
+        0.5,
+        "--coverage-weight-strength",
+        help="Coverage weight strength (0.0-1.0). Weight range = [1-strength, 1+strength].",
         min=0.0,
         max=1.0,
     ),
@@ -1114,21 +1182,21 @@ def batch(
 
     file_ext = ".parquet" if output_format == "parquet" else ".csv"
 
-    # Find all BLAST files
-    blast_files = list(blast_dir.glob(pattern))
+    # Find all alignment files
+    alignment_files = list(alignment_dir.glob(pattern))
 
-    if not blast_files:
+    if not alignment_files:
         console.print(
-            f"[red]Error: No BLAST files found matching pattern: '{pattern}'[/red]\n"
-            f"  Directory: {blast_dir}\n"
+            f"[red]Error: No alignment files found matching pattern: '{pattern}'[/red]\n"
+            f"  Directory: {alignment_dir}\n"
             f"  Pattern: {pattern}\n\n"
             f"Suggestions:\n"
-            f"  - Check if the directory contains BLAST files\n"
+            f"  - Check if the directory contains alignment files\n"
             f"  - Try a different pattern (e.g., '*.tsv', '*.blast.tsv.gz')"
         )
         raise typer.Exit(code=1) from None
 
-    console.print(f"Found {len(blast_files)} BLAST files to process\n")
+    console.print(f"Found {len(alignment_files)} alignment files to process\n")
 
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1145,10 +1213,10 @@ def batch(
     console.print(f"[green]Loaded ANI matrix for {num_genomes} genomes[/green]\n")
 
     # Early validation: check genome coverage using first BLAST file
-    if blast_files:
+    if alignment_files:
         try:
             matched, total, coverage_pct, missing = validate_ani_genome_coverage(
-                blast_files[0], ani_matrix
+                alignment_files[0], ani_matrix
             )
 
             if verbose:
@@ -1228,6 +1296,8 @@ def batch(
             bitscore_threshold_pct=bitscore_threshold,
             min_alignment_length=min_alignment_length,
             min_alignment_fraction=min_alignment_fraction,
+            coverage_weight_mode=coverage_weight_mode,
+            coverage_weight_strength=coverage_weight_strength,
         )
 
     # Log alignment filter settings if non-default
@@ -1252,21 +1322,21 @@ def batch(
     total_classified = 0
     failed_files = []
 
-    for i, blast_file in enumerate(blast_files, 1):
-        sample_name = extract_sample_name(blast_file)
+    for i, alignment_file in enumerate(alignment_files, 1):
+        sample_name = extract_sample_name(alignment_file)
         output_file = output_dir / f"{sample_name}_classifications{file_ext}"
         summary_file = output_dir / f"{sample_name}_summary.json"
 
-        console.print(f"[{i}/{len(blast_files)}] Processing {sample_name}...")
+        console.print(f"[{i}/{len(alignment_files)}] Processing {sample_name}...")
 
         try:
             # Classify using the appropriate method
             if parallel:
-                df = vectorized.classify_file(blast_file)
+                df = vectorized.classify_file(alignment_file)
             elif fast:
-                df = classifier.classify_to_dataframe_fast(blast_file)
+                df = classifier.classify_to_dataframe_fast(alignment_file)
             else:
-                df = classifier.classify_to_dataframe(blast_file)
+                df = classifier.classify_to_dataframe(alignment_file)
             num_classified = len(df)
 
             # Write results in specified format
@@ -1282,14 +1352,14 @@ def batch(
 
         except Exception as e:
             console.print(f"  [red]Failed: {e}[/red]")
-            failed_files.append(blast_file.name)
+            failed_files.append(alignment_file.name)
             if verbose:
                 console.print_exception()
 
     # Summary
     console.print("\n[bold]Batch Processing Complete[/bold]")
     console.print(f"Total reads classified: {total_classified:,}")
-    console.print(f"Successful: {len(blast_files) - len(failed_files)}/{len(blast_files)}")
+    console.print(f"Successful: {len(alignment_files) - len(failed_files)}/{len(alignment_files)}")
 
     if failed_files:
         console.print("\n[yellow]Failed files:[/yellow]")

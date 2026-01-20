@@ -17,11 +17,11 @@ class TestMMseqs2FormatCompatibility:
     """Tests for BLAST parser format compatibility."""
 
     def test_column_count_matches_blast(self):
-        """Should produce 12 columns to match BLAST format."""
+        """Should produce 13 columns to match BLAST format (with qlen)."""
         mmseqs = MMseqs2()
 
-        # BLAST format has 12 columns
-        expected_columns = 12
+        # BLAST format has 13 columns (12 standard + qlen for coverage calculation)
+        expected_columns = 13
 
         # Count columns in MMseqs2 format string
         format_columns = mmseqs.BLAST_FORMAT_COLUMNS
@@ -70,6 +70,7 @@ class TestMMseqs2FormatCompatibility:
             "tend": "send",
             "evalue": "evalue",
             "bits": "bitscore",
+            "qlen": "qlen",  # Added for coverage calculation
         }
 
         # Verify each position maps correctly
@@ -208,10 +209,10 @@ read3\tGCF_000003.1|c1\t50.0\t50\t25\t0\t1\t50\t1\t50\t0.001\t100.0
         """Should validate format strings match documentation."""
         mmseqs = MMseqs2()
 
-        # Format string from docstring/documentation
+        # Format string from docstring/documentation (including qlen for coverage calc)
         documented_format = (
             "query,target,pident,alnlen,mismatch,gapopen,"
-            "qstart,qend,tstart,tend,evalue,bits"
+            "qstart,qend,tstart,tend,evalue,bits,qlen"
         )
 
         actual_format = ",".join(mmseqs.BLAST_FORMAT_COLUMNS)
