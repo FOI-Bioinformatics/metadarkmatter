@@ -944,30 +944,24 @@ class VectorizedClassifier:
         total_rows = 0
         first_partition = True
 
-        # Use batched reading for streaming
+        # Use scan_csv with collect_batches for streaming
         # Detect column count from file (12 for legacy, 13 for new format with qlen)
         from metadarkmatter.core.parsers import StreamingBlastParser
         parser = StreamingBlastParser(blast_path)
 
-        reader = pl.read_csv_batched(
+        batches = pl.scan_csv(
             blast_path,
             separator="\t",
             has_header=False,
             new_columns=parser.column_names,
-            batch_size=partition_size,
-        )
+        ).collect_batches(chunk_size=partition_size)
 
         # Track reads across partitions to handle boundary cases
         pending_reads: dict[str, list] = {}
 
-        while True:
-            batches = reader.next_batches(1)
-            if batches is None or len(batches) == 0:
-                break
-
-            partition_df = batches[0]
+        for partition_df in batches:
             if partition_df.is_empty():
-                break
+                continue
 
             total_rows += len(partition_df)
 

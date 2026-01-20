@@ -968,18 +968,15 @@ class StreamingBlastParser:
         """Stream reads with correct boundary handling."""
         pending_hits: dict[str, list[BlastHitFast]] = {}
 
-        reader = pl.read_csv_batched(
+        # Use scan_csv with collect_batches for streaming
+        batches = pl.scan_csv(
             self.blast_path,
             separator="\t",
-            batch_size=self.chunk_size,  # Process 1M rows at a time
-        )
+        ).collect_batches(chunk_size=self.chunk_size)
 
-        while True:
-            batches = reader.next_batches(1)
-            if not batches:
-                break
-
-            chunk_df = batches[0]
+        for chunk_df in batches:
+            if chunk_df.is_empty():
+                continue
 
             # Vectorized genome extraction + sorting (Polars Rust backend)
             chunk_df = chunk_df.with_columns([
