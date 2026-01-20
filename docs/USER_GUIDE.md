@@ -29,7 +29,7 @@ Basic workflow for classifying metagenomic reads:
 ```bash
 # Classify BLAST results using ANI-weighted placement
 metadarkmatter score classify \
-    --blast results.blast.tsv.gz \
+    --alignment results.blast.tsv.gz \
     --ani ani_matrix.csv \
     --metadata genome_metadata.tsv \
     --output classifications.csv
@@ -312,7 +312,7 @@ Process multiple samples with shared ANI matrix:
 
 ```bash
 metadarkmatter score batch \
-    --blast-dir blast_results/ \
+    --alignment-dir blast_results/ \
     --ani ani_matrix.csv \
     --metadata genome_metadata.tsv \
     --output-dir classifications/ \
@@ -330,21 +330,21 @@ For large datasets, use performance optimization:
 ```bash
 # Fast mode (10M+ alignments)
 metadarkmatter score classify \
-    --blast huge_sample.blast.tsv.gz \
+    --alignment huge_sample.blast.tsv.gz \
     --ani ani_matrix.csv \
     --output classifications.csv \
     --fast
 
 # Parallel mode (10M-100M alignments, multi-core)
 metadarkmatter score classify \
-    --blast huge_sample.blast.tsv.gz \
+    --alignment huge_sample.blast.tsv.gz \
     --ani ani_matrix.csv \
     --output classifications.csv \
     --parallel
 
 # Streaming mode (100M+ alignments, memory-efficient)
 metadarkmatter score classify \
-    --blast huge_sample.blast.tsv.gz \
+    --alignment huge_sample.blast.tsv.gz \
     --ani ani_matrix.csv \
     --output classifications.csv \
     --streaming
@@ -372,7 +372,7 @@ Always use `--metadata` flag for species-level insights:
 
 ```bash
 metadarkmatter score classify \
-    --blast sample.blast.tsv.gz \
+    --alignment sample.blast.tsv.gz \
     --ani ani_matrix.csv \
     --metadata genome_metadata.tsv \  # Enables species tracking
     --output classifications.csv
@@ -385,7 +385,7 @@ For genus-level or higher novelty, use protein mode:
 ```bash
 # Use BLASTX results and AAI matrix
 metadarkmatter score classify \
-    --blast sample.blastx.tsv.gz \
+    --alignment sample.blastx.tsv.gz \
     --ani aai_matrix.csv \
     --alignment-mode protein \  # Different thresholds
     --output classifications.csv

@@ -32,7 +32,7 @@ metadarkmatter blast align --query extraction/reads_R1.fastq.gz --database blast
 metadarkmatter ani compute --genomes genomes/ --output ani_matrix.csv --threads 16
 
 # 5. Classify reads (core algorithm)
-metadarkmatter score classify --blast sample.blast.tsv.gz --ani ani_matrix.csv \
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani_matrix.csv \
   --metadata genome_metadata.tsv --output classifications.csv --parallel
 
 # 6. Generate HTML report

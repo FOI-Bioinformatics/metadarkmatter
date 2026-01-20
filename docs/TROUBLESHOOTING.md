@@ -69,7 +69,7 @@ Error: BLAST file not found: results.blast.tsv.gz
 ls -lh results.blast.tsv.gz
 
 # Use absolute path if needed
-metadarkmatter score classify --blast /absolute/path/to/results.blast.tsv.gz ...
+metadarkmatter score classify --alignment /absolute/path/to/results.blast.tsv.gz ...
 ```
 
 ### Invalid BLAST format
@@ -155,7 +155,7 @@ MemoryError: Unable to allocate array
    ```bash
    zcat huge_file.blast.tsv.gz | split -l 10000000 - chunk_
    for chunk in chunk_*; do
-     metadarkmatter score classify --blast "$chunk" --ani ani.csv --output "${chunk}.csv"
+     metadarkmatter score classify --alignment "$chunk" --ani ani.csv --output "${chunk}.csv"
    done
    cat chunk_*.csv > combined.csv
    ```
@@ -348,7 +348,7 @@ If issues persist:
 2. **Check with minimal example:**
    ```bash
    zcat full_file.blast.tsv.gz | head -n 1000 > test.blast.tsv
-   metadarkmatter score classify --blast test.blast.tsv ...
+   metadarkmatter score classify --alignment test.blast.tsv ...
    ```
 
 3. **Report issue on GitHub:**

@@ -1132,29 +1132,29 @@ def batch(
     ),
 ) -> None:
     """
-    Batch classify multiple BLAST files.
+    Batch classify multiple alignment files.
 
-    Processes all BLAST files matching the pattern in the input directory
-    and writes corresponding classification results.
+    Processes all alignment files (BLAST or MMseqs2) matching the pattern
+    in the input directory and writes corresponding classification results.
 
     Example:
 
         metadarkmatter score batch \\
-            --blast-dir results/blast/ \\
+            --alignment-dir results/blast/ \\
             --ani ani_matrix.csv \\
             --output-dir results/classifications/ \\
             --pattern "*.tsv.gz"
 
         # Use Parquet for 10x smaller files:
         metadarkmatter score batch \\
-            --blast-dir results/blast/ \\
+            --alignment-dir results/blast/ \\
             --ani ani_matrix.csv \\
             --output-dir results/classifications/ \\
             --format parquet
 
         # Use GTDB-compatible settings:
         metadarkmatter score batch \\
-            --blast-dir results/blast/ \\
+            --alignment-dir results/blast/ \\
             --ani ani_matrix.csv \\
             --output-dir results/classifications/ \\
             --preset gtdb-strict

@@ -9,7 +9,7 @@ The `score classify` command offers four processing modes optimized for differen
 ### Standard Mode (Default)
 
 ```bash
-metadarkmatter score classify --blast sample.blast.tsv.gz --ani ani.csv --output out.csv
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv
 ```
 
 | Metric | Value |
@@ -21,7 +21,7 @@ metadarkmatter score classify --blast sample.blast.tsv.gz --ani ani.csv --output
 ### Fast Mode
 
 ```bash
-metadarkmatter score classify --blast sample.blast.tsv.gz --ani ani.csv --output out.csv --fast
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv --fast
 ```
 
 | Metric | Value |
@@ -35,7 +35,7 @@ Optimized single-threaded processing path with reduced object creation overhead.
 ### Parallel Mode (Recommended)
 
 ```bash
-metadarkmatter score classify --blast sample.blast.tsv.gz --ani ani.csv --output out.csv --parallel
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv --parallel
 ```
 
 | Metric | Value |
@@ -49,7 +49,7 @@ Uses Polars vectorized operations with automatic parallelization across all CPU 
 ### Streaming Mode
 
 ```bash
-metadarkmatter score classify --blast sample.blast.tsv.gz --ani ani.csv --output out.csv --streaming
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv --streaming
 ```
 
 | Metric | Value |
@@ -140,7 +140,7 @@ Tested on 64-core HPC node with 128 GB RAM:
 2. **Use compressed input:**
    ```bash
    gzip blast_results.tsv
-   metadarkmatter score classify --blast blast_results.tsv.gz ...
+   metadarkmatter score classify --alignment blast_results.tsv.gz ...
    ```
 
 3. **Reduce BLAST hits per read:**
@@ -162,7 +162,7 @@ Tested on 64-core HPC node with 128 GB RAM:
 
 ```bash
 for f in samples/*.blast.tsv.gz; do
-  metadarkmatter score classify --blast "$f" --ani ani.csv --output "${f%.blast.tsv.gz}.csv"
+  metadarkmatter score classify --alignment "$f" --ani ani.csv --output "${f%.blast.tsv.gz}.csv"
 done
 ```
 
@@ -170,7 +170,7 @@ done
 
 ```bash
 metadarkmatter score batch \
-  --blast-dir samples/ \
+  --alignment-dir samples/ \
   --ani ani.csv \
   --output-dir results/ \
   --parallel

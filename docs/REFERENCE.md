@@ -76,7 +76,7 @@ metadarkmatter ani compute \
 # Step 6: ANI-weighted classification (core algorithm)
 # Use --metadata to add species/genus columns and species-level aggregation
 metadarkmatter score classify \
-  --blast sample.blast.tsv.gz \
+  --alignment sample.blast.tsv.gz \
   --ani ani_matrix.csv \
   --metadata genome_metadata.tsv \
   --output classifications.csv \
@@ -115,7 +115,7 @@ metadarkmatter blastx align \
 
 # Step 6b (Alternative): Protein-level classification (uses protein thresholds)
 metadarkmatter score classify \
-  --blast sample.blastx.tsv.gz \
+  --alignment sample.blastx.tsv.gz \
   --ani ani_matrix.csv \
   --aai aai_matrix.csv \
   --alignment-mode protein \
@@ -213,12 +213,12 @@ metadarkmatter aligns with GTDB (Genome Taxonomy Database) standards for species
 
 ```bash
 # GTDB-strict: 95% ANI, requires 50% alignment fraction
-metadarkmatter score classify --blast results.tsv --ani ani.csv \
+metadarkmatter score classify --alignment results.tsv --ani ani.csv \
     --preset gtdb-strict --output classifications.csv
 
 # Literature-strict: 96% ANI, 1.5% uncertainty, 60% confidence threshold
 # Based on comprehensive literature review (Jain 2018, Riesco 2024)
-metadarkmatter score classify --blast results.tsv --ani ani.csv \
+metadarkmatter score classify --alignment results.tsv --ani ani.csv \
     --preset literature-strict --output classifications.csv
 
 # Available presets: gtdb-strict, gtdb-relaxed, conservative, literature-strict, default
@@ -228,7 +228,7 @@ metadarkmatter score classify --blast results.tsv --ani ani.csv \
 
 ```bash
 # Custom alignment filters (GTDB requires AF >= 50%)
-metadarkmatter score classify --blast results.tsv --ani ani.csv \
+metadarkmatter score classify --alignment results.tsv --ani ani.csv \
     --min-alignment-length 100 \
     --min-alignment-fraction 0.5 \
     --output classifications.csv
@@ -431,16 +431,16 @@ For large datasets, use appropriate processing mode:
 
 ```bash
 # Standard mode (< 1M reads)
-metadarkmatter score classify --blast sample.blast.tsv.gz --ani ani.csv --output out.csv
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv
 
 # Fast mode (1-10M reads)
-metadarkmatter score classify --blast sample.blast.tsv.gz --ani ani.csv --output out.csv --fast
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv --fast
 
 # Parallel mode (10-100M reads) - recommended
-metadarkmatter score classify --blast sample.blast.tsv.gz --ani ani.csv --output out.csv --parallel
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv --parallel
 
 # Streaming mode (100M+ reads, memory-constrained)
-metadarkmatter score classify --blast sample.blast.tsv.gz --ani ani.csv --output out.csv --streaming
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv --streaming
 ```
 
 ### ANI Matrix Computation
@@ -458,7 +458,7 @@ metadarkmatter ani compute --genomes genomes/ --output ani_matrix.csv --backend 
 metadarkmatter ani compute --genomes genomes/ --output ani_matrix.csv --backend fastani
 
 # Validate ANI matrix coverage against BLAST results
-metadarkmatter ani validate --ani ani_matrix.csv --blast sample.blast.tsv.gz
+metadarkmatter ani validate --ani ani_matrix.csv --alignment sample.blast.tsv.gz
 ```
 
 Backend comparison:
@@ -536,7 +536,7 @@ This enables reliable genome identification from BLAST hits, especially for mult
 ```bash
 # Classification with species-level aggregation
 metadarkmatter score classify \
-  --blast sample.blast.tsv.gz \
+  --alignment sample.blast.tsv.gz \
   --ani ani_matrix.csv \
   --metadata genome_metadata.tsv \
   --output classifications.csv \

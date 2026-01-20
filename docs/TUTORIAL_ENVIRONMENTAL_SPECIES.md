@@ -49,7 +49,7 @@ metadarkmatter blast align \
 
 # 6. ANI-weighted classification (with species-level tracking and AAI)
 metadarkmatter score classify \
-  --blast ${SAMPLE}.blast.tsv.gz --ani ani_matrix.csv --aai aai_matrix.csv \
+  --alignment ${SAMPLE}.blast.tsv.gz --ani ani_matrix.csv --aai aai_matrix.csv \
   --metadata genome_metadata.tsv \
   --output classifications.csv --summary summary.json --parallel
 
@@ -668,7 +668,7 @@ Run the core classification algorithm with species-level tracking and genus-leve
 
 ```bash
 metadarkmatter score classify \
-  --blast ${SAMPLE}.blast.tsv.gz \
+  --alignment ${SAMPLE}.blast.tsv.gz \
   --ani ani_matrix.csv \
   --aai aai_matrix.csv \
   --metadata genome_metadata.tsv \
@@ -693,7 +693,7 @@ If you didn't compute an AAI matrix, simply omit the `--aai` flag:
 
 ```bash
 metadarkmatter score classify \
-  --blast ${SAMPLE}.blast.tsv.gz \
+  --alignment ${SAMPLE}.blast.tsv.gz \
   --ani ani_matrix.csv \
   --metadata genome_metadata.tsv \
   --output classifications.csv \
@@ -1165,7 +1165,7 @@ metadarkmatter blast align \
 # Step 7: ANI-weighted classification with species tracking
 echo "Step 7: Classifying reads..."
 metadarkmatter score classify \
-  --blast results/${SAMPLE}.blast.tsv.gz \
+  --alignment results/${SAMPLE}.blast.tsv.gz \
   --ani ani_matrix.csv \
   --metadata genome_metadata.tsv \
   --output results/classifications.csv \
