@@ -304,27 +304,18 @@ class StreamingBlastParser:
         # Buffer to hold partial read data across chunk boundaries
         pending_hits: dict[str, list[dict]] = {}
 
-        # Use Polars batch reader for true streaming
-        # Note: schema_overrides removed due to Polars 1.37 incompatibility with batched reader
-        reader = pl.read_csv_batched(
+        # Use Polars scan_csv with collect_batches for streaming
+        batches = pl.scan_csv(
             self.blast_path,
             separator="\t",
             has_header=False,
             new_columns=self.column_names,
             comment_prefix="#",
-            batch_size=self.chunk_size,
-        )
+        ).collect_batches(chunk_size=self.chunk_size)
 
-        # Track the last read_id seen in previous chunk to detect boundaries
-
-        while True:
-            batches = reader.next_batches(1)
-            if batches is None or len(batches) == 0:
-                break
-
-            chunk_df = batches[0]
+        for chunk_df in batches:
             if chunk_df.is_empty():
-                break
+                continue
 
             # Sort chunk by read_id and bitscore for consistent grouping
             chunk_df = chunk_df.sort(["qseqid", "bitscore"], descending=[False, True])
@@ -430,24 +421,18 @@ class StreamingBlastParser:
         """
         pending_hits: dict[str, list[BlastHitFast]] = {}
 
-        # Note: schema_overrides removed due to Polars 1.37 incompatibility with batched reader
-        reader = pl.read_csv_batched(
+        # Use Polars scan_csv with collect_batches for streaming
+        batches = pl.scan_csv(
             self.blast_path,
             separator="\t",
             has_header=False,
             new_columns=self.column_names,
             comment_prefix="#",
-            batch_size=self.chunk_size,
-        )
+        ).collect_batches(chunk_size=self.chunk_size)
 
-        while True:
-            batches = reader.next_batches(1)
-            if batches is None or len(batches) == 0:
-                break
-
-            chunk_df = batches[0]
+        for chunk_df in batches:
             if chunk_df.is_empty():
-                break
+                continue
 
             # Vectorized genome extraction + sorting in Polars
             chunk_df = (
@@ -760,24 +745,18 @@ def iter_blast_chunks(
     """
     parser = StreamingBlastParser(blast_path, chunk_size=chunk_size)
 
-    # Note: schema_overrides removed due to Polars 1.37 incompatibility with batched reader
-    reader = pl.read_csv_batched(
+    # Use Polars scan_csv with collect_batches for streaming
+    batches = pl.scan_csv(
         blast_path,
         separator="\t",
         has_header=False,
         new_columns=parser.column_names,
         comment_prefix="#",
-        batch_size=chunk_size,
-    )
+    ).collect_batches(chunk_size=chunk_size)
 
-    while True:
-        batches = reader.next_batches(1)
-        if batches is None or len(batches) == 0:
-            break
-
-        chunk_df = batches[0]
+    for chunk_df in batches:
         if chunk_df.is_empty():
-            break
+            continue
 
         # Apply ID transformation if mapping provided
         if id_mapping is not None:
