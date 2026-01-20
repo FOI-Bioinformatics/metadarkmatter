@@ -182,7 +182,7 @@ metadarkmatter's methods are designed to align with the Genome Taxonomy Database
 
 Use `--preset gtdb-strict` for maximum GTDB compatibility:
 ```bash
-metadarkmatter score classify --blast results.tsv --ani ani.csv \
+metadarkmatter score classify --alignment results.tsv --ani ani.csv \
     --preset gtdb-strict --output classifications.csv
 ```
 
@@ -199,7 +199,7 @@ metadarkmatter score classify --blast results.tsv --ani ani.csv \
 The `literature-strict` preset implements thresholds derived from a comprehensive literature review:
 
 ```bash
-metadarkmatter score classify --blast results.tsv --ani ani.csv \
+metadarkmatter score classify --alignment results.tsv --ani ani.csv \
     --preset literature-strict --output classifications.csv
 ```
 

@@ -296,7 +296,7 @@ flowchart TB
             BATCH["batch"]
 
             subgraph classify_opts["classify options"]
-                BLAST_OPT["--blast, -b"]
+                BLAST_OPT["--alignment, -b"]
                 ANI_OPT["--ani, -a"]
                 OUTPUT_OPT["--output, -o"]
                 SUMMARY_OPT["--summary, -s"]
@@ -314,7 +314,7 @@ flowchart TB
             end
 
             subgraph batch_opts["batch options"]
-                BLASTDIR_OPT["--blast-dir, -b"]
+                BLASTDIR_OPT["--alignment-dir, -b"]
                 OUTPUTDIR_OPT["--output-dir, -o"]
                 PATTERN_OPT["--pattern, -p"]
                 WORKERS_OPT["--workers, -w"]

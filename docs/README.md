@@ -69,7 +69,7 @@ conda install -c bioconda kraken2 krakentools blast skani
 ### Classify metagenomic reads
 ```bash
 metadarkmatter score classify \
-    --blast sample.blast.tsv.gz \
+    --alignment sample.blast.tsv.gz \
     --ani ani_matrix.csv \
     --metadata genome_metadata.tsv \
     --output classifications.csv

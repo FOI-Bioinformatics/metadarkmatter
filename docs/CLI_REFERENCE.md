@@ -681,7 +681,7 @@ GCA_000111222.1,82.3,83.1,100.0
 
 **"No BLAST files found matching pattern"**
 - Check the `--pattern` option matches your files
-- Verify the `--blast-dir` path is correct
+- Verify the `--alignment-dir` path is correct
 
 **"Low genome coverage warning"**
 - Many genomes in BLAST file are not in ANI matrix
@@ -698,7 +698,7 @@ metadarkmatter score classify --help
 metadarkmatter score batch --help
 
 # Validate inputs without processing
-metadarkmatter score classify --blast file.tsv --ani matrix.csv --output out.csv --dry-run
+metadarkmatter score classify --alignment file.tsv --ani matrix.csv --output out.csv --dry-run
 ```
 
 ---

@@ -77,7 +77,7 @@ metadarkmatter blast align \
   --output stage1.blast.tsv.gz
 
 metadarkmatter score classify \
-  --blast stage1.blast.tsv.gz \
+  --alignment stage1.blast.tsv.gz \
   --ani family_ani_matrix.csv \
   --output stage1_classifications.csv
 
@@ -199,7 +199,7 @@ metadarkmatter blastx align \
 
 # Classify with protein-calibrated thresholds
 metadarkmatter score classify \
-  --blast sample.blastx.tsv.gz \
+  --alignment sample.blastx.tsv.gz \
   --ani ani_matrix.csv \
   --alignment-mode protein \
   --output classifications.csv \
@@ -426,7 +426,7 @@ Run the core classification algorithm:
 ```bash
 # For most datasets (10-100M alignments)
 metadarkmatter score classify \
-  --blast sample.blast.tsv.gz \
+  --alignment sample.blast.tsv.gz \
   --ani ani_matrix.csv \
   --output classifications.csv \
   --summary summary.json \
@@ -537,7 +537,7 @@ done
 
 # Batch classification
 metadarkmatter score batch \
-  --blast-dir results/ \
+  --alignment-dir results/ \
   --ani ani_matrix.csv \
   --output-dir classifications/ \
   --parallel

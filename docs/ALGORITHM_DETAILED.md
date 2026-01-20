@@ -203,7 +203,7 @@ def classify_read(N, U):
 
 ```bash
 metadarkmatter score classify \
-    --blast sample.blast.tsv.gz \
+    --alignment sample.blast.tsv.gz \
     --ani ani_matrix.csv \
     --output classifications.csv
 ```
@@ -219,7 +219,7 @@ metadarkmatter score classify \
 
 ```bash
 metadarkmatter score classify \
-    --blast sample.blastx.tsv.gz \
+    --alignment sample.blastx.tsv.gz \
     --ani ani_matrix.csv \
     --aai aai_matrix.csv \
     --alignment-mode protein \

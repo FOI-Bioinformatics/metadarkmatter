@@ -1693,7 +1693,7 @@ metadarkmatter (main entry point)
 **Signature:**
 ```bash
 metadarkmatter score classify \
-  --blast BLAST_PATH \
+  --alignment ALIGNMENT_PATH \
   --ani ANI_MATRIX_PATH \
   --output OUTPUT_PATH \
   [--summary SUMMARY_JSON] \
@@ -1913,7 +1913,7 @@ Summary written to: /path/to/summary.json
 **Recommendation:** For >50M reads, use streaming mode to cap memory at 8 GB:
 
 ```bash
-metadarkmatter score classify --streaming --blast huge.tsv.gz --ani ani.csv --output out.parquet
+metadarkmatter score classify --streaming --alignment huge.tsv.gz --ani ani.csv --output out.parquet
 ```
 
 #### 9.3.2 Genome Count Scaling (ANI Matrix)
@@ -2254,7 +2254,7 @@ export POLARS_MAX_THREADS=16
 
 # Run classification
 metadarkmatter score classify \
-  --blast /scratch/${SLURM_JOB_ID}/blast_results.tsv.gz \
+  --alignment /scratch/${SLURM_JOB_ID}/blast_results.tsv.gz \
   --ani /data/references/ani_matrix.csv \
   --output /results/${SAMPLE_ID}_classifications.parquet \
   --summary /results/${SAMPLE_ID}_summary.json \
@@ -2284,7 +2284,7 @@ metadarkmatter score classify \
 SAMPLE=$(sed -n "${SLURM_ARRAY_TASK_ID}p" samples.txt)
 
 metadarkmatter score classify \
-  --blast /data/blast/${SAMPLE}.tsv.gz \
+  --alignment /data/blast/${SAMPLE}.tsv.gz \
   --ani /data/references/ani_matrix.csv \
   --output /results/${SAMPLE}_classifications.parquet \
   --format parquet \
@@ -2320,7 +2320,7 @@ docker build -t metadarkmatter:latest .
 
 docker run -v /data:/data metadarkmatter:latest \
   score classify \
-  --blast /data/blast_results.tsv.gz \
+  --alignment /data/blast_results.tsv.gz \
   --ani /data/ani_matrix.csv \
   --output /data/classifications.csv
 ```
@@ -2538,7 +2538,7 @@ novel_reads = df.filter(pl.col("is_novel") == True)
 
 ```bash
 metadarkmatter score classify \
-  --blast large_file.tsv.gz \
+  --alignment large_file.tsv.gz \
   --ani ani_matrix.csv \
   --output results.parquet \
   --streaming
@@ -2584,7 +2584,7 @@ df = parallel.classify_file(blast_path)
 gzip -c blast_results.tsv > blast_results.tsv.gz
 
 # Polars automatically handles decompression
-metadarkmatter score classify --blast blast_results.tsv.gz ...
+metadarkmatter score classify --alignment blast_results.tsv.gz ...
 ```
 
 **Effect:** 2.5 GB file transfers in 50s (4x faster), decompression adds ~30s (net gain: 120s).
@@ -2596,7 +2596,7 @@ metadarkmatter score classify --blast blast_results.tsv.gz ...
 cp /nfs/data/blast_results.tsv.gz /scratch/
 
 # Run classification from local disk
-metadarkmatter score classify --blast /scratch/blast_results.tsv.gz ...
+metadarkmatter score classify --alignment /scratch/blast_results.tsv.gz ...
 
 # Copy results back
 cp /scratch/classifications.parquet /nfs/results/
@@ -2669,10 +2669,10 @@ print("Missing in columns:", row_genomes - col_genomes)
 
 ```bash
 # Before (slow):
-metadarkmatter score classify --blast file.tsv ...
+metadarkmatter score classify --alignment file.tsv ...
 
 # After (fast):
-metadarkmatter score classify --blast file.tsv --parallel ...
+metadarkmatter score classify --alignment file.tsv --parallel ...
 ```
 
 **Benchmark comparison:**

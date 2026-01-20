@@ -82,7 +82,7 @@ mdm blast align --query extraction/reads_R1.fastq.gz \
 mdm ani compute --genomes genomes/ --output ani_matrix.csv --threads 16
 
 # 5. Classify reads and generate report
-mdm score classify --blast sample.blast.tsv.gz --ani ani_matrix.csv \
+mdm score classify --alignment sample.blast.tsv.gz --ani ani_matrix.csv \
   --metadata genome_metadata.tsv --output classifications.csv --parallel
 mdm report generate --classifications classifications.csv \
   --metadata genome_metadata.tsv --output report.html

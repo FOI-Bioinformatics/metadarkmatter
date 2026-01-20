@@ -79,7 +79,7 @@ metadarkmatter mmseqs2 search \
 
 ```bash
 metadarkmatter score classify \
-    --blast sample.mmseqs2.tsv.gz \
+    --alignment sample.mmseqs2.tsv.gz \
     --ani ani_matrix.csv \
     --metadata genome_metadata.tsv \
     --output classifications.csv
@@ -147,8 +147,8 @@ metadarkmatter blast align --query reads.fasta --database blastdb --output blast
 metadarkmatter mmseqs2 search --query reads.fasta --database mmseqs_db --output mmseqs2.tsv
 
 # Compare classifications
-metadarkmatter score classify --blast blast.tsv --ani ani.csv --output blast_class.csv
-metadarkmatter score classify --blast mmseqs2.tsv --ani ani.csv --output mmseqs_class.csv
+metadarkmatter score classify --alignment blast.tsv --ani ani.csv --output blast_class.csv
+metadarkmatter score classify --alignment mmseqs2.tsv --ani ani.csv --output mmseqs_class.csv
 
 # Analyze differences (manual comparison or custom script)
 ```

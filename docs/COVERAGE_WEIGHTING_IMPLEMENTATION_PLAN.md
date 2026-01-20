@@ -273,14 +273,14 @@ coverage_weight_strength: float = 0.5  # Irrelevant when mode="none"
 3. **Backward compatibility test**: Confirm mode="none" produces identical results
    ```bash
    # Run same classification with and without explicit mode="none"
-   diff <(metadarkmatter score classify --blast test.tsv --ani ani.csv) \
-        <(metadarkmatter score classify --blast test.tsv --ani ani.csv --coverage-weight-mode none)
+   diff <(metadarkmatter score classify --alignment test.tsv --ani ani.csv) \
+        <(metadarkmatter score classify --alignment test.tsv --ani ani.csv --coverage-weight-mode none)
    ```
 
 4. **Benchmark performance**: Measure overhead (<5% expected)
    ```bash
-   time metadarkmatter score classify --blast large.tsv --ani ani.csv  # Baseline
-   time metadarkmatter score classify --blast large.tsv --ani ani.csv --preset coverage-linear  # Weighted
+   time metadarkmatter score classify --alignment large.tsv --ani ani.csv  # Baseline
+   time metadarkmatter score classify --alignment large.tsv --ani ani.csv --preset coverage-linear  # Weighted
    ```
 
 5. **Visual validation**: Generate reports with both modes and compare classification distributions
@@ -325,7 +325,7 @@ By default, metadarkmatter ranks hits by bitscore. Enable coverage weighting to 
 
 # Linear coverage weighting (balanced)
 metadarkmatter score classify \
-  --blast results.tsv \
+  --alignment results.tsv \
   --ani ani.csv \
   --preset coverage-linear \
   --output classifications.csv
