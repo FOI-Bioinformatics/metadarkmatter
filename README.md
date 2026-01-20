@@ -1,96 +1,94 @@
 # Metadarkmatter
 
+[![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+
 ANI-weighted placement uncertainty for detecting novel microbial diversity in environmental eDNA samples.
 
 ## Overview
 
-Metadarkmatter analyzes environmental DNA (eDNA) metagenomic data to detect novel bacterial taxa ("microbial dark matter") using competitive read recruitment. The tool calculates:
+Metadarkmatter identifies novel bacterial taxa ("microbial dark matter") in metagenomic data using competitive read recruitment with ANI-weighted placement uncertainty. The tool distinguishes between true novelty and taxonomic ambiguity by analyzing both sequence divergence and phylogenetic placement confidence.
 
-- **Novelty Index**: Sequence divergence from reference genomes
-- **Placement Uncertainty**: Ambiguity when reads match multiple genomes
-- **Species-Level Tracking**: Automatic metadata propagation from GTDB taxonomy
+**Core Innovation:** Combines BLAST alignment with Average Nucleotide Identity (ANI) matrices to separate reads from genuinely novel taxa from reads that simply match multiple reference genomes with similar identity.
 
-Reads are classified as: Known Species, Novel Species, Novel Genus, or Conserved Region.
+### Key Metrics
+
+- **Novelty Index (N)**: Sequence divergence from closest reference genome
+- **Placement Uncertainty (U)**: Phylogenetic ambiguity based on ANI between competing genomes
+- **Classification**: Known Species, Novel Species, Novel Genus, or Conserved Region
+
+### How It Works
+
+1. **Competitive alignment**: Reads aligned against all reference genomes simultaneously
+2. **ANI-weighted scoring**: Top hits evaluated using genome-genome ANI matrix
+3. **Uncertainty quantification**: Placement confidence computed from ANI between competing matches
+4. **Threshold-based classification**: Literature-backed boundaries for species (95% ANI) and genus (75% ANI)
 
 ## Installation
 
-### Python Package
+### 1. Install Python Package
 
 ```bash
+# Clone repository
+git clone https://github.com/FOI-Bioinformatics/metadarkmatter.git
+cd metadarkmatter
+
+# Install with pip
 pip install -e .
 ```
 
 **Requirements:** Python >= 3.11
 
-### External Software Dependencies
+### 2. Install External Tools
 
-Metadarkmatter requires several external bioinformatics tools (non-Python software):
-
-#### Required Tools
-
-Install via conda/mamba:
+Metadarkmatter requires external bioinformatics tools. Install via conda/mamba:
 
 ```bash
-conda create -n metadarkmatter -c conda-forge  -c bioconda kraken2 krakentools blast skani seqtk mmseqs2 diamond pyani
+conda create -n metadarkmatter -c conda-forge -c bioconda \
+  kraken2 krakentools blast skani mmseqs2 diamond pyani
+conda activate metadarkmatter
 ```
 
-| Tool | Purpose | When Needed |
-|------|---------|--------------|
-| **Kraken2** | Taxonomic classification of reads | Classifying reads to target bacterial family |
-| **KrakenTools** | Extract reads by taxid | Filtering reads to target bacterial family |
-| **BLAST+** | Nucleotide alignment (blastn) |  |
-| **skani** | Faster ANI computation | |
-| **pyani** | Fast ANI computation | |
-| **MMseqs2** | Fast sequence search (BLAST alternative) | Datasets with >100,000 reads |
-| **seqtk** | Sequence manipulation | Assembly workflows, read extraction |
-| **diamond** | Fast AAI computation  |  |
+**Core Tools:**
+- **Kraken2 + KrakenTools**: Taxonomic read classification and extraction
+- **BLAST+**: Nucleotide alignment (accepts FASTQ directly)
+- **skani**: Fast ANI computation
+- **MMseqs2**: Fast sequence search for large datasets (>100K reads)
+- **Diamond**: Protein alignment and AAI computation (for protein mode)
 
-**Note:** BLAST accepts FASTQ files directly (automatic conversion), so seqtk is only needed for specialized workflows like assembly.
+**Optional:** `seqtk` (assembly workflows), `pyani` (alternative ANI tool)
 
 ## Quick Start
 
+Complete workflow for detecting novel diversity in Francisellaceae:
+
 ```bash
-# 1. Download reference genomes (auto-creates genome_metadata.tsv)
-metadarkmatter download genomes list "f__Francisellaceae" --output genomes.tsv
-metadarkmatter download genomes fetch --accessions genomes.tsv --output-dir genomes/
+# 1. Download reference genomes from GTDB
+mdm download genomes list "f__Francisellaceae" --output genomes.tsv
+mdm download genomes fetch --accessions genomes.tsv --output-dir genomes/
 
-# 2. Classify reads with Kraken2
-metadarkmatter kraken2 classify \
-  --reads-1 sample_R1.fastq.gz \
-  --kraken-db /path/to/kraken_db \
-  --output kraken_output/
+# 2. Extract target family reads (requires Kraken2 database)
+mdm kraken2 classify --reads-1 sample_R1.fastq.gz --kraken-db db/ --output kraken_out/
+mdm kraken2 extract --kraken-output kraken_out/sample.kraken \
+  --reads-1 sample_R1.fastq.gz --taxid 119060 --output extraction/
 
-# 3. Extract target family reads
-metadarkmatter kraken2 extract \
-  --kraken-output kraken_output/sample.kraken \
-  --reads-1 sample_R1.fastq.gz \
-  --taxid FAMILY_TAXID \
-  --output extraction/
+# 3. Build BLAST database and align
+mdm blast makedb --genomes genomes/ --output blastdb/pangenome
+mdm blast align --query extraction/reads_R1.fastq.gz \
+  --database blastdb/pangenome --output sample.blast.tsv.gz --threads 16
 
-# 4. Build BLAST database (standardizes contig headers)
-metadarkmatter blast makedb --genomes genomes/ --output blastdb/pangenome
+# 4. Compute ANI matrix
+mdm ani compute --genomes genomes/ --output ani_matrix.csv --threads 16
 
-# 5. Run competitive BLAST alignment (accepts FASTQ/FASTA, gzipped or plain)
-metadarkmatter blast align --query extraction/sample_taxid262_R1.fastq.gz \
-  --database blastdb/pangenome --output sample.blast.tsv.gz
-
-# 6. Compute ANI matrix
-metadarkmatter ani compute --genomes genomes/ --output ani_matrix.csv
-
-# 7. Classify reads (with species-level tracking)
-metadarkmatter score classify \
-  --blast sample.blast.tsv.gz \
-  --ani ani_matrix.csv \
-  --metadata genome_metadata.tsv \
-  --output classifications.csv \
-  --parallel
-
-# 8. Generate report (with species breakdown)
-metadarkmatter report generate \
-  --classifications classifications.csv \
-  --metadata genome_metadata.tsv \
-  --output report.html
+# 5. Classify reads and generate report
+mdm score classify --blast sample.blast.tsv.gz --ani ani_matrix.csv \
+  --metadata genome_metadata.tsv --output classifications.csv --parallel
+mdm report generate --classifications classifications.csv \
+  --metadata genome_metadata.tsv --output report.html
 ```
+
+**Note:** Both `metadarkmatter` and `mdm` commands are available. See [Tutorial](docs/TUTORIAL_ENVIRONMENTAL_SPECIES.md) for detailed walkthrough.
 
 ## Commands
 
@@ -151,16 +149,73 @@ BLAST is efficient for typical workflows. For very large datasets (>100K reads),
 
 **Note**: BLAST accepts FASTQ directly (automatic conversion to FASTA). See [Tutorial](docs/TUTORIAL_ENVIRONMENTAL_SPECIES.md) for workflow details.
 
+## Use Cases
+
+### Environmental Monitoring
+- Track novel pathogen emergence in environmental samples
+- Monitor microbial diversity shifts in ecosystems
+- Identify candidate novel species for targeted isolation
+
+### Biosurveillance
+- Detect divergent bacterial lineages in clinical or environmental eDNA
+- Quantify taxonomic coverage gaps relative to reference databases
+- Prioritize samples for further characterization
+
+### Research Applications
+- Characterize uncultured microbial diversity
+- Validate reference genome coverage for target taxa
+- Generate candidate lists for genome-resolved metagenomics
+
 ## Documentation
 
-- **[Workflow Guide](docs/WORKFLOW.md)** - Step-by-step analysis tutorial
-- **[CLI Reference](docs/CLI_REFERENCE.md)** - Complete command documentation
+### Getting Started
+- **[Tutorial](docs/TUTORIAL_ENVIRONMENTAL_SPECIES.md)** - Complete walkthrough for environmental samples
+- **[Workflow Guide](docs/WORKFLOW.md)** - Step-by-step analysis patterns
 - **[User Guide](docs/USER_GUIDE.md)** - Detailed usage examples
-- **[Performance Guide](docs/PERFORMANCE.md)** - Optimization tips
-- **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues
+
+### Reference
+- **[CLI Reference](docs/CLI_REFERENCE.md)** - Complete command documentation
 - **[API Reference](docs/API_REFERENCE.md)** - Python API documentation
-- **[Tutorial](docs/TUTORIAL_ENVIRONMENTAL_SPECIES.md)** - Finding novel diversity in environmental samples
+- **[Algorithm Details](docs/CLASSIFICATION_STATISTICS.md)** - Statistical framework and literature references
+
+### Advanced
+- **[Performance Guide](docs/PERFORMANCE.md)** - Optimization strategies
+- **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
+- **[Architecture](docs/ARCHITECTURE.md)** - System design and internals
+
+## Citation
+
+If you use metadarkmatter in your research, please cite:
+
+```bibtex
+@software{metadarkmatter2026,
+  author = {Metadarkmatter Team},
+  title = {Metadarkmatter: ANI-weighted placement uncertainty for detecting novel microbial diversity},
+  year = {2026},
+  url = {https://github.com/FOI-Bioinformatics/metadarkmatter}
+}
+```
+
+### Related Methods
+
+This tool implements concepts from:
+- **ANI species boundary**: Jain et al. (2018). "High throughput ANI analysis of 90K prokaryotic genomes reveals clear species boundaries." *Nature Communications* 9:5114.
+- **Competitive recruitment**: Rodriguez-R et al. (2018). "The Microbial Genomes Atlas (MiGA) webserver." *Nucleic Acids Research*.
+
+## Contributing
+
+Contributions are welcome! Please:
+- Open an issue for bug reports or feature requests
+- Submit pull requests for code contributions
+- Follow existing code style (ruff formatting, type hints)
+- Add tests for new features
+
+## Support
+
+- **Issues**: [GitHub Issues](https://github.com/FOI-Bioinformatics/metadarkmatter/issues)
+- **Documentation**: [docs/](docs/)
+- **Tutorial**: [docs/TUTORIAL_ENVIRONMENTAL_SPECIES.md](docs/TUTORIAL_ENVIRONMENTAL_SPECIES.md)
 
 ## License
 
-MIT License
+MIT License - see [LICENSE](LICENSE) file for details.
