@@ -279,3 +279,261 @@ def calculate_confidence_score(
     score += identity_score
 
     return round(min(100.0, max(0.0, score)), 1)
+
+
+# =============================================================================
+# Enhanced Scoring Functions for Novel Diversity Detection
+#
+# These functions address limitations in the base scoring system:
+# 1. Single-hit reads now get inferred uncertainty instead of 0%
+# 2. Alignment quality uses mismatch/gap/coverage/evalue
+# 3. Orthogonal confidence dimensions (identity vs placement)
+# 4. Discovery score prioritizes novel findings for validation
+# =============================================================================
+
+# Inferred uncertainty thresholds
+INFERRED_UNCERTAINTY_BASE = 5.0
+INFERRED_UNCERTAINTY_NOVEL_SPECIES_SLOPE = 1.0
+INFERRED_UNCERTAINTY_NOVEL_GENUS_SLOPE = 1.5
+INFERRED_UNCERTAINTY_MAX = 35.0
+
+
+def calculate_inferred_uncertainty(novelty_index: float) -> float:
+    """
+    Calculate inferred uncertainty for single-hit reads.
+
+    For reads with only one hit (num_ambiguous_hits <= 1), we cannot measure
+    placement uncertainty from ANI between competing genomes. Instead, we
+    infer uncertainty from the novelty level: higher novelty suggests either
+    novel diversity OR database incompleteness, both of which increase
+    placement uncertainty.
+
+    Args:
+        novelty_index: Novelty index value (100 - top_hit_identity)
+
+    Returns:
+        Inferred uncertainty value (5-35%)
+
+    Interpretation:
+        - Low novelty (< 5%): Database likely complete for this species
+        - Novel species range (5-15%): Uncertain if truly novel or database gap
+        - Novel genus range (15-25%): High uncertainty about placement
+        - Very high divergence (> 25%): Maximum uncertainty
+    """
+    if novelty_index < NOVELTY_KNOWN_MAX:
+        # High identity: database likely complete for this species
+        return INFERRED_UNCERTAINTY_BASE + novelty_index * 0.5  # 5-7.5%
+    elif novelty_index < NOVELTY_NOVEL_SPECIES_MAX:
+        # Novel species range: uncertain if truly novel or database gap
+        return 7.5 + (novelty_index - NOVELTY_KNOWN_MAX) * INFERRED_UNCERTAINTY_NOVEL_SPECIES_SLOPE  # 7.5-17.5%
+    elif novelty_index < NOVELTY_NOVEL_GENUS_MAX:
+        # Novel genus range: high uncertainty
+        return 17.5 + (novelty_index - NOVELTY_NOVEL_SPECIES_MAX) * INFERRED_UNCERTAINTY_NOVEL_GENUS_SLOPE  # 17.5-25%
+    else:
+        # Very high divergence: maximum uncertainty
+        return INFERRED_UNCERTAINTY_MAX
+
+
+def calculate_alignment_quality(
+    mismatch: int,
+    gapopen: int,
+    length: int,
+    coverage: float,
+    evalue: float,
+) -> float:
+    """
+    Calculate alignment quality score from BLAST statistics.
+
+    Incorporates alignment statistics that are captured but not currently
+    used in the base scoring system: mismatch count, gap opens, alignment
+    coverage, and e-value.
+
+    Args:
+        mismatch: Number of mismatches in alignment
+        gapopen: Number of gap openings in alignment
+        length: Alignment length in bp
+        coverage: Fraction of read aligned (0.0-1.0)
+        evalue: BLAST e-value
+
+    Returns:
+        Alignment quality score (0-100)
+
+    Components (each 0-25 points):
+        - Mismatch density: Fewer mismatches = higher score
+        - Gap complexity: Fewer gaps = higher score
+        - Coverage: Higher coverage = higher score
+        - E-value significance: Lower e-value = higher score
+    """
+    # Mismatch density penalty (0-25 pts)
+    # Higher mismatch rate = lower score
+    mismatch_rate = mismatch / max(1, length)
+    mismatch_score = max(0.0, 25.0 - mismatch_rate * 50.0)
+
+    # Gap complexity penalty (0-25 pts)
+    # More gap openings per 100bp = lower score
+    gap_rate = gapopen / max(1, length) * 100.0
+    gap_score = max(0.0, 25.0 - gap_rate * 25.0)
+
+    # Coverage bonus (0-25 pts)
+    # Higher coverage = higher score
+    coverage_score = min(25.0, coverage * 25.0)
+
+    # E-value significance (0-25 pts)
+    # Lower e-value = higher significance = higher score
+    if evalue <= 1e-50:
+        evalue_score = 25.0
+    elif evalue <= 1e-20:
+        evalue_score = 20.0
+    elif evalue <= 1e-10:
+        evalue_score = 15.0
+    elif evalue <= 1e-5:
+        evalue_score = 10.0
+    else:
+        evalue_score = 5.0
+
+    return round(mismatch_score + gap_score + coverage_score + evalue_score, 1)
+
+
+def calculate_identity_confidence(
+    novelty_index: float,
+    alignment_quality: float,
+) -> float:
+    """
+    Calculate confidence in the identity measurement.
+
+    This measures how reliable the percent identity value is, independent
+    of placement confidence. High identity with good alignment quality
+    means we can trust what this sequence is.
+
+    Args:
+        novelty_index: Novelty index value (100 - top_hit_identity)
+        alignment_quality: Alignment quality score (0-100)
+
+    Returns:
+        Identity confidence score (0-100)
+
+    Interpretation:
+        - High score: Confident about the identity measurement
+        - Low score: Identity measurement may be unreliable
+    """
+    # Base score from novelty (inverted - higher identity = more confident)
+    if novelty_index < 5:
+        base = 80.0  # Very high identity
+    elif novelty_index < 15:
+        base = 60.0 - (novelty_index - 5)  # 60-50
+    elif novelty_index < 25:
+        base = 50.0 - (novelty_index - 15) * 1.5  # 50-35
+    else:
+        base = 30.0
+
+    # Alignment quality contribution (up to +20)
+    quality_bonus = alignment_quality * 0.2
+
+    return round(min(100.0, base + quality_bonus), 1)
+
+
+def calculate_placement_confidence(
+    uncertainty: float,
+    uncertainty_type: str,
+    identity_gap: float | None,
+    num_ambiguous_hits: int,
+) -> float:
+    """
+    Calculate confidence in genome assignment.
+
+    This measures how confident we are about which genome this read
+    belongs to, accounting for whether uncertainty was measured or
+    inferred.
+
+    Args:
+        uncertainty: Placement uncertainty (measured OR inferred)
+        uncertainty_type: "measured" (from ANI) or "inferred" (from novelty)
+        identity_gap: Gap between best and second-best hit identity
+        num_ambiguous_hits: Number of competing hits
+
+    Returns:
+        Placement confidence score (0-100)
+
+    Key insight:
+        Inferred uncertainty is penalized because we cannot directly
+        measure competing placements - absence of data is not evidence
+        of confident placement.
+    """
+    # Base score from uncertainty level
+    if uncertainty < 2:
+        base = 80.0
+    elif uncertainty < 5:
+        base = 60.0
+    elif uncertainty < 10:
+        base = 40.0
+    elif uncertainty < 20:
+        base = 25.0
+    else:
+        base = 10.0
+
+    # Penalty for inferred (unmeasured) uncertainty
+    # We can't be as confident without actual competing hit data
+    if uncertainty_type == "inferred":
+        base -= 15.0
+
+    # Identity gap bonus (only meaningful for multi-hit reads)
+    gap_bonus = 0.0
+    if identity_gap is not None and num_ambiguous_hits > 1:
+        if identity_gap >= 5:
+            gap_bonus = 20.0
+        elif identity_gap >= 2:
+            gap_bonus = 10.0
+        elif identity_gap >= 1:
+            gap_bonus = 5.0
+
+    return round(max(0.0, min(100.0, base + gap_bonus)), 1)
+
+
+def calculate_discovery_score(
+    taxonomic_call: str,
+    novelty_index: float,
+    identity_confidence: float,
+    placement_confidence: float,
+    alignment_quality: float,
+) -> float | None:
+    """
+    Calculate discovery priority score for novel reads.
+
+    This score helps prioritize which novel findings to investigate first.
+    Only calculated for Novel Species and Novel Genus classifications.
+
+    Args:
+        taxonomic_call: Classification category string
+        novelty_index: Novelty index value (100 - top_hit_identity)
+        identity_confidence: Identity confidence score (0-100)
+        placement_confidence: Placement confidence score (0-100)
+        alignment_quality: Alignment quality score (0-100)
+
+    Returns:
+        Discovery score (0-100) for novel reads, None for non-novel
+
+    Score interpretation:
+        75-100: High-confidence discovery - prioritize for validation
+        50-74: Moderate discovery signal - include in candidate list
+        25-49: Low-confidence discovery - needs more evidence
+        < 25: Unreliable signal - likely artifact
+    """
+    if taxonomic_call not in (CATEGORY_NOVEL_SPECIES, CATEGORY_NOVEL_GENUS):
+        return None
+
+    # Novelty component (0-40): Higher divergence = more interesting
+    if taxonomic_call == CATEGORY_NOVEL_SPECIES:
+        # Novel species: 5-20% novelty -> 15-30 points
+        novelty_pts = 15.0 + (novelty_index - NOVELTY_NOVEL_SPECIES_MIN) * 1.5
+    else:  # Novel Genus
+        # Novel genus: 20-25% novelty -> 30-40 points
+        novelty_pts = 30.0 + (novelty_index - NOVELTY_NOVEL_GENUS_MIN) * 2.0
+    novelty_pts = min(40.0, novelty_pts)
+
+    # Quality component (0-30): Better alignment = more trustworthy
+    quality_pts = alignment_quality * 0.3
+
+    # Confidence component (0-30): Average of identity and placement
+    conf_pts = (identity_confidence + placement_confidence) / 2.0 * 0.3
+
+    return round(novelty_pts + quality_pts + conf_pts, 1)

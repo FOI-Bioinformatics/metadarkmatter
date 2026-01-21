@@ -234,6 +234,37 @@ class ScoringConfig(BaseModel):
         ),
     )
 
+    # Uncertainty calculation mode
+    uncertainty_mode: Literal["max", "second"] = Field(
+        default="second",
+        description=(
+            "Mode for calculating placement uncertainty. "
+            "'max' uses maximum ANI to any competing genome. "
+            "'second' uses ANI to the second-best genome only (default)."
+        ),
+    )
+
+    # Enhanced scoring options
+    enhanced_scoring: bool = Field(
+        default=False,
+        description=(
+            "Enable enhanced scoring metrics: alignment quality, orthogonal "
+            "confidence dimensions (identity_confidence, placement_confidence), "
+            "and discovery score. Default False for backward compatibility."
+        ),
+    )
+    infer_single_hit_uncertainty: bool = Field(
+        default=False,
+        description=(
+            "Infer uncertainty for single-hit reads based on novelty level "
+            "instead of reporting 0%. Single-hit reads (~70% of environmental data) "
+            "normally report placement_uncertainty=0%, which conflates 'no competing "
+            "hits to measure' with 'confident placement'. When enabled, adds "
+            "inferred_uncertainty and uncertainty_type fields. Default False for "
+            "backward compatibility."
+        ),
+    )
+
     # AAI (Average Amino Acid Identity) thresholds for genus-level classification
     # Based on Riesco & Trujillo 2024: 58-65% AAI genus boundary
     # AAI is more reliable than ANI for genus-level decisions because

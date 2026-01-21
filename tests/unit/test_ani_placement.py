@@ -727,6 +727,207 @@ class TestClassifyReadFast:
             assert "taxonomic_call" in c
 
 
+class TestUncertaintyModes:
+    """Tests for uncertainty mode calculation (max vs second)."""
+
+    @pytest.fixture
+    def uncertainty_test_hits(self):
+        """Create hits for testing uncertainty modes.
+
+        Scenario:
+        - Best hit: GCF_000123456.1 (bitscore 250)
+        - Second best: GCF_000789012.1 (bitscore 245, ANI 95.5 to best)
+        - Third best: GCA_000111222.1 (bitscore 240, ANI 80.0 to best)
+
+        Max mode: U = 100 - max(95.5, 80.0) = 100 - 95.5 = 4.5
+        Second mode: U = 100 - 95.5 = 4.5 (same because second-best has max ANI)
+        """
+        return (
+            BlastHit(
+                qseqid="read_001",
+                sseqid="GCF_000123456.1",
+                pident=99.0,
+                length=150,
+                mismatch=1,
+                gapopen=0,
+                qstart=1,
+                qend=150,
+                sstart=1000,
+                send=1150,
+                evalue=1e-50,
+                bitscore=250.0,
+            ),
+            BlastHit(
+                qseqid="read_001",
+                sseqid="GCF_000789012.1",  # ANI 95.5 to best
+                pident=98.0,
+                length=150,
+                mismatch=3,
+                gapopen=0,
+                qstart=1,
+                qend=150,
+                sstart=2000,
+                send=2150,
+                evalue=1e-48,
+                bitscore=245.0,
+            ),
+            BlastHit(
+                qseqid="read_001",
+                sseqid="GCA_000111222.1",  # ANI 80.0 to best
+                pident=96.0,
+                length=150,
+                mismatch=6,
+                gapopen=0,
+                qstart=1,
+                qend=150,
+                sstart=3000,
+                send=3150,
+                evalue=1e-46,
+                bitscore=240.0,
+            ),
+        )
+
+    @pytest.fixture
+    def uncertainty_test_hits_different(self):
+        """Create hits where max and second modes give different results.
+
+        Scenario:
+        - Best hit: GCF_000123456.1 (bitscore 250)
+        - Second best: GCA_000111222.1 (bitscore 245, ANI 80.0 to best) - LOWER ANI
+        - Third best: GCF_000789012.1 (bitscore 240, ANI 95.5 to best) - HIGHER ANI
+
+        95% threshold = 250 * 0.95 = 237.5, so all three hits are within threshold.
+
+        Max mode: U = 100 - max(80.0, 95.5) = 100 - 95.5 = 4.5
+        Second mode: U = 100 - 80.0 = 20.0 (uses second-best genome's ANI)
+        """
+        return (
+            BlastHit(
+                qseqid="read_001",
+                sseqid="GCF_000123456.1",
+                pident=99.0,
+                length=150,
+                mismatch=1,
+                gapopen=0,
+                qstart=1,
+                qend=150,
+                sstart=1000,
+                send=1150,
+                evalue=1e-50,
+                bitscore=250.0,
+            ),
+            BlastHit(
+                qseqid="read_001",
+                sseqid="GCA_000111222.1",  # ANI 80.0 to best - second by bitscore
+                pident=97.0,
+                length=150,
+                mismatch=4,
+                gapopen=0,
+                qstart=1,
+                qend=150,
+                sstart=3000,
+                send=3150,
+                evalue=1e-47,
+                bitscore=245.0,
+            ),
+            BlastHit(
+                qseqid="read_001",
+                sseqid="GCF_000789012.1",  # ANI 95.5 to best - third by bitscore
+                pident=95.0,
+                length=150,
+                mismatch=7,
+                gapopen=0,
+                qstart=1,
+                qend=150,
+                sstart=2000,
+                send=2150,
+                evalue=1e-44,
+                bitscore=240.0,  # Within 95% threshold (237.5)
+            ),
+        )
+
+    def test_max_mode_uses_maximum_ani(self, ani_matrix, uncertainty_test_hits):
+        """Max mode should use maximum ANI among all competing genomes."""
+        config = ScoringConfig(uncertainty_mode="max")
+        classifier = ANIWeightedClassifier(ani_matrix, config=config)
+
+        result = BlastResult(read_id="read_001", hits=uncertainty_test_hits)
+        classification = classifier.classify_read(result)
+
+        # Max ANI to any competitor is 95.5, so uncertainty = 4.5
+        assert classification.placement_uncertainty == pytest.approx(4.5, abs=0.1)
+
+    def test_second_mode_uses_second_best_ani(self, ani_matrix, uncertainty_test_hits):
+        """Second mode should use ANI to second-best genome by bitscore."""
+        config = ScoringConfig(uncertainty_mode="second")
+        classifier = ANIWeightedClassifier(ani_matrix, config=config)
+
+        result = BlastResult(read_id="read_001", hits=uncertainty_test_hits)
+        classification = classifier.classify_read(result)
+
+        # Second-best genome (by bitscore) is GCF_000789012.1 with ANI 95.5
+        # So uncertainty = 100 - 95.5 = 4.5
+        assert classification.placement_uncertainty == pytest.approx(4.5, abs=0.1)
+
+    def test_modes_differ_when_second_has_lower_ani(
+        self, ani_matrix, uncertainty_test_hits_different
+    ):
+        """Max and second modes should give different results when appropriate.
+
+        When the second-best genome (by bitscore) has lower ANI than other
+        competitors, max mode gives lower uncertainty than second mode.
+        """
+        config_max = ScoringConfig(uncertainty_mode="max")
+        config_second = ScoringConfig(uncertainty_mode="second")
+
+        classifier_max = ANIWeightedClassifier(ani_matrix, config=config_max)
+        classifier_second = ANIWeightedClassifier(ani_matrix, config=config_second)
+
+        result = BlastResult(read_id="read_001", hits=uncertainty_test_hits_different)
+
+        classification_max = classifier_max.classify_read(result)
+        classification_second = classifier_second.classify_read(result)
+
+        # Max mode: uses max ANI (95.5), uncertainty = 4.5
+        assert classification_max.placement_uncertainty == pytest.approx(4.5, abs=0.1)
+
+        # Second mode: uses ANI to second-best genome (80.0), uncertainty = 20.0
+        assert classification_second.placement_uncertainty == pytest.approx(20.0, abs=0.1)
+
+        # Results should differ
+        assert classification_max.placement_uncertainty < classification_second.placement_uncertainty
+
+    def test_single_hit_uncertainty_zero_both_modes(self, ani_matrix):
+        """Single hit should have zero uncertainty in both modes."""
+        hit = BlastHit(
+            qseqid="read_001",
+            sseqid="GCF_000123456.1",
+            pident=99.0,
+            length=150,
+            mismatch=1,
+            gapopen=0,
+            qstart=1,
+            qend=150,
+            sstart=1000,
+            send=1150,
+            evalue=1e-50,
+            bitscore=250.0,
+        )
+        result = BlastResult(read_id="read_001", hits=(hit,))
+
+        config_max = ScoringConfig(uncertainty_mode="max")
+        config_second = ScoringConfig(uncertainty_mode="second")
+
+        classifier_max = ANIWeightedClassifier(ani_matrix, config=config_max)
+        classifier_second = ANIWeightedClassifier(ani_matrix, config=config_second)
+
+        classification_max = classifier_max.classify_read(result)
+        classification_second = classifier_second.classify_read(result)
+
+        assert classification_max.placement_uncertainty == 0.0
+        assert classification_second.placement_uncertainty == 0.0
+
+
 class TestStreamingChunks:
     """Tests for streaming chunk writing."""
 

@@ -119,6 +119,11 @@ class ParallelClassifier:
             # Coverage weighting parameters
             "coverage_weight_mode": self.config.coverage_weight_mode,
             "coverage_weight_strength": self.config.coverage_weight_strength,
+            # Uncertainty calculation mode
+            "uncertainty_mode": self.config.uncertainty_mode,
+            # Enhanced scoring options
+            "enhanced_scoring": self.config.enhanced_scoring,
+            "infer_single_hit_uncertainty": self.config.infer_single_hit_uncertainty,
         }
 
     def _iter_chunks(

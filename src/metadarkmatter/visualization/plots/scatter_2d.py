@@ -36,6 +36,9 @@ class NoveltyUncertaintyScatter(BasePlot):
 
     Includes classification region boxes showing thresholds for
     Known Species, Novel Species, Novel Genus, and Conserved Region.
+
+    Supports toggling visibility of single-hit reads (reads with only one
+    BLAST hit) via dropdown menu.
     """
 
     def __init__(
@@ -47,6 +50,7 @@ class NoveltyUncertaintyScatter(BasePlot):
         show_regions: bool = True,
         show_legend: bool = True,
         title: str = "Novelty Index vs Placement Uncertainty",
+        enable_single_hit_toggle: bool = True,
     ) -> None:
         """
         Initialize 2D scatter plot.
@@ -59,6 +63,7 @@ class NoveltyUncertaintyScatter(BasePlot):
             show_regions: Whether to show classification region boxes
             show_legend: Whether to show legend
             title: Plot title
+            enable_single_hit_toggle: Whether to add toggle for single-hit reads
         """
         super().__init__(config, thresholds)
         self.data = data
@@ -66,6 +71,7 @@ class NoveltyUncertaintyScatter(BasePlot):
         self.show_regions = show_regions
         self.show_legend = show_legend
         self.title = title
+        self.enable_single_hit_toggle = enable_single_hit_toggle
 
     def create_figure(self) -> go.Figure:
         """Create 2D scatter with classification regions."""
@@ -80,6 +86,10 @@ class NoveltyUncertaintyScatter(BasePlot):
         if self.show_regions:
             self._add_classification_regions(fig)
 
+        # Check if we can enable single-hit toggle
+        has_ambiguous_hits_col = "num_ambiguous_hits" in plot_data.columns
+        use_toggle = self.enable_single_hit_toggle and has_ambiguous_hits_col
+
         # Add scatter traces for each classification category
         categories = [
             ("Known Species", TAXONOMY_COLORS["Known Species"]),
@@ -88,31 +98,127 @@ class NoveltyUncertaintyScatter(BasePlot):
             ("Conserved Region", TAXONOMY_COLORS["Conserved Region"]),
         ]
 
+        # Track trace names for toggle functionality
+        trace_names = []
+
         for category, color in categories:
             category_data = plot_data.filter(pl.col("taxonomic_call") == category)
 
             if len(category_data) == 0:
                 continue
 
-            # Use Scattergl for better performance with large datasets
-            fig.add_trace(
-                go.Scattergl(
-                    x=category_data["novelty_index"].to_list(),
-                    y=category_data["placement_uncertainty"].to_list(),
-                    mode="markers",
-                    name=f"{category} ({len(category_data):,})",
-                    marker={
-                        "color": color,
-                        "size": 5,
-                        "opacity": 0.6,
-                    },
-                    hovertemplate=(
-                        f"<b>{category}</b><br>"
-                        "Novelty: %{x:.2f}<br>"
-                        "Uncertainty: %{y:.2f}<br>"
-                        "<extra></extra>"
-                    ),
+            if use_toggle:
+                # Split into single-hit and multi-hit traces
+                single_hit = category_data.filter(pl.col("num_ambiguous_hits") <= 1)
+                multi_hit = category_data.filter(pl.col("num_ambiguous_hits") > 1)
+
+                # Add multi-hit trace (always visible)
+                if len(multi_hit) > 0:
+                    fig.add_trace(
+                        go.Scattergl(
+                            x=multi_hit["novelty_index"].to_list(),
+                            y=multi_hit["placement_uncertainty"].to_list(),
+                            mode="markers",
+                            name=f"{category} multi-hit ({len(multi_hit):,})",
+                            legendgroup=category,
+                            marker={
+                                "color": color,
+                                "size": 5,
+                                "opacity": 0.6,
+                            },
+                            hovertemplate=(
+                                f"<b>{category}</b> (multi-hit)<br>"
+                                "Novelty: %{x:.2f}<br>"
+                                "Uncertainty: %{y:.2f}<br>"
+                                "<extra></extra>"
+                            ),
+                        )
+                    )
+                    trace_names.append(("multi", category))
+
+                # Add single-hit trace (can be toggled)
+                if len(single_hit) > 0:
+                    fig.add_trace(
+                        go.Scattergl(
+                            x=single_hit["novelty_index"].to_list(),
+                            y=single_hit["placement_uncertainty"].to_list(),
+                            mode="markers",
+                            name=f"{category} single-hit ({len(single_hit):,})",
+                            legendgroup=category,
+                            marker={
+                                "color": color,
+                                "size": 5,
+                                "opacity": 0.4,
+                                "symbol": "circle-open",
+                            },
+                            hovertemplate=(
+                                f"<b>{category}</b> (single-hit)<br>"
+                                "Novelty: %{x:.2f}<br>"
+                                "Uncertainty: %{y:.2f}<br>"
+                                "<extra></extra>"
+                            ),
+                        )
+                    )
+                    trace_names.append(("single", category))
+            else:
+                # Original behavior: single trace per category
+                fig.add_trace(
+                    go.Scattergl(
+                        x=category_data["novelty_index"].to_list(),
+                        y=category_data["placement_uncertainty"].to_list(),
+                        mode="markers",
+                        name=f"{category} ({len(category_data):,})",
+                        marker={
+                            "color": color,
+                            "size": 5,
+                            "opacity": 0.6,
+                        },
+                        hovertemplate=(
+                            f"<b>{category}</b><br>"
+                            "Novelty: %{x:.2f}<br>"
+                            "Uncertainty: %{y:.2f}<br>"
+                            "<extra></extra>"
+                        ),
+                    )
                 )
+                trace_names.append(("all", category))
+
+        # Add toggle buttons if enabled
+        if use_toggle and len(trace_names) > 0:
+            # Build visibility lists for each mode
+            all_visible = [True] * len(trace_names)
+            multi_only = [t[0] == "multi" for t in trace_names]
+            single_only = [t[0] == "single" for t in trace_names]
+
+            fig.update_layout(
+                updatemenus=[
+                    {
+                        "type": "dropdown",
+                        "direction": "down",
+                        "x": 0.01,
+                        "y": 0.99,
+                        "xanchor": "left",
+                        "yanchor": "top",
+                        "showactive": True,
+                        "buttons": [
+                            {
+                                "label": "All Reads",
+                                "method": "update",
+                                "args": [{"visible": all_visible}],
+                            },
+                            {
+                                "label": "Multi-hit Only",
+                                "method": "update",
+                                "args": [{"visible": multi_only}],
+                            },
+                            {
+                                "label": "Single-hit Only",
+                                "method": "update",
+                                "args": [{"visible": single_only}],
+                            },
+                        ],
+                    }
+                ]
             )
 
         # Layout
@@ -188,6 +294,245 @@ class NoveltyUncertaintyScatter(BasePlot):
                 font={"size": 9, "color": color},
                 opacity=0.7,
             )
+
+
+class ConfidenceNoveltyScatter(BasePlot):
+    """
+    2D scatter plot showing confidence score vs novelty index.
+
+    This plot helps visualize the relationship between how confident
+    the classification is (confidence_score) and how divergent the
+    read is from known references (novelty_index).
+
+    Confidence score is calculated as: 100 - novelty_index - placement_uncertainty
+    Higher values indicate more confident classifications.
+    """
+
+    def __init__(
+        self,
+        data: pl.DataFrame,
+        config: PlotConfig | None = None,
+        thresholds: ThresholdConfig | None = None,
+        max_points: int = 50000,
+        show_legend: bool = True,
+        title: str = "Confidence Score vs Novelty Index",
+        enable_single_hit_toggle: bool = True,
+    ) -> None:
+        """
+        Initialize confidence vs novelty scatter plot.
+
+        Args:
+            data: DataFrame with columns: novelty_index, confidence_score, taxonomic_call
+            config: Plot configuration
+            thresholds: Classification thresholds
+            max_points: Maximum points to display (subsampling for performance)
+            show_legend: Whether to show legend
+            title: Plot title
+            enable_single_hit_toggle: Whether to add toggle for single-hit reads
+        """
+        super().__init__(config, thresholds)
+        self.data = data
+        self.max_points = max_points
+        self.show_legend = show_legend
+        self.title = title
+        self.enable_single_hit_toggle = enable_single_hit_toggle
+
+    def create_figure(self) -> go.Figure:
+        """Create scatter plot of confidence score vs novelty index."""
+        import polars as pl
+
+        # Check if confidence_score column exists
+        if "confidence_score" not in self.data.columns:
+            # Return empty figure with message
+            fig = go.Figure()
+            fig.add_annotation(
+                x=0.5,
+                y=0.5,
+                text="confidence_score column not available",
+                showarrow=False,
+                xref="paper",
+                yref="paper",
+                font={"size": 14},
+            )
+            return fig
+
+        # Subsample if needed for performance
+        plot_data = subsample_dataframe(self.data, self.max_points)
+
+        fig = go.Figure()
+
+        # Check if we can enable single-hit toggle
+        has_ambiguous_hits_col = "num_ambiguous_hits" in plot_data.columns
+        use_toggle = self.enable_single_hit_toggle and has_ambiguous_hits_col
+
+        # Add scatter traces for each classification category
+        categories = [
+            ("Known Species", TAXONOMY_COLORS["Known Species"]),
+            ("Novel Species", TAXONOMY_COLORS["Novel Species"]),
+            ("Novel Genus", TAXONOMY_COLORS["Novel Genus"]),
+            ("Conserved Region", TAXONOMY_COLORS["Conserved Region"]),
+        ]
+
+        # Track trace names for toggle functionality
+        trace_names = []
+
+        for category, color in categories:
+            category_data = plot_data.filter(pl.col("taxonomic_call") == category)
+
+            if len(category_data) == 0:
+                continue
+
+            if use_toggle:
+                # Split into single-hit and multi-hit traces
+                single_hit = category_data.filter(pl.col("num_ambiguous_hits") <= 1)
+                multi_hit = category_data.filter(pl.col("num_ambiguous_hits") > 1)
+
+                # Add multi-hit trace (always visible)
+                if len(multi_hit) > 0:
+                    fig.add_trace(
+                        go.Scattergl(
+                            x=multi_hit["novelty_index"].to_list(),
+                            y=multi_hit["confidence_score"].to_list(),
+                            mode="markers",
+                            name=f"{category} multi-hit ({len(multi_hit):,})",
+                            legendgroup=category,
+                            marker={
+                                "color": color,
+                                "size": 5,
+                                "opacity": 0.6,
+                            },
+                            hovertemplate=(
+                                f"<b>{category}</b> (multi-hit)<br>"
+                                "Novelty: %{x:.2f}<br>"
+                                "Confidence: %{y:.2f}<br>"
+                                "<extra></extra>"
+                            ),
+                        )
+                    )
+                    trace_names.append(("multi", category))
+
+                # Add single-hit trace (can be toggled)
+                if len(single_hit) > 0:
+                    fig.add_trace(
+                        go.Scattergl(
+                            x=single_hit["novelty_index"].to_list(),
+                            y=single_hit["confidence_score"].to_list(),
+                            mode="markers",
+                            name=f"{category} single-hit ({len(single_hit):,})",
+                            legendgroup=category,
+                            marker={
+                                "color": color,
+                                "size": 5,
+                                "opacity": 0.4,
+                                "symbol": "circle-open",
+                            },
+                            hovertemplate=(
+                                f"<b>{category}</b> (single-hit)<br>"
+                                "Novelty: %{x:.2f}<br>"
+                                "Confidence: %{y:.2f}<br>"
+                                "<extra></extra>"
+                            ),
+                        )
+                    )
+                    trace_names.append(("single", category))
+            else:
+                # Original behavior: single trace per category
+                fig.add_trace(
+                    go.Scattergl(
+                        x=category_data["novelty_index"].to_list(),
+                        y=category_data["confidence_score"].to_list(),
+                        mode="markers",
+                        name=f"{category} ({len(category_data):,})",
+                        marker={
+                            "color": color,
+                            "size": 5,
+                            "opacity": 0.6,
+                        },
+                        hovertemplate=(
+                            f"<b>{category}</b><br>"
+                            "Novelty: %{x:.2f}<br>"
+                            "Confidence: %{y:.2f}<br>"
+                            "<extra></extra>"
+                        ),
+                    )
+                )
+                trace_names.append(("all", category))
+
+        # Add toggle buttons if enabled
+        if use_toggle and len(trace_names) > 0:
+            # Build visibility lists for each mode
+            all_visible = [True] * len(trace_names)
+            multi_only = [t[0] == "multi" for t in trace_names]
+            single_only = [t[0] == "single" for t in trace_names]
+
+            fig.update_layout(
+                updatemenus=[
+                    {
+                        "type": "dropdown",
+                        "direction": "down",
+                        "x": 0.01,
+                        "y": 0.99,
+                        "xanchor": "left",
+                        "yanchor": "top",
+                        "showactive": True,
+                        "buttons": [
+                            {
+                                "label": "All Reads",
+                                "method": "update",
+                                "args": [{"visible": all_visible}],
+                            },
+                            {
+                                "label": "Multi-hit Only",
+                                "method": "update",
+                                "args": [{"visible": multi_only}],
+                            },
+                            {
+                                "label": "Single-hit Only",
+                                "method": "update",
+                                "args": [{"visible": single_only}],
+                            },
+                        ],
+                    }
+                ]
+            )
+
+        # Add reference lines
+        # Confidence threshold line (if available from thresholds)
+        # confidence_score = 100 - novelty - uncertainty
+        # For known species: novelty < 5%, uncertainty < 2% => confidence > 93%
+        fig.add_hline(
+            y=50.0,
+            line_dash="dash",
+            line_color="gray",
+            opacity=0.5,
+            annotation_text="50% confidence threshold",
+            annotation_position="bottom right",
+        )
+
+        # Layout
+        fig.update_layout(
+            xaxis_title="Novelty Index (100 - % Identity)",
+            yaxis_title="Confidence Score (%)",
+            legend={
+                "yanchor": "top",
+                "y": 0.99,
+                "xanchor": "right",
+                "x": 0.99,
+                "bgcolor": "rgba(255, 255, 255, 0.8)",
+                "bordercolor": "#ddd",
+                "borderwidth": 1,
+            },
+            showlegend=self.show_legend,
+            **self.config.to_layout_dict(self.title),
+        )
+
+        # Set axis ranges
+        max_novelty = max(30, plot_data["novelty_index"].max() * 1.1)
+
+        fig.update_xaxes(range=[0, max_novelty])
+        fig.update_yaxes(range=[0, 105])
+
+        return self._apply_config(fig)
 
 
 class NoveltyUncertaintyDensity(BasePlot):

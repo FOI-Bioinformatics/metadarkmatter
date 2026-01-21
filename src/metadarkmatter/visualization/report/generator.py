@@ -29,6 +29,7 @@ from metadarkmatter.visualization.report.components import (
     build_aai_stats_cards,
     build_ani_heatmap,
     build_ani_stats_cards,
+    build_phylogenetic_context_heatmap,
 )
 from metadarkmatter.visualization.plots.classification_charts import (
     ClassificationBarChart,
@@ -41,6 +42,7 @@ from metadarkmatter.visualization.plots.distributions import (
     UncertaintyHistogram,
 )
 from metadarkmatter.visualization.plots.scatter_2d import (
+    ConfidenceNoveltyScatter,
     NoveltyUncertaintyScatter,
 )
 from metadarkmatter.visualization.report.styles import get_css_styles
@@ -55,6 +57,10 @@ from metadarkmatter.visualization.report.templates import (
     DISTRIBUTIONS_SUMMARY_TEMPLATE,
     DIVERSITY_SUMMARY_TEMPLATE,
     EMPTY_SECTION_TEMPLATE,
+    ENHANCED_SCORING_CONFIDENCE_TEMPLATE,
+    ENHANCED_SCORING_DISCOVERY_GUIDE_TEMPLATE,
+    ENHANCED_SCORING_SUMMARY_TEMPLATE,
+    ENHANCED_SCORING_UNCERTAINTY_TYPES_TEMPLATE,
     GENOME_HIGHLIGHTS_TEMPLATE,
     GENOME_INTERPRETATION_TEMPLATE,
     GENOMES_SUMMARY_TEMPLATE,
@@ -70,6 +76,16 @@ from metadarkmatter.visualization.report.templates import (
     TAB_SECTION_TEMPLATE,
     TABLE_ROW_TEMPLATE,
     get_cell_class,
+)
+from metadarkmatter.visualization.report.novel_section import (
+    NOVEL_CONFIDENCE_GUIDE_TEMPLATE,
+    NOVEL_EMPTY_TEMPLATE,
+    PHYLOGENETIC_HEATMAP_INTRO_TEMPLATE,
+    PHYLOGENETIC_HEATMAP_LEGEND_TEMPLATE,
+    build_cluster_scatter_figure,
+    build_cluster_table_html,
+    build_novel_summary_html,
+    build_sunburst_figure,
 )
 
 if TYPE_CHECKING:
@@ -103,6 +119,18 @@ class TaxonomicSummary:
     mean_novelty_index: float = 0.0
     mean_placement_uncertainty: float = 0.0
     mean_top_hit_identity: float = 0.0
+    # Enhanced scoring metrics (optional, only when --enhanced-scoring used)
+    has_enhanced_scoring: bool = False
+    has_inferred_uncertainty: bool = False
+    single_hit_count: int = 0
+    single_hit_pct: float = 0.0
+    mean_inferred_uncertainty: float | None = None
+    mean_alignment_quality: float | None = None
+    mean_identity_confidence: float | None = None
+    mean_placement_confidence: float | None = None
+    mean_discovery_score: float | None = None
+    novel_with_discovery_score: int = 0
+    high_priority_discoveries: int = 0  # discovery_score >= 75
 
     @property
     def novel_percentage(self) -> float:
@@ -134,7 +162,7 @@ class TaxonomicSummary:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for template rendering."""
-        return {
+        result = {
             "total_reads": self.total_reads,
             "known_species": self.known_species,
             "novel_species": self.novel_species,
@@ -154,7 +182,26 @@ class TaxonomicSummary:
             "diversity_known_pct": self.diversity_known_pct,
             "diversity_novel_pct": self.diversity_novel_pct,
             "diversity_uncertain_pct": self.diversity_uncertain_pct,
+            # Enhanced scoring
+            "has_enhanced_scoring": self.has_enhanced_scoring,
+            "has_inferred_uncertainty": self.has_inferred_uncertainty,
+            "single_hit_count": self.single_hit_count,
+            "single_hit_pct": self.single_hit_pct,
         }
+        # Add enhanced scoring metrics if available
+        if self.mean_inferred_uncertainty is not None:
+            result["mean_inferred_uncertainty"] = self.mean_inferred_uncertainty
+        if self.mean_alignment_quality is not None:
+            result["mean_alignment_quality"] = self.mean_alignment_quality
+        if self.mean_identity_confidence is not None:
+            result["mean_identity_confidence"] = self.mean_identity_confidence
+        if self.mean_placement_confidence is not None:
+            result["mean_placement_confidence"] = self.mean_placement_confidence
+        if self.mean_discovery_score is not None:
+            result["mean_discovery_score"] = self.mean_discovery_score
+            result["novel_with_discovery_score"] = self.novel_with_discovery_score
+            result["high_priority_discoveries"] = self.high_priority_discoveries
+        return result
 
 
 @dataclass
@@ -165,12 +212,28 @@ class ReportConfig:
     title: str = "Metadarkmatter Classification Report"
     theme: str = "light"
     page_size: int = 100
-    max_table_rows: int = 10000
+    max_table_rows: int = 10000  # Configurable via CLI --max-table-rows
     max_scatter_points: int = 50000
     include_plotlyjs: str = "cdn"  # 'cdn', 'embed', or path
 
+    # Histogram bin sizes (None = auto-calculate based on nbins)
+    novelty_bin_size: float | None = None  # e.g., 1.0 for 1% bins
+    uncertainty_bin_size: float | None = 1.0  # Default to 1% bins for finer resolution
+
+    # Alignment mode indicator for display
+    alignment_mode: str = "nucleotide"  # "nucleotide" (ANI) or "protein" (AAI)
+
+    # Phylogenetic context heatmap limits
+    max_phylo_clusters: int = 20  # Maximum novel clusters in heatmap
+    max_phylo_references: int = 50  # Maximum reference genomes in heatmap
+
     plot_config: PlotConfig = field(default_factory=PlotConfig)
     thresholds: ThresholdConfig = field(default_factory=ThresholdConfig)
+
+    @property
+    def similarity_type(self) -> str:
+        """Return ANI or AAI based on alignment mode."""
+        return "AAI" if self.alignment_mode == "protein" else "ANI"
 
 
 class ReportGenerator:
@@ -261,6 +324,48 @@ class ReportGenerator:
             conserved_regions + unclassified
         )
 
+        # Check for enhanced scoring columns
+        has_enhanced_scoring = "alignment_quality" in self.df.columns
+        has_inferred_uncertainty = "inferred_uncertainty" in self.df.columns
+
+        # Calculate single-hit statistics
+        single_hit_count = 0
+        single_hit_pct = 0.0
+        if "num_ambiguous_hits" in self.df.columns:
+            single_hit_df = self.df.filter(pl.col("num_ambiguous_hits") <= 1)
+            single_hit_count = len(single_hit_df)
+            single_hit_pct = (single_hit_count / len(self.df) * 100) if len(self.df) > 0 else 0.0
+
+        # Calculate enhanced scoring metrics if available
+        mean_inferred_uncertainty = None
+        mean_alignment_quality = None
+        mean_identity_confidence = None
+        mean_placement_confidence = None
+        mean_discovery_score = None
+        novel_with_discovery_score = 0
+        high_priority_discoveries = 0
+
+        if has_inferred_uncertainty:
+            inferred_df = self.df.filter(pl.col("inferred_uncertainty").is_not_null())
+            if len(inferred_df) > 0:
+                mean_inferred_uncertainty = inferred_df["inferred_uncertainty"].mean() or 0.0
+
+        if has_enhanced_scoring:
+            if "alignment_quality" in self.df.columns:
+                mean_alignment_quality = self.df["alignment_quality"].mean() or 0.0
+            if "identity_confidence" in self.df.columns:
+                mean_identity_confidence = self.df["identity_confidence"].mean() or 0.0
+            if "placement_confidence" in self.df.columns:
+                mean_placement_confidence = self.df["placement_confidence"].mean() or 0.0
+            if "discovery_score" in self.df.columns:
+                discovery_df = self.df.filter(pl.col("discovery_score").is_not_null())
+                novel_with_discovery_score = len(discovery_df)
+                if novel_with_discovery_score > 0:
+                    mean_discovery_score = discovery_df["discovery_score"].mean() or 0.0
+                    high_priority_discoveries = len(
+                        discovery_df.filter(pl.col("discovery_score") >= 75)
+                    )
+
         return TaxonomicSummary(
             total_reads=len(self.df),
             known_species=known_species,
@@ -277,6 +382,18 @@ class ReportGenerator:
             mean_novelty_index=mean_novelty,
             mean_placement_uncertainty=mean_uncertainty,
             mean_top_hit_identity=mean_identity,
+            # Enhanced scoring
+            has_enhanced_scoring=has_enhanced_scoring,
+            has_inferred_uncertainty=has_inferred_uncertainty,
+            single_hit_count=single_hit_count,
+            single_hit_pct=single_hit_pct,
+            mean_inferred_uncertainty=mean_inferred_uncertainty,
+            mean_alignment_quality=mean_alignment_quality,
+            mean_identity_confidence=mean_identity_confidence,
+            mean_placement_confidence=mean_placement_confidence,
+            mean_discovery_score=mean_discovery_score,
+            novel_with_discovery_score=novel_with_discovery_score,
+            high_priority_discoveries=high_priority_discoveries,
         )
 
     def _get_genome_label(self, accession: str, max_species_len: int = 25) -> str:
@@ -332,7 +449,7 @@ class ReportGenerator:
 
     def _build_html(self) -> str:
         """Build the complete HTML report."""
-        # Generate all sections
+        # Generate all sections (order matches tab navigation)
         content_sections = []
 
         # Overview tab (always visible first)
@@ -341,25 +458,36 @@ class ReportGenerator:
         # Distributions tab
         content_sections.append(self._build_distributions_section())
 
-        # Recruitment tab
-        content_sections.append(self._build_recruitment_section())
-
         # Species tab (if metadata provided)
         content_sections.append(self._build_species_section())
 
         # Genomes tab
         content_sections.append(self._build_genomes_section())
 
-        # ANI tab
+        # Novel Diversity tab (only if there are novel reads)
+        if self.summary.diversity_novel > 0:
+            content_sections.append(self._build_novel_diversity_section())
+
+        # Reference ANI tab
         content_sections.append(self._build_ani_section())
 
-        # AAI tab
+        # Reference AAI tab
         content_sections.append(self._build_aai_section())
+
+        # Discovery Scores tab (only if enhanced scoring data available)
+        if self.summary.has_enhanced_scoring or self.summary.has_inferred_uncertainty:
+            content_sections.append(self._build_enhanced_scoring_section())
+
+        # Recruitment tab
+        content_sections.append(self._build_recruitment_section())
 
         # Data table tab
         content_sections.append(self._build_data_section())
 
         content = "\n".join(content_sections)
+
+        # Build dynamic navigation
+        navigation = self._build_navigation()
 
         # Collect all Plotly JS initialization code
         plotly_js = self._build_plotly_js()
@@ -377,10 +505,50 @@ class ReportGenerator:
             total_reads=format_count(self.summary.total_reads),
             version=__version__,
             css_styles=get_css_styles(self.config.theme),
+            navigation=navigation,
             content=content,
             plotly_js=plotly_js,
             js_scripts=js_scripts,
         )
+
+    def _build_navigation(self) -> str:
+        """Build dynamic navigation based on available data."""
+        # Tab order: General -> Specific -> Novel -> Reference -> Technical -> Data
+        tabs = [
+            ("overview", "Overview", True),
+            ("distributions", "Distributions", False),
+            ("species", "Species", False),
+            ("genomes", "Genomes", False),
+        ]
+
+        # Add Novel Diversity tab if there are novel reads
+        if self.summary.diversity_novel > 0:
+            tabs.append(("novel-diversity", "Novel Diversity", False))
+
+        # Reference matrices (renamed for clarity)
+        tabs.extend([
+            ("ani", "Reference ANI", False),
+            ("aai", "Reference AAI", False),
+        ])
+
+        # Add Discovery Scores tab if data available (renamed from Enhanced Scoring)
+        if self.summary.has_enhanced_scoring or self.summary.has_inferred_uncertainty:
+            tabs.append(("enhanced-scoring", "Discovery Scores", False))
+
+        tabs.extend([
+            ("recruitment", "Recruitment", False),
+            ("data", "Data", False),
+        ])
+
+        nav_items = []
+        for tab_id, label, is_active in tabs:
+            active_class = " active" if is_active else ""
+            nav_items.append(
+                f'        <button class="tab-btn{active_class}" '
+                f"onclick=\"showTab('{tab_id}')\">{label}</button>"
+            )
+
+        return "\n".join(nav_items)
 
     def _build_overview_section(self) -> str:
         """Build the overview tab section with hero diversity summary."""
@@ -566,9 +734,31 @@ class ReportGenerator:
             title="Novelty vs Uncertainty Landscape",
             description=(
                 "Each point represents a read. Position indicates divergence from references (x-axis) "
-                "and confidence in placement (y-axis). Colors show classification categories."
+                "and confidence in placement (y-axis). Colors show classification categories. "
+                "Use dropdown to toggle single-hit reads."
             ),
             plot_id=scatter_id,
+        )
+
+        # Confidence vs Novelty scatter plot
+        confidence_scatter = ConfidenceNoveltyScatter(
+            self.df,
+            config=PlotConfig(width=1100, height=650),
+            thresholds=self.config.thresholds,
+            max_points=self.config.max_scatter_points,
+        )
+        confidence_id = "plot-confidence-novelty"
+        self._register_plot(confidence_id, confidence_scatter.create_figure())
+
+        confidence_plot = PLOT_CONTAINER_TEMPLATE.format(
+            extra_class="full-width",
+            title="Confidence Score vs Novelty Index",
+            description=(
+                "Confidence score (100 - novelty - uncertainty) vs novelty index. "
+                "High confidence with high novelty indicates reliable novel species detection. "
+                "Use dropdown to toggle single-hit reads."
+            ),
+            plot_id=confidence_id,
         )
 
         # Novelty histogram
@@ -576,6 +766,7 @@ class ReportGenerator:
             self.df,
             config=PlotConfig(width=550, height=400),
             thresholds=self.config.thresholds,
+            bin_size=self.config.novelty_bin_size,
         )
         novelty_id = "plot-novelty-hist"
         self._register_plot(novelty_id, novelty_hist.create_figure())
@@ -585,6 +776,7 @@ class ReportGenerator:
             self.df,
             config=PlotConfig(width=550, height=400),
             thresholds=self.config.thresholds,
+            bin_size=self.config.uncertainty_bin_size,
         )
         uncertainty_id = "plot-uncertainty-hist"
         self._register_plot(uncertainty_id, uncertainty_hist.create_figure())
@@ -615,12 +807,396 @@ class ReportGenerator:
             )
         )
 
-        content = summary_html + interpretation_html + scatter_plot + hist_row
+        content = summary_html + interpretation_html + scatter_plot + confidence_plot + hist_row
 
         return TAB_SECTION_TEMPLATE.format(
             tab_id="distributions",
             active_class="",
             section_title="Distributions",
+            content=content,
+        )
+
+    def _build_enhanced_scoring_section(self) -> str:
+        """Build the enhanced scoring tab section with confidence metrics and discovery scores."""
+        import plotly.graph_objects as go
+
+        s = self.summary
+        content_parts = []
+
+        # Summary section with key metrics
+        summary_html = ENHANCED_SCORING_SUMMARY_TEMPLATE.format(
+            single_hit_pct=s.single_hit_pct,
+            single_hit_count=s.single_hit_count,
+            total_reads=s.total_reads,
+            mean_inferred_uncertainty=s.mean_inferred_uncertainty or 0.0,
+            high_priority_count=s.high_priority_discoveries,
+            mean_discovery_score=s.mean_discovery_score or 0.0,
+            novel_count=s.novel_with_discovery_score,
+        )
+        content_parts.append(summary_html)
+
+        # Confidence dimensions section (only if enhanced scoring)
+        if s.has_enhanced_scoring:
+            confidence_html = ENHANCED_SCORING_CONFIDENCE_TEMPLATE.format(
+                mean_identity_confidence=s.mean_identity_confidence or 0.0,
+                mean_placement_confidence=s.mean_placement_confidence or 0.0,
+                mean_alignment_quality=s.mean_alignment_quality or 0.0,
+            )
+            content_parts.append(confidence_html)
+
+        # Uncertainty types breakdown
+        if s.has_inferred_uncertainty and "uncertainty_type" in self.df.columns:
+            measured_df = self.df.filter(pl.col("uncertainty_type") == "measured")
+            inferred_df = self.df.filter(pl.col("uncertainty_type") == "inferred")
+            measured_count = len(measured_df)
+            inferred_count = len(inferred_df)
+            total = s.total_reads if s.total_reads > 0 else 1
+
+            uncertainty_types_html = ENHANCED_SCORING_UNCERTAINTY_TYPES_TEMPLATE.format(
+                measured_count=measured_count,
+                measured_pct=measured_count / total * 100,
+                inferred_count=inferred_count,
+                inferred_pct=inferred_count / total * 100,
+                single_hit_pct=s.single_hit_pct,
+            )
+            content_parts.append(uncertainty_types_html)
+
+        # Discovery score interpretation guide
+        if s.has_enhanced_scoring and s.novel_with_discovery_score > 0:
+            content_parts.append(ENHANCED_SCORING_DISCOVERY_GUIDE_TEMPLATE)
+
+        # Visualizations
+
+        # Discovery Score Distribution (histogram for novel reads)
+        if s.has_enhanced_scoring and "discovery_score" in self.df.columns:
+            discovery_df = self.df.filter(pl.col("discovery_score").is_not_null())
+            if len(discovery_df) > 0:
+                scores = discovery_df["discovery_score"].to_list()
+
+                discovery_fig = go.Figure()
+                discovery_fig.add_trace(go.Histogram(
+                    x=scores,
+                    nbinsx=25,
+                    marker_color="#667eea",
+                    hovertemplate="Score: %{x:.0f}<br>Count: %{y}<extra></extra>",
+                ))
+
+                # Add threshold lines
+                discovery_fig.add_vline(x=75, line_dash="dash", line_color="#22c55e",
+                                        annotation_text="High Priority (75+)")
+                discovery_fig.add_vline(x=50, line_dash="dot", line_color="#f59e0b",
+                                        annotation_text="Moderate (50+)")
+                discovery_fig.add_vline(x=25, line_dash="dot", line_color="#ef4444",
+                                        annotation_text="Low (25+)")
+
+                discovery_fig.update_layout(
+                    title="Discovery Score Distribution (Novel Reads)",
+                    xaxis_title="Discovery Score",
+                    yaxis_title="Number of Reads",
+                    template="plotly_white",
+                    height=400,
+                    showlegend=False,
+                )
+                discovery_hist_id = "plot-discovery-hist"
+                self._register_plot(discovery_hist_id, discovery_fig)
+
+                content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
+                    extra_class="full-width",
+                    title="Discovery Score Distribution",
+                    description=(
+                        "Distribution of discovery scores for novel reads. Higher scores indicate "
+                        "more reliable discoveries. Green line marks high-priority threshold (75+)."
+                    ),
+                    plot_id=discovery_hist_id,
+                ))
+
+        # Confidence Dimensions Scatter Plot
+        if s.has_enhanced_scoring and "identity_confidence" in self.df.columns:
+            # Sample for performance
+            plot_df = self.df
+            if len(plot_df) > self.config.max_scatter_points:
+                plot_df = plot_df.sample(n=self.config.max_scatter_points, seed=42)
+
+            conf_fig = go.Figure()
+
+            # Color by taxonomic call
+            for call, color in [
+                ("Known Species", "#22c55e"),
+                ("Novel Species", "#f59e0b"),
+                ("Novel Genus", "#ef4444"),
+                ("Ambiguous", "#94a3b8"),
+            ]:
+                call_df = plot_df.filter(pl.col("taxonomic_call") == call)
+                if len(call_df) > 0:
+                    conf_fig.add_trace(go.Scattergl(
+                        x=call_df["identity_confidence"].to_list(),
+                        y=call_df["placement_confidence"].to_list(),
+                        mode="markers",
+                        name=call,
+                        marker={"color": color, "size": 4, "opacity": 0.6},
+                        hovertemplate=(
+                            f"<b>{call}</b><br>"
+                            "Identity Conf: %{x:.1f}<br>"
+                            "Placement Conf: %{y:.1f}<extra></extra>"
+                        ),
+                    ))
+
+            conf_fig.update_layout(
+                title="Confidence Dimensions",
+                xaxis_title="Identity Confidence",
+                yaxis_title="Placement Confidence",
+                template="plotly_white",
+                height=500,
+                legend={"orientation": "h", "y": -0.15},
+            )
+            conf_scatter_id = "plot-confidence-dimensions"
+            self._register_plot(conf_scatter_id, conf_fig)
+
+            content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
+                extra_class="full-width",
+                title="Confidence Dimensions Scatter",
+                description=(
+                    "Identity confidence (reliability of identity measurement) vs "
+                    "placement confidence (confidence in genome assignment). "
+                    "High values on both axes indicate reliable classifications."
+                ),
+                plot_id=conf_scatter_id,
+            ))
+
+        # Inferred vs Measured Uncertainty Comparison
+        if s.has_inferred_uncertainty and "inferred_uncertainty" in self.df.columns:
+            # Create comparison histogram
+            inferred_df = self.df.filter(pl.col("inferred_uncertainty").is_not_null())
+            measured_df = self.df.filter(
+                (pl.col("uncertainty_type") == "measured") &
+                (pl.col("placement_uncertainty").is_not_null())
+            )
+
+            unc_fig = go.Figure()
+
+            if len(inferred_df) > 0:
+                unc_fig.add_trace(go.Histogram(
+                    x=inferred_df["inferred_uncertainty"].to_list(),
+                    name="Inferred (single-hit)",
+                    marker_color="#f59e0b",
+                    opacity=0.7,
+                    nbinsx=30,
+                ))
+
+            if len(measured_df) > 0:
+                unc_fig.add_trace(go.Histogram(
+                    x=measured_df["placement_uncertainty"].to_list(),
+                    name="Measured (multi-hit)",
+                    marker_color="#22c55e",
+                    opacity=0.7,
+                    nbinsx=30,
+                ))
+
+            unc_fig.update_layout(
+                title="Uncertainty Distribution by Type",
+                xaxis_title="Uncertainty (%)",
+                yaxis_title="Number of Reads",
+                template="plotly_white",
+                height=400,
+                barmode="overlay",
+                legend={"orientation": "h", "y": -0.15},
+            )
+            unc_hist_id = "plot-uncertainty-comparison"
+            self._register_plot(unc_hist_id, unc_fig)
+
+            content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
+                extra_class="full-width",
+                title="Uncertainty by Type",
+                description=(
+                    "Comparison of measured uncertainty (from ANI between competing hits) "
+                    "vs inferred uncertainty (estimated from novelty for single-hit reads). "
+                    "Inferred uncertainty prevents false confidence in single-hit reads."
+                ),
+                plot_id=unc_hist_id,
+            ))
+
+        content = "\n".join(content_parts)
+
+        return TAB_SECTION_TEMPLATE.format(
+            tab_id="enhanced-scoring",
+            active_class="",
+            section_title="Discovery Scores",
+            content=content,
+        )
+
+    def _build_novel_diversity_section(self) -> str:
+        """Build the novel diversity tab section with cluster analysis."""
+        from metadarkmatter.core.novel_diversity import NovelDiversityAnalyzer
+
+        content_parts = []
+
+        # Create analyzer and cluster novel reads
+        try:
+            analyzer = NovelDiversityAnalyzer(
+                classifications=self.df,
+                metadata=self.genome_metadata,
+                novelty_band_size=5.0,
+                min_cluster_size=3,
+            )
+            clusters = analyzer.cluster_novel_reads()
+            summary = analyzer.get_summary()
+        except Exception as e:
+            logger.warning(f"Could not analyze novel diversity: {e}")
+            content = EMPTY_SECTION_TEMPLATE.format(
+                message="Could not analyze novel diversity. Check classification data."
+            )
+            return TAB_SECTION_TEMPLATE.format(
+                tab_id="novel-diversity",
+                active_class="",
+                section_title="Novel Diversity",
+                content=content,
+            )
+
+        if not clusters:
+            content = NOVEL_EMPTY_TEMPLATE
+            return TAB_SECTION_TEMPLATE.format(
+                tab_id="novel-diversity",
+                active_class="",
+                section_title="Novel Diversity",
+                content=content,
+            )
+
+        # Build summary section
+        content_parts.append(build_novel_summary_html(summary))
+
+        # Add confidence guide
+        content_parts.append(NOVEL_CONFIDENCE_GUIDE_TEMPLATE)
+
+        # Build scatter plot of cluster quality
+        scatter_fig = build_cluster_scatter_figure(clusters, width=1000, height=500)
+        scatter_id = "plot-novel-scatter"
+        self._register_plot(scatter_id, scatter_fig)
+
+        content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
+            extra_class="full-width",
+            title="Cluster Quality Overview",
+            description=(
+                "Scatter plot showing cluster novelty vs quality metrics. "
+                "Marker size indicates read count. Colors indicate confidence rating."
+            ),
+            plot_id=scatter_id,
+        ))
+
+        # Build sunburst chart for phylogenetic context
+        sunburst_fig = build_sunburst_figure(clusters, width=600, height=600)
+        sunburst_id = "plot-novel-sunburst"
+        self._register_plot(sunburst_id, sunburst_fig)
+
+        content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
+            extra_class="full-width",
+            title="Phylogenetic Context",
+            description=(
+                "Sunburst chart showing novel clusters within taxonomic hierarchy. "
+                "Click to explore family/genus/cluster relationships."
+            ),
+            plot_id=sunburst_id,
+        ))
+
+        # Build phylogenetic context heatmap(s) based on available matrices
+        # Prefer AAI for protein mode, ANI for nucleotide mode
+        # Show both when both are available (ANI for species, AAI for genus context)
+        is_protein_mode = self.config.alignment_mode == "protein"
+
+        # Determine which matrices to use
+        heatmaps_to_build: list[tuple[pl.DataFrame, str]] = []
+
+        if is_protein_mode:
+            # Protein mode: prefer AAI, fallback to ANI
+            if self.aai_matrix is not None and len(self.aai_matrix) > 0:
+                heatmaps_to_build.append((self.aai_matrix, "AAI"))
+            elif self.ani_matrix is not None and len(self.ani_matrix) > 0:
+                heatmaps_to_build.append((self.ani_matrix, "ANI"))
+        else:
+            # Nucleotide mode: use ANI primarily
+            if self.ani_matrix is not None and len(self.ani_matrix) > 0:
+                heatmaps_to_build.append((self.ani_matrix, "ANI"))
+            # Also show AAI if available (better for Novel Genus clusters)
+            if self.aai_matrix is not None and len(self.aai_matrix) > 0:
+                heatmaps_to_build.append((self.aai_matrix, "AAI"))
+
+        for matrix, sim_type in heatmaps_to_build:
+            try:
+                # Get genome accessions from matrix
+                matrix_cols = matrix.columns
+                if "genome" in matrix_cols:
+                    genome_accessions = matrix["genome"].to_list()
+                else:
+                    genome_accessions = list(matrix_cols)
+
+                genome_labels_map = self._get_genome_labels_map(genome_accessions)
+
+                # Build the phylogenetic context heatmap
+                phylo_fig, phylo_metadata, clustering_ok = build_phylogenetic_context_heatmap(
+                    similarity_matrix=matrix,
+                    novel_clusters=clusters,
+                    genome_labels_map=genome_labels_map,
+                    similarity_type=sim_type,
+                    max_references=self.config.max_phylo_references,
+                    max_clusters=self.config.max_phylo_clusters,
+                )
+
+                if phylo_metadata.get("n_total", 0) > 0:
+                    # Add intro section with note if clusters were truncated
+                    n_clusters_shown = phylo_metadata.get("n_clusters", 0)
+                    total_clusters = len(clusters)
+                    clusters_note = ""
+                    if n_clusters_shown < total_clusters:
+                        clusters_note = f" (top {n_clusters_shown} of {total_clusters} by read count)"
+
+                    # Customize description based on similarity type
+                    if sim_type == "AAI":
+                        intro_description = (
+                            "This AAI-based heatmap is particularly useful for visualizing "
+                            "Novel Genus candidates, where protein-level similarity provides "
+                            "better resolution than nucleotide comparisons."
+                        )
+                    else:
+                        intro_description = (
+                            "This ANI-based heatmap shows novel clusters positioned alongside "
+                            "reference genomes. Best for visualizing Novel Species placement."
+                        )
+
+                    content_parts.append(PHYLOGENETIC_HEATMAP_INTRO_TEMPLATE.format(
+                        n_references=phylo_metadata.get("n_references", 0),
+                        n_clusters=n_clusters_shown,
+                        clusters_note=clusters_note,
+                    ))
+
+                    # Register and add the heatmap
+                    phylo_heatmap_id = f"plot-novel-phylo-heatmap-{sim_type.lower()}"
+                    self._register_plot(phylo_heatmap_id, phylo_fig)
+
+                    content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
+                        extra_class="full-width",
+                        title=f"Phylogenetic Context Heatmap ({sim_type})",
+                        description=(
+                            f"Extended {sim_type} heatmap showing novel clusters alongside reference genomes. "
+                            f"Entries marked with [*] are novel clusters. Hover for details."
+                        ),
+                        plot_id=phylo_heatmap_id,
+                    ))
+
+                    # Add legend (only for first heatmap to avoid repetition)
+                    if matrix is heatmaps_to_build[0][0]:
+                        content_parts.append(PHYLOGENETIC_HEATMAP_LEGEND_TEMPLATE)
+
+            except Exception as e:
+                logger.warning(f"Could not build {sim_type} phylogenetic context heatmap: {e}")
+
+        # Build cluster table (includes phylogenetic placement)
+        content_parts.append(build_cluster_table_html(clusters))
+
+        content = "\n".join(content_parts)
+
+        return TAB_SECTION_TEMPLATE.format(
+            tab_id="novel-diversity",
+            active_class="",
+            section_title="Novel Diversity",
             content=content,
         )
 
@@ -1086,7 +1662,7 @@ class ReportGenerator:
         return TAB_SECTION_TEMPLATE.format(
             tab_id="ani",
             active_class="",
-            section_title="ANI Matrix",
+            section_title="Reference ANI",
             content=content,
         )
 
@@ -1138,18 +1714,29 @@ class ReportGenerator:
         return TAB_SECTION_TEMPLATE.format(
             tab_id="aai",
             active_class="",
-            section_title="AAI Matrix",
+            section_title="Reference AAI",
             content=content,
         )
 
     def _build_data_section(self) -> str:
         """Build the interactive data table section with improved UX."""
         s = self.summary
+        total_reads = len(self.df)
 
         # Limit rows for performance
         table_df = self.df.head(self.config.max_table_rows)
+        rows_truncated = total_reads > self.config.max_table_rows
 
-        # Build summary section
+        # Build summary section with truncation notice if applicable
+        truncation_notice = ""
+        if rows_truncated:
+            truncation_notice = (
+                f'<div class="truncation-notice">'
+                f'<strong>Note:</strong> Showing first {self.config.max_table_rows:,} of '
+                f'{total_reads:,} reads. Export full data for complete analysis.'
+                f'</div>'
+            )
+
         summary_html = DATA_SUMMARY_TEMPLATE.format(
             total_rows=len(table_df),
             known_count=s.diversity_known,
@@ -1166,8 +1753,10 @@ class ReportGenerator:
             conserved_count=s.conserved_regions,
         )
 
-        # Column guide
-        column_guide_html = DATA_COLUMN_GUIDE_TEMPLATE
+        # Column guide with similarity type (ANI or AAI)
+        column_guide_html = DATA_COLUMN_GUIDE_TEMPLATE.format(
+            similarity_type=self.config.similarity_type,
+        )
 
         # Build table rows with additional columns
         rows_html = ""
@@ -1184,13 +1773,27 @@ class ReportGenerator:
             # Get additional columns from dataframe
             ambiguous_hits = row.get("num_ambiguous_hits", 0)
             identity_gap = row.get("identity_gap")
-            # Format identity_gap: show "-" if not available, otherwise format as number
-            identity_gap_str = "-" if identity_gap is None else f"{identity_gap:.2f}"
+            # Format identity_gap: use absolute value, show "-" if not available
+            if identity_gap is None:
+                identity_gap_str = "-"
+            else:
+                identity_gap_str = f"{abs(identity_gap):.2f}"
             is_novel = row.get("is_novel", False)
             if is_novel is None:
                 # Compute from taxonomic_call if not in dataframe
                 call = row.get("taxonomic_call", "")
                 is_novel = call in ("Novel Species", "Novel Genus")
+
+            # Enhanced scoring fields (with defaults for when not available)
+            uncertainty_type = row.get("uncertainty_type", "-")
+            inferred_unc = row.get("inferred_uncertainty")
+            inferred_unc_str = "-" if inferred_unc is None else f"{inferred_unc:.1f}"
+            discovery = row.get("discovery_score")
+            discovery_str = "-" if discovery is None else f"{discovery:.1f}"
+            id_conf = row.get("identity_confidence")
+            id_conf_str = "-" if id_conf is None else f"{id_conf:.1f}"
+            pl_conf = row.get("placement_confidence")
+            pl_conf_str = "-" if pl_conf is None else f"{pl_conf:.1f}"
 
             rows_html += TABLE_ROW_TEMPLATE.format(
                 read_id=row.get("read_id", ""),
@@ -1205,6 +1808,11 @@ class ReportGenerator:
                 is_novel="Yes" if is_novel else "No",
                 classification=row.get("taxonomic_call", ""),
                 cell_class=get_cell_class(row.get("taxonomic_call", "")),
+                uncertainty_type=uncertainty_type or "-",
+                inferred_uncertainty=inferred_unc_str,
+                discovery_score=discovery_str,
+                identity_confidence=id_conf_str,
+                placement_confidence=pl_conf_str,
             )
 
         table_html = DATA_TABLE_TEMPLATE.format(
@@ -1213,8 +1821,31 @@ class ReportGenerator:
             total_rows=len(table_df),
         )
 
+        # Add JavaScript to show enhanced scoring columns and guide if data available
+        enhanced_js = ""
+        if self.summary.has_enhanced_scoring or self.summary.has_inferred_uncertainty:
+            enhanced_js = """
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Show enhanced scoring column options
+    var divider = document.getElementById('enhancedColsDivider');
+    if (divider) divider.style.display = 'block';
+    for (var i = 11; i <= 15; i++) {
+        var label = document.getElementById('colLabel' + i);
+        if (label) label.style.display = 'block';
+    }
+    // Show enhanced guide section
+    var enhancedGuide = document.getElementById('enhancedGuide');
+    if (enhancedGuide) enhancedGuide.style.display = 'block';
+});
+</script>
+"""
+
         # Combine all sections
-        content = summary_html + quick_filters_html + column_guide_html + table_html
+        content = (
+            truncation_notice + summary_html + quick_filters_html +
+            column_guide_html + table_html + enhanced_js
+        )
 
         return TAB_SECTION_TEMPLATE.format(
             tab_id="data",

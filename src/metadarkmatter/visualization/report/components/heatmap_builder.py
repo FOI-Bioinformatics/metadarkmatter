@@ -227,16 +227,17 @@ def build_aai_heatmap(
     # Convert to Python list for JSON serialization
     z_list = [[float(v) for v in row] for row in z_clustered]
 
-    # AAI colorscale: adjusted range for protein-level comparisons
+    # AAI colorscale: 40-100% range for protein-level comparisons
+    # Matches the phylogenetic context heatmap scale
     aai_colorscale = [
-        [0.0, "#313695"],    # 40% - Dark blue (very distant)
-        [0.15, "#4575b4"],   # 45%
-        [0.3, "#74add1"],    # 50%
-        [0.45, "#abd9e9"],   # 55%
-        [0.6, "#ffffbf"],    # 60% - Yellow (approaching genus)
-        [0.75, "#fdae61"],   # 65% - Orange (genus boundary)
-        [0.9, "#f46d43"],    # 70%
-        [1.0, "#a50026"],    # 75%+ - Red (same genus)
+        [0.0, "#313695"],     # 40% - Dark blue (very distant)
+        [0.167, "#4575b4"],   # 50%
+        [0.333, "#abd9e9"],   # 60%
+        [0.417, "#ffffbf"],   # 65% - Yellow (genus boundary)
+        [0.5, "#fee090"],     # 70%
+        [0.583, "#fdae61"],   # 75%
+        [0.75, "#f46d43"],    # 85%
+        [1.0, "#a50026"],     # 100% - Dark red (identical)
     ]
 
     # Create heatmap
@@ -247,11 +248,11 @@ def build_aai_heatmap(
             y=genome_labels,
             colorscale=aai_colorscale,
             zmin=40,
-            zmax=75,
+            zmax=100,
             colorbar=dict(
                 title="AAI (%)",
-                tickvals=[40, 45, 50, 55, 60, 65, 70, 75],
-                ticktext=["40", "45", "50", "55", "60", "65 (genus)", "70", "75+"],
+                tickvals=[40, 50, 60, 65, 70, 80, 90, 100],
+                ticktext=["40", "50", "60", "65 (genus)", "70", "80", "90", "100"],
             ),
             hovertemplate=(
                 "Genome 1: %{y}<br>"
@@ -358,3 +359,243 @@ def build_aai_stats_cards(stats: SimilarityStats) -> str:
         </div>
     </div>
     """
+
+
+def build_phylogenetic_context_heatmap(
+    similarity_matrix: pl.DataFrame,
+    novel_clusters: list,
+    genome_labels_map: dict[str, str],
+    similarity_type: str = "ANI",
+    default_value: float | None = None,
+    max_references: int = 50,
+    max_clusters: int = 20,
+) -> tuple[go.Figure, dict, bool]:
+    """
+    Build heatmap showing novel clusters in phylogenetic context.
+
+    Creates an extended similarity heatmap (ANI or AAI) that includes both
+    reference genomes and novel clusters, positioning novel taxa near their
+    closest relatives.
+
+    Args:
+        similarity_matrix: Similarity matrix DataFrame (wide format) - ANI or AAI
+        novel_clusters: List of NovelCluster objects
+        genome_labels_map: Mapping from accession to display label
+        similarity_type: "ANI" for nucleotide or "AAI" for protein comparisons
+        default_value: Default value for missing/distant pairs
+            (defaults to 70 for ANI, 40 for AAI)
+        max_references: Maximum reference genomes to include
+        max_clusters: Maximum novel clusters to include
+
+    Returns:
+        Tuple of (plotly_figure, metadata_dict, clustering_succeeded)
+        - plotly_figure: Plotly heatmap figure
+        - metadata_dict: Dictionary with counts and cluster info
+        - clustering_succeeded: Whether hierarchical clustering worked
+    """
+    from metadarkmatter.visualization.report.components.extended_matrix_builder import (
+        build_extended_similarity_matrix,
+    )
+
+    # Set defaults based on similarity type
+    is_aai = similarity_type.upper() == "AAI"
+    if default_value is None:
+        default_value = 40.0 if is_aai else 70.0
+
+    # Build extended matrix
+    extended_matrix, labels, is_novel_mask = build_extended_similarity_matrix(
+        similarity_matrix=similarity_matrix,
+        novel_clusters=novel_clusters,
+        genome_labels_map=genome_labels_map,
+        similarity_type=similarity_type,
+        default_value=default_value,
+        max_references=max_references,
+        max_clusters=max_clusters,
+    )
+
+    if len(labels) == 0:
+        # Empty result - return empty figure
+        fig = go.Figure()
+        fig.update_layout(
+            title=f"No data available for {similarity_type} phylogenetic context heatmap",
+            template="plotly_white",
+        )
+        return fig, {"n_references": 0, "n_clusters": 0, "similarity_type": similarity_type}, False
+
+    # Count entities
+    n_references = sum(1 for is_novel in is_novel_mask if not is_novel)
+    n_clusters = sum(1 for is_novel in is_novel_mask if is_novel)
+
+    # Attempt hierarchical clustering
+    clustering_succeeded = False
+    try:
+        z_clustered, labels_ordered, is_novel_ordered, clustering_succeeded = (
+            _cluster_extended_matrix(extended_matrix, labels, is_novel_mask, default_value)
+        )
+    except Exception:
+        # Fallback to unclustered
+        z_clustered = extended_matrix
+        labels_ordered = labels
+        is_novel_ordered = is_novel_mask
+
+    # Convert to Python list for JSON serialization
+    z_list = [[float(v) for v in row] for row in z_clustered]
+
+    # Colorscale and range based on similarity type
+    if is_aai:
+        # AAI colorscale: 40-100% range (full range for proper visualization)
+        # Key threshold: ~65% AAI = genus boundary
+        colorscale = [
+            [0.0, "#313695"],     # 40% - Dark blue (very distant)
+            [0.167, "#4575b4"],   # 50%
+            [0.333, "#abd9e9"],   # 60%
+            [0.417, "#ffffbf"],   # 65% - Yellow (genus boundary)
+            [0.5, "#fee090"],     # 70%
+            [0.583, "#fdae61"],   # 75%
+            [0.75, "#f46d43"],    # 85%
+            [1.0, "#a50026"],     # 100% - Dark red (identical)
+        ]
+        zmin, zmax = 40, 100
+        colorbar_tickvals = [40, 50, 60, 65, 70, 80, 90, 100]
+        colorbar_ticktext = ["40", "50", "60", "65 (genus)", "70", "80", "90", "100"]
+        boundary_label = "genus"
+    else:
+        # ANI colorscale: 70-100% range (species-level comparisons)
+        colorscale = [
+            [0.0, "#4575b4"],    # 70% - Blue (distant/different genera)
+            [0.167, "#74add1"],  # 75%
+            [0.333, "#abd9e9"],  # 80%
+            [0.5, "#ffffbf"],    # 85% - Yellow (genus boundary)
+            [0.667, "#fee090"],  # 90%
+            [0.833, "#fdae61"],  # 95% - Orange (species boundary)
+            [1.0, "#d73027"],    # 100% - Red (identical/same species)
+        ]
+        zmin, zmax = 70, 100
+        colorbar_tickvals = [70, 75, 80, 85, 90, 95, 100]
+        colorbar_ticktext = ["70", "75", "80", "85 (genus)", "90", "95 (species)", "100"]
+        boundary_label = "species"
+
+    # Create custom hover text to indicate novel vs reference
+    hover_text = []
+    for i, label_i in enumerate(labels_ordered):
+        row_hover = []
+        is_novel_i = is_novel_ordered[i]
+        type_i = "Novel cluster" if is_novel_i else "Reference genome"
+        for j, label_j in enumerate(labels_ordered):
+            is_novel_j = is_novel_ordered[j]
+            type_j = "Novel cluster" if is_novel_j else "Reference genome"
+            sim_val = z_clustered[i, j]
+
+            # Determine if this is an estimated value
+            is_estimated = is_novel_i or is_novel_j
+            estimate_note = " (estimated)" if is_estimated and i != j else ""
+
+            hover_text_val = (
+                f"{type_i}: {label_i}<br>"
+                f"{type_j}: {label_j}<br>"
+                f"{similarity_type}: {sim_val:.1f}%{estimate_note}"
+            )
+            row_hover.append(hover_text_val)
+        hover_text.append(row_hover)
+
+    # Create heatmap
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=z_list,
+            x=labels_ordered,
+            y=labels_ordered,
+            colorscale=colorscale,
+            zmin=zmin,
+            zmax=zmax,
+            colorbar=dict(
+                title=f"{similarity_type} (%)",
+                tickvals=colorbar_tickvals,
+                ticktext=colorbar_ticktext,
+            ),
+            hovertext=hover_text,
+            hovertemplate="%{hovertext}<extra></extra>",
+        )
+    )
+
+    # Build title
+    title = f"Phylogenetic Context Heatmap ({similarity_type})"
+    if clustering_succeeded:
+        title += " - Hierarchically Clustered"
+
+    # Calculate appropriate dimensions based on number of entities
+    n_total = len(labels_ordered)
+    height = max(600, min(1200, 50 + n_total * 15))
+
+    # Dynamic width based on matrix size for better label readability
+    if n_total > 50:
+        width = 1400
+    elif n_total > 30:
+        width = 1200
+    else:
+        width = 1000
+
+    fig.update_layout(
+        title=title,
+        width=width,
+        height=height,
+        template="plotly_white",
+        xaxis=dict(tickangle=45, tickfont=dict(size=8)),
+        yaxis=dict(tickfont=dict(size=8)),
+    )
+
+    # Metadata for reporting
+    metadata = {
+        "n_references": n_references,
+        "n_clusters": n_clusters,
+        "n_total": n_total,
+        "clustering_succeeded": clustering_succeeded,
+        "similarity_type": similarity_type,
+    }
+
+    return fig, metadata, clustering_succeeded
+
+
+def _cluster_extended_matrix(
+    matrix: np.ndarray,
+    labels: list[str],
+    is_novel_mask: list[bool],
+    default_value: float,
+) -> tuple[np.ndarray, list[str], list[bool], bool]:
+    """
+    Perform hierarchical clustering on extended matrix.
+
+    Args:
+        matrix: Extended ANI matrix
+        labels: Labels for matrix entries
+        is_novel_mask: Boolean mask indicating novel clusters
+        default_value: Default ANI value
+
+    Returns:
+        Tuple of (clustered_matrix, ordered_labels, ordered_mask, success)
+    """
+    try:
+        from scipy.cluster.hierarchy import leaves_list, linkage
+        from scipy.spatial.distance import squareform
+
+        # Fill diagonal
+        np.fill_diagonal(matrix, 100.0)
+
+        # Convert similarity to distance
+        dist_matrix = 100.0 - matrix
+        dist_matrix = (dist_matrix + dist_matrix.T) / 2
+        np.fill_diagonal(dist_matrix, 0.0)
+
+        # Hierarchical clustering
+        condensed_dist = squareform(dist_matrix)
+        linkage_matrix = linkage(condensed_dist, method="average")
+        order = leaves_list(linkage_matrix)
+
+        # Reorder everything
+        clustered = matrix[order][:, order]
+        ordered_labels = [labels[i] for i in order]
+        ordered_mask = [is_novel_mask[i] for i in order]
+
+        return clustered, ordered_labels, ordered_mask, True
+
+    except ImportError:
+        return matrix, labels, is_novel_mask, False

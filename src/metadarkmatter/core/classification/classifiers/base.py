@@ -14,7 +14,14 @@ from typing import TYPE_CHECKING, Iterator
 import numpy as np
 import polars as pl
 
-from metadarkmatter.core.constants import calculate_confidence_score
+from metadarkmatter.core.constants import (
+    calculate_alignment_quality,
+    calculate_confidence_score,
+    calculate_discovery_score,
+    calculate_identity_confidence,
+    calculate_inferred_uncertainty,
+    calculate_placement_confidence,
+)
 from metadarkmatter.core.io_utils import write_dataframe, write_dataframe_append
 from metadarkmatter.core.parsers import BlastResultFast, StreamingBlastParser
 from metadarkmatter.models.blast import BlastResult
@@ -209,6 +216,66 @@ class ANIWeightedClassifier:
             identity_score_range=eff["identity_score_range"],
         )
 
+        # Initialize enhanced scoring fields
+        inferred_uncertainty: float | None = None
+        uncertainty_type: str | None = None
+        alignment_quality: float | None = None
+        identity_confidence: float | None = None
+        placement_confidence: float | None = None
+        discovery_score: float | None = None
+
+        # Calculate inferred uncertainty for single-hit reads if enabled
+        if self.config.infer_single_hit_uncertainty or self.config.enhanced_scoring:
+            if num_ambiguous_hits <= 1:
+                inferred_uncertainty = calculate_inferred_uncertainty(novelty_index)
+                uncertainty_type = "inferred"
+            else:
+                uncertainty_type = "measured"
+
+        # Calculate enhanced scoring metrics if enabled
+        if self.config.enhanced_scoring:
+            # Calculate coverage for alignment quality
+            if read_length is not None and read_length > 0:
+                coverage = (best_hit.qend - best_hit.qstart + 1) / read_length
+            else:
+                coverage = min(1.0, (best_hit.qend - best_hit.qstart + 1) / best_hit.qend)
+            coverage = max(0.0, min(1.0, coverage))
+
+            # Alignment quality from BLAST statistics
+            alignment_quality = calculate_alignment_quality(
+                mismatch=best_hit.mismatch,
+                gapopen=best_hit.gapopen,
+                length=best_hit.length,
+                coverage=coverage,
+                evalue=best_hit.evalue,
+            )
+
+            # Identity confidence
+            identity_confidence = calculate_identity_confidence(
+                novelty_index=novelty_index,
+                alignment_quality=alignment_quality,
+            )
+
+            # Placement confidence - use inferred uncertainty for single-hit reads
+            effective_uncertainty = inferred_uncertainty if num_ambiguous_hits <= 1 else placement_uncertainty
+            effective_type = uncertainty_type or ("inferred" if num_ambiguous_hits <= 1 else "measured")
+
+            placement_confidence = calculate_placement_confidence(
+                uncertainty=effective_uncertainty,
+                uncertainty_type=effective_type,
+                identity_gap=identity_gap,
+                num_ambiguous_hits=num_ambiguous_hits,
+            )
+
+            # Discovery score for novel reads
+            discovery_score = calculate_discovery_score(
+                taxonomic_call=taxonomic_call.value,
+                novelty_index=novelty_index,
+                identity_confidence=identity_confidence,
+                placement_confidence=placement_confidence,
+                alignment_quality=alignment_quality,
+            )
+
         return ReadClassification(
             read_id=blast_result.read_id,
             best_match_genome=best_genome,
@@ -221,6 +288,12 @@ class ANIWeightedClassifier:
             genus_uncertainty=genus_uncertainty,
             num_genus_hits=num_genus_hits,
             confidence_score=confidence_score,
+            inferred_uncertainty=inferred_uncertainty,
+            uncertainty_type=uncertainty_type,
+            alignment_quality=alignment_quality,
+            identity_confidence=identity_confidence,
+            placement_confidence=placement_confidence,
+            discovery_score=discovery_score,
             taxonomic_call=taxonomic_call,
         )
 
@@ -232,7 +305,9 @@ class ANIWeightedClassifier:
         """
         Calculate placement uncertainty from ANI values to secondary hits.
 
-        Placement Uncertainty (U) = 100 - max(ANI(top_hit, secondary_hits))
+        Two modes are supported (controlled by config.uncertainty_mode):
+        - 'max': U = 100 - max(ANI(top_hit, all_secondary_hits))
+        - 'second': U = 100 - ANI(top_hit, second_best_hit)
 
         Performance optimization: Accepts an iterator with early termination
         and counts hits in a single pass, avoiding list materialization.
@@ -246,6 +321,8 @@ class ANIWeightedClassifier:
         """
         # Process iterator in single pass - collect ANI values and count
         max_ani = 0.0
+        second_genome_ani = 0.0  # ANI to second-best genome (by bitscore)
+        second_genome_found = False  # Flag for first secondary genome
         num_ambiguous_hits = 0
 
         for hit in ambiguous_hits_iter:
@@ -253,6 +330,13 @@ class ANIWeightedClassifier:
             secondary_genome = hit.genome_name
             if secondary_genome != best_genome:
                 ani = self.ani_matrix.get_ani(best_genome, secondary_genome)
+
+                # Track first secondary genome (second-best by bitscore)
+                if not second_genome_found:
+                    second_genome_ani = ani
+                    second_genome_found = True
+
+                # Track max ANI (existing behavior)
                 if ani > max_ani:
                     max_ani = ani
 
@@ -260,13 +344,19 @@ class ANIWeightedClassifier:
             # Only one genome hit, no uncertainty
             return 0.0, num_ambiguous_hits
 
-        if max_ani == 0.0:
+        # Choose ANI based on uncertainty mode
+        if self.config.uncertainty_mode == "second":
+            effective_ani = second_genome_ani
+        else:  # "max" mode (default)
+            effective_ani = max_ani
+
+        if effective_ani == 0.0:
             # Genome not in ANI matrix at all - maximum uncertainty
             # Note: Missing ANI values within the matrix return default_ani (70%)
             return 100.0, num_ambiguous_hits
 
-        # Uncertainty is inverse of maximum ANI to any competing genome
-        return 100.0 - max_ani, num_ambiguous_hits
+        # Uncertainty is inverse of effective ANI
+        return 100.0 - effective_ani, num_ambiguous_hits
 
     def _calculate_genus_uncertainty(
         self,
@@ -646,6 +736,8 @@ class ANIWeightedClassifier:
         bitscore_cutoff = best_hit.bitscore * (self.config.bitscore_threshold_pct / 100.0)
 
         max_ani = 0.0
+        second_genome_ani = 0.0  # ANI to second-best genome (by bitscore)
+        second_genome_found = False  # Flag for first secondary genome
         num_ambiguous_hits = 0
 
         for hit in result.hits:
@@ -655,17 +747,31 @@ class ANIWeightedClassifier:
             num_ambiguous_hits += 1
             if hit.genome_name != best_genome:
                 ani = self.ani_matrix.get_ani(best_genome, hit.genome_name)
+
+                # Track first secondary genome (second-best by bitscore)
+                if not second_genome_found:
+                    second_genome_ani = ani
+                    second_genome_found = True
+
+                # Track max ANI
                 if ani > max_ani:
                     max_ani = ani
 
-        # Calculate placement uncertainty
+        # Calculate placement uncertainty based on mode
         if num_ambiguous_hits <= 1:
             placement_uncertainty = 0.0
-        elif max_ani == 0.0:
-            # Genome not in ANI matrix - maximum uncertainty
-            placement_uncertainty = 100.0
         else:
-            placement_uncertainty = 100.0 - max_ani
+            # Choose ANI based on uncertainty mode
+            if self.config.uncertainty_mode == "second":
+                effective_ani = second_genome_ani
+            else:  # "max" mode (default)
+                effective_ani = max_ani
+
+            if effective_ani == 0.0:
+                # Genome not in ANI matrix - maximum uncertainty
+                placement_uncertainty = 100.0
+            else:
+                placement_uncertainty = 100.0 - effective_ani
 
         # Calculate AAI-based uncertainty for genus-level classification
         # Only computed when AAI matrix is available and read is in genus-level novelty range
@@ -714,7 +820,8 @@ class ANIWeightedClassifier:
             identity_score_range=eff["identity_score_range"],
         )
 
-        return {
+        # Build result dict
+        result_dict = {
             "read_id": result.read_id,
             "best_match_genome": best_genome,
             "top_hit_identity": top_hit_identity,
@@ -727,6 +834,58 @@ class ANIWeightedClassifier:
             "taxonomic_call": taxonomic_call.value,
             "is_novel": taxonomic_call in (TaxonomicCall.NOVEL_SPECIES, TaxonomicCall.NOVEL_GENUS),
         }
+
+        # Add enhanced scoring fields if enabled
+        if self.config.infer_single_hit_uncertainty or self.config.enhanced_scoring:
+            if num_ambiguous_hits <= 1:
+                result_dict["inferred_uncertainty"] = calculate_inferred_uncertainty(novelty_index)
+                result_dict["uncertainty_type"] = "inferred"
+            else:
+                result_dict["uncertainty_type"] = "measured"
+
+        if self.config.enhanced_scoring:
+            # Calculate coverage for alignment quality
+            coverage = (best_hit.qend - best_hit.qstart + 1) / max(1, best_hit.qend)
+            coverage = max(0.0, min(1.0, coverage))
+
+            alignment_quality = calculate_alignment_quality(
+                mismatch=best_hit.mismatch,
+                gapopen=best_hit.gapopen,
+                length=best_hit.length,
+                coverage=coverage,
+                evalue=best_hit.evalue,
+            )
+            result_dict["alignment_quality"] = alignment_quality
+
+            identity_confidence = calculate_identity_confidence(
+                novelty_index=novelty_index,
+                alignment_quality=alignment_quality,
+            )
+            result_dict["identity_confidence"] = identity_confidence
+
+            # Use inferred uncertainty for single-hit reads
+            effective_uncertainty = result_dict.get("inferred_uncertainty", placement_uncertainty)
+            effective_type = result_dict.get("uncertainty_type", "measured")
+
+            placement_confidence = calculate_placement_confidence(
+                uncertainty=effective_uncertainty,
+                uncertainty_type=effective_type,
+                identity_gap=identity_gap,
+                num_ambiguous_hits=num_ambiguous_hits,
+            )
+            result_dict["placement_confidence"] = placement_confidence
+
+            discovery_score = calculate_discovery_score(
+                taxonomic_call=taxonomic_call.value,
+                novelty_index=novelty_index,
+                identity_confidence=identity_confidence,
+                placement_confidence=placement_confidence,
+                alignment_quality=alignment_quality,
+            )
+            if discovery_score is not None:
+                result_dict["discovery_score"] = discovery_score
+
+        return result_dict
 
     def classify_blast_file_fast(
         self,
@@ -960,6 +1119,10 @@ def _classify_chunk_worker(
     identity_score_base = config_dict["identity_score_base"]
     identity_score_range = config_dict["identity_score_range"]
 
+    # Enhanced scoring options
+    enhanced_scoring = config_dict.get("enhanced_scoring", False)
+    infer_single_hit_uncertainty = config_dict.get("infer_single_hit_uncertainty", False)
+
     for read_id, hits_data in chunk_data:
         if not hits_data:
             continue
@@ -986,9 +1149,12 @@ def _classify_chunk_worker(
         # Calculate placement uncertainty (95% threshold)
         bitscore_cutoff = best_bitscore * (bitscore_pct / 100.0)
         max_ani = 0.0
+        second_genome_ani = 0.0  # ANI to second-best genome
+        second_genome_found = False
         num_ambiguous_hits = 0
 
         best_idx = genome_to_idx.get(best_genome)
+        uncertainty_mode = config_dict.get("uncertainty_mode", "max")
 
         for hit in hits_data:
             if hit[3] < bitscore_cutoff:  # bitscore
@@ -1002,6 +1168,12 @@ def _classify_chunk_worker(
                     # Use default_ani for missing values (0.0 means not computed)
                     if ani == 0.0:
                         ani = default_ani
+
+                    # Track first secondary genome (second-best by bitscore)
+                    if not second_genome_found:
+                        second_genome_ani = ani
+                        second_genome_found = True
+
                     if ani > max_ani:
                         max_ani = ani
 
@@ -1024,14 +1196,21 @@ def _classify_chunk_worker(
                     if ani > genus_max_ani:
                         genus_max_ani = ani
 
-        # Calculate uncertainties
+        # Calculate uncertainties based on mode
         if num_ambiguous_hits <= 1:
             placement_uncertainty = 0.0
-        elif max_ani == 0.0:
-            # Genome not in ANI matrix at all - maximum uncertainty
-            placement_uncertainty = 100.0
         else:
-            placement_uncertainty = 100.0 - max_ani
+            # Choose ANI based on uncertainty mode
+            if uncertainty_mode == "second":
+                effective_ani = second_genome_ani
+            else:  # "max" mode (default)
+                effective_ani = max_ani
+
+            if effective_ani == 0.0:
+                # Genome not in ANI matrix at all - maximum uncertainty
+                placement_uncertainty = 100.0
+            else:
+                placement_uncertainty = 100.0 - effective_ani
 
         # Genus uncertainty
         genus_uncertainty: float | None = None
@@ -1112,7 +1291,7 @@ def _classify_chunk_worker(
             identity_score_range=identity_score_range,
         )
 
-        results.append({
+        result_dict = {
             "read_id": read_id,
             "best_match_genome": best_genome,
             "top_hit_identity": top_hit_identity,
@@ -1127,7 +1306,46 @@ def _classify_chunk_worker(
             "taxonomic_call": call,
             "diversity_status": TAXONOMIC_TO_DIVERSITY[call],
             "is_novel": is_novel,
-        })
+        }
+
+        # Add enhanced scoring fields if enabled
+        if infer_single_hit_uncertainty or enhanced_scoring:
+            if num_ambiguous_hits <= 1:
+                result_dict["inferred_uncertainty"] = _calculate_inferred_uncertainty_inline(
+                    novelty_index, novelty_known_max, novelty_novel_species_max, novelty_novel_genus_max
+                )
+                result_dict["uncertainty_type"] = "inferred"
+            else:
+                result_dict["uncertainty_type"] = "measured"
+
+        if enhanced_scoring:
+            # Alignment quality (using basic coverage estimate from hit data)
+            # Note: In parallel worker we don't have full BLAST fields, use defaults
+            alignment_quality = 75.0  # Default quality for parallel processing
+            result_dict["alignment_quality"] = alignment_quality
+
+            identity_confidence = _calculate_identity_confidence_inline(
+                novelty_index, alignment_quality
+            )
+            result_dict["identity_confidence"] = identity_confidence
+
+            # Use inferred uncertainty for single-hit reads
+            effective_uncertainty = result_dict.get("inferred_uncertainty", placement_uncertainty)
+            effective_type = result_dict.get("uncertainty_type", "measured")
+
+            placement_confidence = _calculate_placement_confidence_inline(
+                effective_uncertainty, effective_type, identity_gap, num_ambiguous_hits
+            )
+            result_dict["placement_confidence"] = placement_confidence
+
+            discovery_score = _calculate_discovery_score_inline(
+                call, novelty_index, identity_confidence, placement_confidence, alignment_quality,
+                novelty_novel_species_min, novelty_novel_genus_min
+            )
+            if discovery_score is not None:
+                result_dict["discovery_score"] = discovery_score
+
+        results.append(result_dict)
 
     return results
 
@@ -1226,3 +1444,125 @@ def _calculate_confidence_score_inline(
     return round(min(100.0, max(0.0, score)), 1)
 
 
+def _calculate_inferred_uncertainty_inline(
+    novelty_index: float,
+    novelty_known_max: float,
+    novelty_novel_species_max: float,
+    novelty_novel_genus_max: float,
+) -> float:
+    """
+    Inline inferred uncertainty calculation for parallel workers.
+
+    For single-hit reads, infers uncertainty from novelty level since
+    there are no competing hits to measure ANI-based uncertainty.
+    """
+    if novelty_index < novelty_known_max:
+        # High identity: database likely complete
+        return 5.0 + novelty_index * 0.5  # 5-7.5%
+    elif novelty_index < novelty_novel_species_max:
+        # Novel species range: uncertain if truly novel or database gap
+        return 7.5 + (novelty_index - novelty_known_max) * 1.0  # 7.5-17.5%
+    elif novelty_index < novelty_novel_genus_max:
+        # Novel genus range: high uncertainty
+        return 17.5 + (novelty_index - novelty_novel_species_max) * 1.5  # 17.5-25%
+    else:
+        # Very high divergence: maximum uncertainty
+        return 35.0
+
+
+def _calculate_identity_confidence_inline(
+    novelty_index: float,
+    alignment_quality: float,
+) -> float:
+    """
+    Inline identity confidence calculation for parallel workers.
+
+    Measures confidence in the identity measurement itself.
+    """
+    # Base score from novelty (inverted - higher identity = more confident)
+    if novelty_index < 5:
+        base = 80.0
+    elif novelty_index < 15:
+        base = 60.0 - (novelty_index - 5)
+    elif novelty_index < 25:
+        base = 50.0 - (novelty_index - 15) * 1.5
+    else:
+        base = 30.0
+
+    # Alignment quality contribution (up to +20)
+    quality_bonus = alignment_quality * 0.2
+
+    return round(min(100.0, base + quality_bonus), 1)
+
+
+def _calculate_placement_confidence_inline(
+    uncertainty: float,
+    uncertainty_type: str,
+    identity_gap: float | None,
+    num_ambiguous_hits: int,
+) -> float:
+    """
+    Inline placement confidence calculation for parallel workers.
+
+    Measures confidence in genome assignment.
+    """
+    # Base score from uncertainty level
+    if uncertainty < 2:
+        base = 80.0
+    elif uncertainty < 5:
+        base = 60.0
+    elif uncertainty < 10:
+        base = 40.0
+    elif uncertainty < 20:
+        base = 25.0
+    else:
+        base = 10.0
+
+    # Penalty for inferred uncertainty
+    if uncertainty_type == "inferred":
+        base -= 15.0
+
+    # Identity gap bonus (only meaningful for multi-hit)
+    gap_bonus = 0.0
+    if identity_gap is not None and num_ambiguous_hits > 1:
+        if identity_gap >= 5:
+            gap_bonus = 20.0
+        elif identity_gap >= 2:
+            gap_bonus = 10.0
+        elif identity_gap >= 1:
+            gap_bonus = 5.0
+
+    return round(max(0.0, min(100.0, base + gap_bonus)), 1)
+
+
+def _calculate_discovery_score_inline(
+    taxonomic_call: str,
+    novelty_index: float,
+    identity_confidence: float,
+    placement_confidence: float,
+    alignment_quality: float,
+    novelty_novel_species_min: float,
+    novelty_novel_genus_min: float,
+) -> float | None:
+    """
+    Inline discovery score calculation for parallel workers.
+
+    Priority score for novel discoveries.
+    """
+    if taxonomic_call not in ("Novel Species", "Novel Genus"):
+        return None
+
+    # Novelty component (0-40)
+    if taxonomic_call == "Novel Species":
+        novelty_pts = 15.0 + (novelty_index - novelty_novel_species_min) * 1.5
+    else:  # Novel Genus
+        novelty_pts = 30.0 + (novelty_index - novelty_novel_genus_min) * 2.0
+    novelty_pts = min(40.0, novelty_pts)
+
+    # Quality component (0-30)
+    quality_pts = alignment_quality * 0.3
+
+    # Confidence component (0-30)
+    conf_pts = (identity_confidence + placement_confidence) / 2.0 * 0.3
+
+    return round(novelty_pts + quality_pts + conf_pts, 1)
