@@ -34,12 +34,16 @@ conda install -c bioconda kraken2 krakentools blast skani
 
 ## Core Documentation
 
+**Methods and Algorithms:**
+- **[METHODS.md](METHODS.md)** - Comprehensive scientific methods with all calculations (publication-ready)
+- **[ALGORITHM_DETAILED.md](ALGORITHM_DETAILED.md)** - Step-by-step algorithm walkthrough with examples
+- **[CLASSIFICATION_STATISTICS.md](CLASSIFICATION_STATISTICS.md)** - Statistical framework and literature references
+
 **Workflows and Usage:**
 - **[WORKFLOW.md](WORKFLOW.md)** - Workflow decisions and database strategies
 - **[USER_GUIDE.md](USER_GUIDE.md)** - Input formats, output interpretation, common workflows
 - **[CLI_REFERENCE.md](CLI_REFERENCE.md)** - Complete command-line reference
 - **[REFERENCE.md](REFERENCE.md)** - Algorithm overview and technical reference
-- **[ALGORITHM_DETAILED.md](ALGORITHM_DETAILED.md)** - Complete algorithm explanation with ANI/AAI decision tree
 - **[ALIGNMENT_OUTPUT_STATISTICS.md](ALIGNMENT_OUTPUT_STATISTICS.md)** - BLAST/MMseqs2 output statistics explained
 
 **Optimization and Troubleshooting:**
@@ -49,7 +53,6 @@ conda install -c bioconda kraken2 krakentools blast skani
 ## Advanced Topics
 
 - **[mmseqs2-integration.md](mmseqs2-integration.md)** - MMseqs2 for very large datasets (>100K reads)
-- **[CLASSIFICATION_STATISTICS.md](CLASSIFICATION_STATISTICS.md)** - Statistical framework and literature
 
 ## Technical Documentation
 
@@ -102,9 +105,11 @@ metadarkmatter score classify \
 
 **Placement Uncertainty (U)**: `100 - max(ANI between competing genomes)`
 - U < 2%: Clear placement
-- U > 2%: Conserved region (ambiguous)
+- U >= 5%: Conserved region (ambiguous)
 
 **Species-Level Tracking**: Use `--metadata genome_metadata.tsv` to track diversity by species/genus in classifications and reports.
+
+**For complete formulas and scientific documentation**, see **[METHODS.md](METHODS.md)**.
 
 ---
 
@@ -114,6 +119,11 @@ metadarkmatter score classify \
 docs/
 ├── README.md                          # This file - documentation index
 │
+├── Methods (Scientific)
+│   ├── METHODS.md                           # Comprehensive methods (publication-ready)
+│   ├── ALGORITHM_DETAILED.md                # Step-by-step algorithm walkthrough
+│   └── CLASSIFICATION_STATISTICS.md         # Statistical framework and literature
+│
 ├── Getting Started
 │   ├── TUTORIAL_ENVIRONMENTAL_SPECIES.md    # Hands-on tutorial (start here)
 │   ├── USER_GUIDE.md                        # Practical usage guide
@@ -122,14 +132,12 @@ docs/
 ├── Reference
 │   ├── CLI_REFERENCE.md                     # Complete command reference
 │   ├── REFERENCE.md                         # Algorithm overview
-│   ├── ALGORITHM_DETAILED.md                # Detailed algorithm with ANI/AAI decision tree
 │   ├── ALIGNMENT_OUTPUT_STATISTICS.md       # BLAST/MMseqs2 statistics explained
 │   ├── PERFORMANCE.md                       # Performance optimization
 │   └── TROUBLESHOOTING.md                   # Common issues
 │
 ├── Advanced
-│   ├── mmseqs2-integration.md               # MMseqs2 for large datasets
-│   └── CLASSIFICATION_STATISTICS.md         # Statistical framework
+│   └── mmseqs2-integration.md               # MMseqs2 for large datasets
 │
 └── Technical
     ├── ARCHITECTURE.md                      # System design

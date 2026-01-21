@@ -2,6 +2,8 @@
 
 Complete technical explanation of how metadarkmatter classifies reads using ANI-weighted placement uncertainty.
 
+**For comprehensive methods documentation with all calculations at scientific standard, see [METHODS.md](METHODS.md).**
+
 **For details on BLAST/MMseqs2 output statistics (pident, bitscore, evalue, etc.), see [ALIGNMENT_OUTPUT_STATISTICS.md](ALIGNMENT_OUTPUT_STATISTICS.md).**
 
 ## Overview

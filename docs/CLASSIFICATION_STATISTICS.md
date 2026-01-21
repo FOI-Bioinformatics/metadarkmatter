@@ -2,6 +2,8 @@
 
 This document describes the statistical metrics and classification thresholds used by metadarkmatter to distinguish novel bacterial diversity from known taxa in environmental DNA samples.
 
+**For comprehensive methods documentation with all calculations at scientific standard, see [METHODS.md](METHODS.md).**
+
 **For step-by-step algorithm explanation with ANI/AAI matrix usage, see [ALGORITHM_DETAILED.md](ALGORITHM_DETAILED.md).**
 
 ## Core Metrics

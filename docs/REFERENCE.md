@@ -169,7 +169,9 @@ metadarkmatter score classify \
 4. Calculate **Placement Uncertainty**: `U = 100 - max(ANI between competing genomes)`
 5. Classify based on thresholds (mode-dependent, literature-backed)
 
-**For complete algorithm details including ANI/AAI matrix usage and decision tree logic, see [ALGORITHM_DETAILED.md](ALGORITHM_DETAILED.md).**
+**For comprehensive methods documentation with all calculations at scientific standard, see [METHODS.md](METHODS.md).**
+
+**For step-by-step algorithm explanation with examples, see [ALGORITHM_DETAILED.md](ALGORITHM_DETAILED.md).**
 
 ### Nucleotide Mode Thresholds
 

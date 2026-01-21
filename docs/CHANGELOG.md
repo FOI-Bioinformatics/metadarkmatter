@@ -32,6 +32,13 @@ All notable changes to metadarkmatter are documented in this file.
 - Inferred uncertainty for single-hit reads
 - Alignment quality scoring
 
+**Scientific Methods Documentation**
+- New `docs/METHODS.md` with comprehensive documentation of all calculations
+- Publication-ready methods section covering classification algorithm, enhanced scoring, and novel diversity clustering
+- Complete formulas for Novelty Index, Placement Uncertainty, confidence scores, and discovery scores
+- Documentation of coverage weighting modes and protein mode thresholds
+- Updated all existing documentation to reference METHODS.md as authoritative source
+
 ### Changed
 
 **Report Tab Reorganization**
