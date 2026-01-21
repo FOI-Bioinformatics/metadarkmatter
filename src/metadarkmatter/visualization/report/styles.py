@@ -1115,6 +1115,48 @@ body {
 .filter-chip.novel-genus.active { background: var(--danger-color); border-color: var(--danger-color); }
 .filter-chip.ambiguous.active { background: var(--text-muted); border-color: var(--text-muted); }
 .filter-chip.conserved.active { background: var(--info-color); border-color: var(--info-color); }
+.filter-chip.range.active { background: var(--accent-color); border-color: var(--accent-color); }
+
+/* Filter Rows */
+.quick-filters {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    background: var(--bg-primary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-light);
+}
+
+.filter-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.filter-row .filter-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    min-width: 80px;
+}
+
+/* Truncation Notice */
+.truncation-notice {
+    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+    border: 1px solid #f59e0b;
+    border-radius: var(--radius-md);
+    padding: 0.75rem 1rem;
+    margin-bottom: 1rem;
+    font-size: 0.85rem;
+    color: #92400e;
+}
+
+.truncation-notice strong {
+    color: #78350f;
+}
 
 /* Column Guide */
 .column-guide {
@@ -1165,6 +1207,36 @@ body {
 
 .guide-desc {
     color: var(--text-secondary);
+}
+
+.guide-section {
+    margin-bottom: 1rem;
+}
+
+.guide-section:last-child {
+    margin-bottom: 0;
+}
+
+.guide-section h4 {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--accent-color);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.guide-section.enhanced-guide {
+    background: var(--bg-secondary);
+    padding: 0.75rem;
+    border-radius: var(--radius-sm);
+    margin-top: 0.5rem;
+}
+
+.guide-section.enhanced-guide h4 {
+    color: var(--warning-color);
 }
 
 /* Enhanced Table Controls */
@@ -1331,6 +1403,268 @@ body {
     .interp-label {
         min-width: auto;
     }
+
+    .metric-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .confidence-cards {
+        grid-template-columns: 1fr;
+    }
+
+    .type-cards {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Enhanced Scoring Section */
+.enhanced-scoring-summary {
+    background: var(--bg-primary);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border-light);
+}
+
+.enhanced-scoring-summary .summary-intro h3 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+}
+
+.enhanced-scoring-summary .intro-text {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-bottom: 1.5rem;
+}
+
+.metric-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+}
+
+.metric-box {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    text-align: center;
+}
+
+.metric-box.highlight {
+    background: linear-gradient(135deg, #667eea22 0%, #764ba222 100%);
+    border: 1px solid #667eea44;
+}
+
+.metric-box .metric-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 0.5rem;
+}
+
+.metric-box .metric-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--accent-color);
+    line-height: 1.2;
+}
+
+.metric-box .metric-detail {
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    margin-top: 0.25rem;
+}
+
+.metric-box .metric-note {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.5rem;
+    line-height: 1.4;
+}
+
+/* Confidence Dimensions */
+.confidence-dimensions {
+    background: var(--bg-primary);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border-light);
+}
+
+.confidence-dimensions h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+}
+
+.confidence-dimensions .section-intro {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 1.5rem;
+    line-height: 1.5;
+}
+
+.confidence-cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+}
+
+.confidence-card {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 1.25rem;
+    text-align: center;
+}
+
+.confidence-card .card-header {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.75rem;
+}
+
+.confidence-card .card-value {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: var(--accent-color);
+    line-height: 1;
+    margin-bottom: 0.75rem;
+}
+
+.confidence-card .card-desc {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+    margin-bottom: 0.75rem;
+}
+
+.confidence-card .card-scale {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border-light);
+}
+
+.confidence-card .card-scale .low { color: var(--danger-color); }
+.confidence-card .card-scale .mid { color: var(--warning-color); }
+.confidence-card .card-scale .high { color: var(--success-color); }
+
+/* Discovery Score Guide */
+.discovery-guide {
+    background: var(--bg-primary);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border-light);
+}
+
+.discovery-guide h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 1rem;
+}
+
+.guide-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.guide-table th,
+.guide-table td {
+    padding: 0.75rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.guide-table th {
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+}
+
+.guide-table tr.priority-high td { border-left: 4px solid var(--success-color); }
+.guide-table tr.priority-medium td { border-left: 4px solid var(--warning-color); }
+.guide-table tr.priority-low td { border-left: 4px solid #f59e0b66; }
+.guide-table tr.priority-uncertain td { border-left: 4px solid var(--text-muted); }
+
+/* Uncertainty Types */
+.uncertainty-types {
+    background: var(--bg-primary);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border-light);
+}
+
+.uncertainty-types h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 1rem;
+}
+
+.type-cards {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.type-card {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 1.25rem;
+}
+
+.type-card.measured {
+    border-left: 4px solid var(--success-color);
+}
+
+.type-card.inferred {
+    border-left: 4px solid var(--warning-color);
+}
+
+.type-card .type-header {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+}
+
+.type-card .type-count {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--accent-color);
+    margin-bottom: 0.5rem;
+}
+
+.type-card .type-desc {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.uncertainty-note {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    padding: 1rem;
+    border-radius: var(--radius-md);
+    line-height: 1.5;
 }
 
 /* Print styles */
@@ -2535,6 +2869,261 @@ body {
 # Utility Functions
 # =============================================================================
 
+# =============================================================================
+# Novel Diversity Section Styles
+# =============================================================================
+
+NOVEL_SECTION_CSS: str = """
+/* Novel Diversity Section Styles */
+.novel-summary {
+    margin-bottom: 2rem;
+}
+
+.novel-intro {
+    margin-bottom: 1.5rem;
+}
+
+.novel-intro h3 {
+    margin-bottom: 0.5rem;
+    color: var(--text-primary);
+}
+
+.novel-intro p {
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+.novel-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+}
+
+.novel-metric {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.25rem;
+    text-align: center;
+}
+
+.novel-metric.highlight {
+    border-color: var(--accent-color);
+    background: linear-gradient(135deg, var(--bg-primary), rgba(102, 126, 234, 0.1));
+}
+
+.novel-metric-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.novel-metric.species .novel-metric-value { color: #f59e0b; }
+.novel-metric.genus .novel-metric-value { color: #ef4444; }
+.novel-metric.confidence .novel-metric-value { color: #22c55e; }
+
+.novel-metric-label {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+}
+
+.novel-metric-hint {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+}
+
+/* Confidence Guide */
+.novel-confidence-guide {
+    margin: 1.5rem 0;
+    padding: 1rem;
+    background: var(--bg-primary);
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.novel-confidence-guide h4 {
+    margin-bottom: 1rem;
+    color: var(--text-primary);
+}
+
+.confidence-grid {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.confidence-item {
+    display: grid;
+    grid-template-columns: 80px 1fr 1fr;
+    gap: 1rem;
+    align-items: center;
+    padding: 0.5rem;
+    border-radius: 4px;
+}
+
+.confidence-item.high { background: rgba(34, 197, 94, 0.1); }
+.confidence-item.medium { background: rgba(245, 158, 11, 0.1); }
+.confidence-item.low { background: rgba(148, 163, 184, 0.1); }
+
+.conf-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+}
+
+.confidence-item.high .conf-badge { background: #22c55e; color: white; }
+.confidence-item.medium .conf-badge { background: #f59e0b; color: white; }
+.confidence-item.low .conf-badge { background: #94a3b8; color: white; }
+
+.conf-criteria {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.conf-action {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* Cluster Table */
+.novel-cluster-table {
+    margin: 1.5rem 0;
+}
+
+.novel-cluster-table h4 {
+    margin-bottom: 1rem;
+}
+
+.cluster-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+.cluster-table th {
+    text-align: left;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border-bottom: 2px solid var(--border-color);
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.cluster-table td {
+    padding: 0.75rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.cluster-row:hover {
+    background: rgba(102, 126, 234, 0.05);
+}
+
+.cluster-id {
+    font-family: monospace;
+    font-weight: 600;
+}
+
+.cluster-type.type-species { color: #f59e0b; }
+.cluster-type.type-genus { color: #ef4444; }
+
+.conf-tag {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.conf-tag.conf-high { background: #22c55e; color: white; }
+.conf-tag.conf-medium { background: #f59e0b; color: white; }
+.conf-tag.conf-low { background: #94a3b8; color: white; }
+
+.cluster-name {
+    font-style: italic;
+    color: var(--text-secondary);
+}
+
+/* Phylogenetic Context */
+.phylo-context {
+    margin: 1.5rem 0;
+}
+
+.phylo-intro {
+    color: var(--text-secondary);
+    margin-bottom: 1rem;
+}
+
+.phylo-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.phylo-item {
+    display: grid;
+    grid-template-columns: 80px 200px 1fr;
+    gap: 1rem;
+    padding: 0.75rem;
+    background: var(--bg-primary);
+    border-radius: 4px;
+    border-left: 3px solid;
+}
+
+.phylo-item.type-species { border-left-color: #f59e0b; }
+.phylo-item.type-genus { border-left-color: #ef4444; }
+
+.phylo-cluster {
+    font-family: monospace;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.phylo-name {
+    font-style: italic;
+    color: var(--text-secondary);
+}
+
+.phylo-placement {
+    color: var(--text-muted);
+}
+
+/* Empty state */
+.novel-empty {
+    text-align: center;
+    padding: 3rem;
+    color: var(--text-muted);
+}
+
+.novel-empty ul {
+    text-align: left;
+    display: inline-block;
+    margin-top: 1rem;
+}
+
+@media (max-width: 768px) {
+    .novel-metrics {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .confidence-item {
+        grid-template-columns: 1fr;
+        gap: 0.5rem;
+    }
+
+    .phylo-item {
+        grid-template-columns: 1fr;
+        gap: 0.25rem;
+    }
+}
+"""
+
+
 def get_css_styles(theme: str = "light") -> str:
     """
     Get CSS styles for specified theme.
@@ -2545,6 +3134,5 @@ def get_css_styles(theme: str = "light") -> str:
     Returns:
         CSS stylesheet string
     """
-    if theme.lower() == "dark":
-        return DARK_THEME
-    return LIGHT_THEME
+    base_theme = DARK_THEME if theme.lower() == "dark" else LIGHT_THEME
+    return base_theme + NOVEL_SECTION_CSS

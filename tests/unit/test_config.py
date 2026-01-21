@@ -136,6 +136,26 @@ class TestScoringConfig:
         with pytest.raises(ValidationError):
             ScoringConfig(uncertainty_known_max=-0.5)
 
+    def test_uncertainty_mode_default(self):
+        """Default uncertainty_mode should be 'second'."""
+        config = ScoringConfig()
+        assert config.uncertainty_mode == "second"
+
+    def test_uncertainty_mode_max(self):
+        """Should accept 'max' uncertainty mode."""
+        config = ScoringConfig(uncertainty_mode="max")
+        assert config.uncertainty_mode == "max"
+
+    def test_uncertainty_mode_second(self):
+        """Should accept 'second' uncertainty mode."""
+        config = ScoringConfig(uncertainty_mode="second")
+        assert config.uncertainty_mode == "second"
+
+    def test_uncertainty_mode_invalid_rejected(self):
+        """Invalid uncertainty_mode should be rejected."""
+        with pytest.raises(ValidationError):
+            ScoringConfig(uncertainty_mode="invalid")
+
 
 class TestBlastConfig:
     """Tests for BlastConfig model."""

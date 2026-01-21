@@ -36,7 +36,8 @@ class NoveltyHistogram(BasePlot):
         data: pl.DataFrame,
         config: PlotConfig | None = None,
         thresholds: ThresholdConfig | None = None,
-        nbins: int = 50,
+        nbins: int | None = None,
+        bin_size: float | None = None,
         show_thresholds: bool = True,
         title: str = "Novelty Index Distribution",
     ) -> None:
@@ -47,13 +48,15 @@ class NoveltyHistogram(BasePlot):
             data: DataFrame with 'novelty_index' column
             config: Plot configuration
             thresholds: Classification thresholds
-            nbins: Number of histogram bins
+            nbins: Number of histogram bins (ignored if bin_size is set)
+            bin_size: Explicit bin width (e.g., 1.0 for 1% bins, 0.5 for 0.5% bins)
             show_thresholds: Whether to show threshold lines
             title: Plot title
         """
         super().__init__(config, thresholds)
         self.data = data
-        self.nbins = nbins
+        self.nbins = nbins if nbins is not None else 50
+        self.bin_size = bin_size
         self.show_thresholds = show_thresholds
         self.title = title
 
@@ -63,17 +66,23 @@ class NoveltyHistogram(BasePlot):
 
         fig = go.Figure()
 
+        # Build histogram kwargs
+        hist_kwargs = {
+            "x": novelty_values,
+            "name": "Novelty Index",
+            "marker_color": "#667eea",
+            "opacity": 0.75,
+            "hovertemplate": "Novelty: %{x:.1f}<br>Count: %{y}<extra></extra>",
+        }
+
+        # Use explicit bin_size if provided, otherwise use nbins
+        if self.bin_size is not None:
+            hist_kwargs["xbins"] = {"size": self.bin_size}
+        else:
+            hist_kwargs["nbinsx"] = self.nbins
+
         # Main histogram
-        fig.add_trace(
-            go.Histogram(
-                x=novelty_values,
-                nbinsx=self.nbins,
-                name="Novelty Index",
-                marker_color="#667eea",
-                opacity=0.75,
-                hovertemplate="Novelty: %{x:.1f}<br>Count: %{y}<extra></extra>",
-            )
-        )
+        fig.add_trace(go.Histogram(**hist_kwargs))
 
         # Add threshold lines
         if self.show_thresholds:
@@ -139,7 +148,8 @@ class UncertaintyHistogram(BasePlot):
         data: pl.DataFrame,
         config: PlotConfig | None = None,
         thresholds: ThresholdConfig | None = None,
-        nbins: int = 50,
+        nbins: int | None = None,
+        bin_size: float | None = None,
         show_thresholds: bool = True,
         title: str = "Placement Uncertainty Distribution",
     ) -> None:
@@ -150,13 +160,15 @@ class UncertaintyHistogram(BasePlot):
             data: DataFrame with 'placement_uncertainty' column
             config: Plot configuration
             thresholds: Classification thresholds
-            nbins: Number of histogram bins
+            nbins: Number of histogram bins (ignored if bin_size is set)
+            bin_size: Explicit bin width (e.g., 1.0 for 1% bins, 0.5 for 0.5% bins)
             show_thresholds: Whether to show threshold lines
             title: Plot title
         """
         super().__init__(config, thresholds)
         self.data = data
-        self.nbins = nbins
+        self.nbins = nbins if nbins is not None else 50
+        self.bin_size = bin_size
         self.show_thresholds = show_thresholds
         self.title = title
 
@@ -166,17 +178,23 @@ class UncertaintyHistogram(BasePlot):
 
         fig = go.Figure()
 
+        # Build histogram kwargs
+        hist_kwargs = {
+            "x": uncertainty_values,
+            "name": "Placement Uncertainty",
+            "marker_color": "#764ba2",
+            "opacity": 0.75,
+            "hovertemplate": "Uncertainty: %{x:.1f}<br>Count: %{y}<extra></extra>",
+        }
+
+        # Use explicit bin_size if provided, otherwise use nbins
+        if self.bin_size is not None:
+            hist_kwargs["xbins"] = {"size": self.bin_size}
+        else:
+            hist_kwargs["nbinsx"] = self.nbins
+
         # Main histogram
-        fig.add_trace(
-            go.Histogram(
-                x=uncertainty_values,
-                nbinsx=self.nbins,
-                name="Placement Uncertainty",
-                marker_color="#764ba2",
-                opacity=0.75,
-                hovertemplate="Uncertainty: %{x:.1f}<br>Count: %{y}<extra></extra>",
-            )
-        )
+        fig.add_trace(go.Histogram(**hist_kwargs))
 
         # Add threshold lines
         if self.show_thresholds:

@@ -162,6 +162,44 @@ class ReadClassification(BaseModel):
             "Scores below 50 indicate borderline classifications."
         ),
     )
+    # Enhanced scoring fields (optional, enabled via --enhanced-scoring)
+    inferred_uncertainty: float | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description=(
+            "Inferred placement uncertainty for single-hit reads based on "
+            "novelty level. Only set when num_ambiguous_hits <= 1."
+        ),
+    )
+    uncertainty_type: str | None = Field(
+        default=None,
+        description="Source of uncertainty: 'measured' (from ANI) or 'inferred' (from novelty)",
+    )
+    alignment_quality: float | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Alignment quality score based on mismatch, gap, coverage, and evalue",
+    )
+    identity_confidence: float | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Confidence in the identity measurement itself",
+    )
+    placement_confidence: float | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Confidence in genome assignment, accounting for uncertainty source",
+    )
+    discovery_score: float | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Priority score for novel discoveries (null for non-novel)",
+    )
     taxonomic_call: TaxonomicCall = Field(description="Final classification")
 
     model_config = {"frozen": True}
@@ -183,7 +221,7 @@ class ReadClassification(BaseModel):
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for DataFrame creation."""
-        return {
+        result = {
             "read_id": self.read_id,
             "best_match_genome": self.best_match_genome,
             "top_hit_identity": self.top_hit_identity,
@@ -199,6 +237,20 @@ class ReadClassification(BaseModel):
             "diversity_status": self.diversity_status,
             "is_novel": self.is_novel,
         }
+        # Add enhanced scoring fields if they are set
+        if self.inferred_uncertainty is not None:
+            result["inferred_uncertainty"] = self.inferred_uncertainty
+        if self.uncertainty_type is not None:
+            result["uncertainty_type"] = self.uncertainty_type
+        if self.alignment_quality is not None:
+            result["alignment_quality"] = self.alignment_quality
+        if self.identity_confidence is not None:
+            result["identity_confidence"] = self.identity_confidence
+        if self.placement_confidence is not None:
+            result["placement_confidence"] = self.placement_confidence
+        if self.discovery_score is not None:
+            result["discovery_score"] = self.discovery_score
+        return result
 
 
 class TaxonomicSummary(BaseModel):

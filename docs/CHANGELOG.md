@@ -2,7 +2,61 @@
 
 All notable changes to metadarkmatter are documented in this file.
 
-## [Unreleased] - 2026-01-20
+## [Unreleased] - 2026-01-21
+
+### Added
+
+**Novel Diversity Analysis**
+- New `core/novel_diversity/` module for analyzing reads classified as Novel Species or Novel Genus
+- Clusters novel reads based on nearest reference genome and divergence level
+- Assigns confidence ratings (High/Medium/Low) based on read count, uncertainty, and discovery score
+- Generates suggested names for novel clusters (e.g., "Francisella sp. nov. NSP_001")
+- Provides phylogenetic context placement within family/genus hierarchy
+
+**Novel Diversity Tab in Reports**
+- New "Novel Diversity" tab appears when novel reads are detected
+- Summary metrics: total clusters, novel species/genus counts, high-confidence clusters
+- Cluster quality scatter plot showing novelty vs discovery score
+- Phylogenetic context sunburst chart for taxonomic hierarchy visualization
+- Phylogenetic Context Heatmap showing novel clusters alongside reference genomes
+- Unified "Novel Clusters" table with integrated phylogenetic placement information
+
+**Extended Matrix Builder**
+- New `extended_matrix_builder.py` for building similarity matrices that include novel clusters
+- Estimates ANI/AAI between novel clusters and reference genomes
+- Supports hierarchical clustering for visual grouping
+
+**Enhanced Scoring System**
+- Discovery scores for prioritizing novel taxa validation
+- Identity confidence and placement confidence metrics
+- Inferred uncertainty for single-hit reads
+- Alignment quality scoring
+
+### Changed
+
+**Report Tab Reorganization**
+- Reordered tabs for logical interpretation flow: Overview, Distributions, Species, Genomes, Novel Diversity, Reference ANI, Reference AAI, Discovery Scores, Recruitment, Data
+- Renamed "ANI Matrix" to "Reference ANI" for clarity
+- Renamed "AAI Matrix" to "Reference AAI" for clarity
+- Renamed "Enhanced Scoring" to "Discovery Scores" for clarity
+
+**Heatmap Improvements**
+- Phylogenetic Context Heatmap now uses dynamic width based on matrix size (1000/1200/1400px for <30/30-50/>50 entities)
+- Reference AAI heatmap scale changed from 40-75% to 40-100% for consistency with Novel Diversity AAI heatmap
+- Improved colorscale consistency across all AAI visualizations
+
+**Novel Diversity Table Consolidation**
+- Merged "Cluster Details" and "Phylogenetic Context" tables into single "Novel Clusters" table
+- New "Phylogenetic Placement" column combines suggested name, context narrative, and nearest reference
+- Reduced redundancy while preserving all information
+
+### Fixed
+
+- AAI heatmap scale inconsistency between Reference AAI and Novel Diversity tabs
+
+---
+
+## [Previous] - 2026-01-20
 
 ### Added
 

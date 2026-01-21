@@ -91,6 +91,11 @@ def generate_report(
         "--theme",
         help="Color theme: 'light' or 'dark'",
     ),
+    alignment_mode: str = typer.Option(
+        "nucleotide",
+        "--alignment-mode",
+        help="Alignment mode: 'nucleotide' (uses ANI) or 'protein' (uses AAI)",
+    ),
     max_scatter_points: int = typer.Option(
         50000,
         "--max-points",
@@ -102,6 +107,20 @@ def generate_report(
         "--max-table-rows",
         help="Maximum rows in data table (for file size)",
         min=100,
+    ),
+    max_phylo_clusters: int = typer.Option(
+        20,
+        "--max-phylo-clusters",
+        help="Maximum novel clusters in phylogenetic context heatmap",
+        min=5,
+        max=100,
+    ),
+    max_phylo_references: int = typer.Option(
+        50,
+        "--max-phylo-references",
+        help="Maximum reference genomes in phylogenetic context heatmap",
+        min=10,
+        max=200,
     ),
     verbose: bool = typer.Option(
         False,
@@ -286,8 +305,11 @@ def generate_report(
                 sample_name=sample_name,
                 title=title,
                 theme=theme,
+                alignment_mode=alignment_mode,
                 max_scatter_points=max_scatter_points,
                 max_table_rows=max_table_rows,
+                max_phylo_clusters=max_phylo_clusters,
+                max_phylo_references=max_phylo_references,
                 plot_config=PlotConfig(),
                 thresholds=ThresholdConfig(),
             )
@@ -484,3 +506,206 @@ def multi_sample_report(
     out.print(f"  - Total reads: {total_reads:,}")
     out.print(f"  - Theme: {theme}")
     out.print(f"\n[dim]Open in browser: file://{output.absolute()}[/dim]\n")
+
+
+@app.command(name="summarize")
+def summarize_novel_diversity(
+    classifications: Path = typer.Argument(
+        ...,
+        help="Classification results file (CSV or Parquet)",
+        exists=True,
+        dir_okay=False,
+    ),
+    output: Path = typer.Option(
+        ...,
+        "--output", "-o",
+        help="Output file path (TSV or JSON based on --format)",
+    ),
+    metadata: Path | None = typer.Option(
+        None,
+        "--metadata", "-m",
+        help="Genome metadata file (TSV) for species/genus/family lookups",
+        exists=True,
+        dir_okay=False,
+    ),
+    novelty_band_size: float = typer.Option(
+        5.0,
+        "--band-size", "-b",
+        help="Size of novelty bands in percent (default 5.0)",
+    ),
+    min_cluster_size: int = typer.Option(
+        3,
+        "--min-cluster-size", "-s",
+        help="Minimum reads to form a cluster (default 3)",
+    ),
+    output_format: str = typer.Option(
+        "tsv",
+        "--format", "-f",
+        help="Output format: 'tsv' or 'json'",
+    ),
+    json_output: Path | None = typer.Option(
+        None,
+        "--json", "-j",
+        help="Additional JSON output path with full metadata",
+    ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose", "-v",
+        help="Enable verbose output",
+    ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet", "-q",
+        help="Suppress progress output",
+    ),
+) -> None:
+    """
+    Summarize novel diversity into putative taxon clusters.
+
+    Groups reads classified as Novel Species or Novel Genus into clusters
+    based on their nearest reference genome and novelty level. This enables
+    identification of distinct novel organisms for further investigation.
+
+    Example:
+
+        # Basic summary (TSV output)
+        metadarkmatter report summarize classifications.csv \\
+            --output novel_summary.tsv \\
+            --metadata genome_metadata.tsv
+
+        # With JSON output for programmatic access
+        metadarkmatter report summarize classifications.csv \\
+            --output novel_summary.tsv \\
+            --json novel_summary.json \\
+            --metadata genome_metadata.tsv
+
+        # Custom clustering parameters
+        metadarkmatter report summarize classifications.csv \\
+            --output novel_summary.tsv \\
+            --band-size 10.0 \\
+            --min-cluster-size 5
+    """
+    import json
+
+    out = QuietConsole(console, quiet=quiet)
+
+    out.print("\n[bold blue]Novel Diversity Summary[/bold blue]\n")
+
+    # Validate format
+    if output_format not in ("tsv", "json"):
+        console.print(
+            f"[red]Error: Invalid format '{output_format}'. Use 'tsv' or 'json'.[/red]"
+        )
+        raise typer.Exit(code=1) from None
+
+    # Step 1: Load classification data
+    out.print("[bold]Step 1:[/bold] Loading classification data...")
+
+    with spinner_progress("Reading classifications...", console, quiet):
+        try:
+            df = read_dataframe(classifications)
+        except Exception as e:
+            console.print(f"[red]Error reading classifications: {e}[/red]")
+            raise typer.Exit(code=1) from None
+
+    out.print(f"  [green]Loaded {len(df):,} classifications[/green]")
+
+    # Count novel reads
+    novel_count = len(df.filter(
+        pl.col("taxonomic_call").is_in(["Novel Species", "Novel Genus"])
+    ))
+    out.print(f"  [dim]Novel reads: {novel_count:,}[/dim]")
+
+    if novel_count == 0:
+        console.print("[yellow]No novel reads found in classifications.[/yellow]")
+        raise typer.Exit(code=0) from None
+
+    # Step 2: Load metadata if provided
+    genome_metadata: GenomeMetadata | None = None
+    if metadata:
+        out.print("\n[bold]Step 2:[/bold] Loading genome metadata...")
+        try:
+            genome_metadata = GenomeMetadata.from_file(metadata)
+            out.print(
+                f"  [green]Loaded metadata for {genome_metadata.genome_count} genomes "
+                f"({genome_metadata.species_count} species)[/green]"
+            )
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not load metadata: {e}[/yellow]")
+
+    # Step 3: Cluster novel reads
+    out.print("\n[bold]Step 3:[/bold] Clustering novel reads...")
+
+    with spinner_progress("Analyzing novel diversity...", console, quiet):
+        try:
+            from metadarkmatter.core.novel_diversity import NovelDiversityAnalyzer
+
+            analyzer = NovelDiversityAnalyzer(
+                classifications=df,
+                metadata=genome_metadata,
+                novelty_band_size=novelty_band_size,
+                min_cluster_size=min_cluster_size,
+            )
+            clusters = analyzer.cluster_novel_reads()
+            summary = analyzer.get_summary()
+
+        except Exception as e:
+            console.print(f"[red]Error analyzing novel diversity: {e}[/red]")
+            if verbose:
+                console.print_exception()
+            raise typer.Exit(code=1) from None
+
+    out.print(f"  [green]Found {len(clusters)} clusters[/green]")
+
+    if len(clusters) == 0:
+        console.print(
+            f"[yellow]No clusters found with >= {min_cluster_size} reads.[/yellow]"
+        )
+        raise typer.Exit(code=0) from None
+
+    # Show summary
+    if verbose:
+        out.print(f"\n[bold]Cluster Summary:[/bold]")
+        out.print(f"  - Novel Species clusters: {summary.novel_species_clusters}")
+        out.print(f"  - Novel Genus clusters: {summary.novel_genus_clusters}")
+        out.print(f"  - High confidence: {summary.high_confidence_clusters}")
+        out.print(f"  - Medium confidence: {summary.medium_confidence_clusters}")
+        out.print(f"  - Low confidence: {summary.low_confidence_clusters}")
+
+    # Step 4: Write output
+    out.print("\n[bold]Step 4:[/bold] Writing output...")
+
+    # Ensure output directory exists
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if output_format == "tsv":
+            cluster_df = analyzer.to_dataframe()
+            cluster_df.write_csv(output, separator="\t")
+            out.print(f"  [green]Saved TSV to {output}[/green]")
+        else:
+            output_data = analyzer.to_dict()
+            output.write_text(json.dumps(output_data, indent=2))
+            out.print(f"  [green]Saved JSON to {output}[/green]")
+
+        # Write additional JSON if requested
+        if json_output:
+            json_output.parent.mkdir(parents=True, exist_ok=True)
+            output_data = analyzer.to_dict()
+            json_output.write_text(json.dumps(output_data, indent=2))
+            out.print(f"  [green]Saved full JSON to {json_output}[/green]")
+
+    except Exception as e:
+        console.print(f"[red]Error writing output: {e}[/red]")
+        raise typer.Exit(code=1) from None
+
+    # Summary
+    out.print("\n[bold green]Novel diversity summary complete![/bold green]")
+    out.print("\n[bold]Summary:[/bold]")
+    out.print(f"  - Total clusters: {len(clusters)}")
+    out.print(f"  - Novel Species: {summary.novel_species_clusters} clusters ({summary.novel_species_reads:,} reads)")
+    out.print(f"  - Novel Genus: {summary.novel_genus_clusters} clusters ({summary.novel_genus_reads:,} reads)")
+    out.print(f"  - High confidence: {summary.high_confidence_clusters}")
+    out.print(f"  - Genera with novel species: {summary.genera_with_novel_species}")
+    out.print(f"  - Families with novel genera: {summary.families_with_novel_genera}")
+    out.print(f"\n[dim]Output: {output}[/dim]\n")

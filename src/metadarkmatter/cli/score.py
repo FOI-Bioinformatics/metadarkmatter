@@ -449,6 +449,34 @@ def classify(
         min=0.0,
         max=1.0,
     ),
+    uncertainty_mode: str = typer.Option(
+        "second",
+        "--uncertainty-mode",
+        help=(
+            "Mode for calculating placement uncertainty: "
+            "'max' uses maximum ANI to any competing genome, "
+            "'second' uses ANI to the second-best genome only (default)."
+        ),
+    ),
+    enhanced_scoring: bool = typer.Option(
+        False,
+        "--enhanced-scoring",
+        help=(
+            "Enable enhanced scoring with alignment quality, orthogonal confidence "
+            "dimensions (identity_confidence, placement_confidence), and discovery_score "
+            "for prioritizing novel findings."
+        ),
+    ),
+    infer_single_hit_uncertainty: bool = typer.Option(
+        False,
+        "--infer-single-hit-uncertainty",
+        help=(
+            "Infer uncertainty for single-hit reads based on novelty level. Single-hit "
+            "reads (~70%% of environmental data) normally report 0%% uncertainty which "
+            "conflates 'no competing hits' with 'confident placement'. Adds "
+            "inferred_uncertainty and uncertainty_type columns."
+        ),
+    ),
     output_format: str = typer.Option(
         "csv",
         "--format",
@@ -661,6 +689,21 @@ def classify(
             "[dim]  Note: Ensure input is from BLASTX (DNA query vs protein DB)[/dim]"
         )
 
+    # Validate uncertainty mode
+    uncertainty_mode_lower = uncertainty_mode.lower()
+    if uncertainty_mode_lower not in ("max", "second"):
+        console.print(
+            f"[red]Error: Unknown uncertainty mode '{uncertainty_mode}'. "
+            f"Use 'max' or 'second'.[/red]"
+        )
+        raise typer.Exit(code=1) from None
+
+    # Log uncertainty mode if non-default
+    if uncertainty_mode_lower == "max":
+        out.print(
+            "[bold]Uncertainty mode: max[/bold] - using maximum ANI to any competing genome"
+        )
+
     # Initialize configuration (preset or custom options)
     if preset:
         preset_lower = preset.lower()
@@ -673,7 +716,7 @@ def classify(
         config = THRESHOLD_PRESETS[preset_lower]
         out.print(f"[dim]Using preset: {preset_lower}[/dim]")
         # Override bitscore threshold and alignment mode if explicitly provided
-        if bitscore_threshold != 95.0 or alignment_mode_lower != "nucleotide" or coverage_weight_mode != "none":
+        if bitscore_threshold != 95.0 or alignment_mode_lower != "nucleotide" or coverage_weight_mode != "none" or uncertainty_mode_lower != "second" or enhanced_scoring or infer_single_hit_uncertainty:
             config = ScoringConfig(
                 alignment_mode=alignment_mode_lower,
                 bitscore_threshold_pct=bitscore_threshold,
@@ -690,6 +733,9 @@ def classify(
                 min_alignment_fraction=config.min_alignment_fraction,
                 coverage_weight_mode=coverage_weight_mode,
                 coverage_weight_strength=coverage_weight_strength,
+                uncertainty_mode=uncertainty_mode_lower,
+                enhanced_scoring=enhanced_scoring,
+                infer_single_hit_uncertainty=infer_single_hit_uncertainty,
             )
     else:
         config = ScoringConfig(
@@ -699,6 +745,9 @@ def classify(
             min_alignment_fraction=min_alignment_fraction,
             coverage_weight_mode=coverage_weight_mode,
             coverage_weight_strength=coverage_weight_strength,
+            uncertainty_mode=uncertainty_mode_lower,
+            enhanced_scoring=enhanced_scoring,
+            infer_single_hit_uncertainty=infer_single_hit_uncertainty,
         )
 
     # Log alignment filter settings if non-default
@@ -706,6 +755,18 @@ def classify(
         out.print(
             f"[dim]Alignment filters: length >= {config.min_alignment_length}bp, "
             f"fraction >= {config.min_alignment_fraction:.0%}[/dim]"
+        )
+
+    # Log enhanced scoring settings
+    if config.enhanced_scoring:
+        out.print(
+            "[bold]Enhanced scoring enabled[/bold] - adds alignment_quality, "
+            "identity_confidence, placement_confidence, discovery_score"
+        )
+    if config.infer_single_hit_uncertainty:
+        out.print(
+            "[bold]Single-hit uncertainty inference enabled[/bold] - adds "
+            "inferred_uncertainty, uncertainty_type"
         )
 
     # Load ANI matrix
@@ -1101,6 +1162,15 @@ def batch(
         min=0.0,
         max=1.0,
     ),
+    uncertainty_mode: str = typer.Option(
+        "second",
+        "--uncertainty-mode",
+        help=(
+            "Mode for calculating placement uncertainty: "
+            "'max' uses maximum ANI to any competing genome, "
+            "'second' uses ANI to the second-best genome only (default)."
+        ),
+    ),
     output_format: str = typer.Option(
         "csv",
         "--format",
@@ -1262,6 +1332,20 @@ def batch(
             "[dim]  Note: Ensure input is from BLASTX (DNA query vs protein DB)[/dim]"
         )
 
+    # Validate uncertainty mode
+    uncertainty_mode_lower = uncertainty_mode.lower()
+    if uncertainty_mode_lower not in ("max", "second"):
+        console.print(
+            f"[red]Error: Unknown uncertainty mode '{uncertainty_mode}'. "
+            f"Use 'max' or 'second'.[/red]"
+        )
+        raise typer.Exit(code=1) from None
+
+    if uncertainty_mode_lower == "max":
+        console.print(
+            "[bold]Uncertainty mode: max[/bold] - using maximum ANI to any competing genome"
+        )
+
     # Initialize configuration (preset or custom options)
     if preset:
         preset_lower = preset.lower()
@@ -1273,8 +1357,8 @@ def batch(
             raise typer.Exit(code=1) from None
         config = THRESHOLD_PRESETS[preset_lower]
         console.print(f"[dim]Using preset: {preset_lower}[/dim]")
-        # Override with alignment mode if protein
-        if alignment_mode_lower != "nucleotide":
+        # Override with alignment mode if protein or non-default uncertainty mode
+        if alignment_mode_lower != "nucleotide" or uncertainty_mode_lower != "second":
             config = ScoringConfig(
                 alignment_mode=alignment_mode_lower,
                 bitscore_threshold_pct=config.bitscore_threshold_pct,
@@ -1289,6 +1373,7 @@ def batch(
                 uncertainty_conserved_min=config.uncertainty_conserved_min,
                 min_alignment_length=config.min_alignment_length,
                 min_alignment_fraction=config.min_alignment_fraction,
+                uncertainty_mode=uncertainty_mode_lower,
             )
     else:
         config = ScoringConfig(
@@ -1298,6 +1383,7 @@ def batch(
             min_alignment_fraction=min_alignment_fraction,
             coverage_weight_mode=coverage_weight_mode,
             coverage_weight_strength=coverage_weight_strength,
+            uncertainty_mode=uncertainty_mode_lower,
         )
 
     # Log alignment filter settings if non-default

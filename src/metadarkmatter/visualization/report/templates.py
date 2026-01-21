@@ -32,14 +32,7 @@ REPORT_BASE_TEMPLATE: str = '''<!DOCTYPE html>
     </header>
 
     <nav class="tab-navigation">
-        <button class="tab-btn active" onclick="showTab('overview')">Overview</button>
-        <button class="tab-btn" onclick="showTab('distributions')">Distributions</button>
-        <button class="tab-btn" onclick="showTab('recruitment')">Recruitment</button>
-        <button class="tab-btn" onclick="showTab('species')">Species</button>
-        <button class="tab-btn" onclick="showTab('genomes')">Genomes</button>
-        <button class="tab-btn" onclick="showTab('ani')">ANI Matrix</button>
-        <button class="tab-btn" onclick="showTab('aai')">AAI Matrix</button>
-        <button class="tab-btn" onclick="showTab('data')">Data</button>
+{navigation}
     </nav>
 
     <main class="report-content">
@@ -419,35 +412,95 @@ DATA_SUMMARY_TEMPLATE: str = '''
 
 DATA_QUICK_FILTERS_TEMPLATE: str = '''
 <div class="quick-filters">
-    <span class="filter-label">Quick filters:</span>
-    <button class="filter-chip all active" onclick="quickFilter('')">All</button>
-    <button class="filter-chip known" onclick="quickFilter('Known Species')">Known Species ({known_count})</button>
-    <button class="filter-chip novel-species" onclick="quickFilter('Novel Species')">Novel Species ({novel_species_count})</button>
-    <button class="filter-chip novel-genus" onclick="quickFilter('Novel Genus')">Novel Genus ({novel_genus_count})</button>
-    <button class="filter-chip ambiguous" onclick="quickFilter('Ambiguous')">Ambiguous ({ambiguous_count})</button>
-    <button class="filter-chip conserved" onclick="quickFilter('Conserved Region')">Conserved ({conserved_count})</button>
+    <div class="filter-row">
+        <span class="filter-label">Category:</span>
+        <button class="filter-chip active" data-filter="" onclick="quickFilter(this, '')">All</button>
+        <button class="filter-chip known" data-filter="Known Species" onclick="quickFilter(this, 'Known Species')">Known Species ({known_count})</button>
+        <button class="filter-chip novel-species" data-filter="Novel Species" onclick="quickFilter(this, 'Novel Species')">Novel Species ({novel_species_count})</button>
+        <button class="filter-chip novel-genus" data-filter="Novel Genus" onclick="quickFilter(this, 'Novel Genus')">Novel Genus ({novel_genus_count})</button>
+        <button class="filter-chip ambiguous" data-filter="Ambiguous" onclick="quickFilter(this, 'Ambiguous')">Ambiguous ({ambiguous_count})</button>
+        <button class="filter-chip conserved" data-filter="Conserved Region" onclick="quickFilter(this, 'Conserved Region')">Conserved ({conserved_count})</button>
+    </div>
+    <div class="filter-row">
+        <span class="filter-label">Novelty:</span>
+        <button class="filter-chip range" data-range="novelty" data-min="0" data-max="5" onclick="rangeFilter(this, 'novelty', 0, 5)">Low (0-5%)</button>
+        <button class="filter-chip range" data-range="novelty" data-min="5" data-max="20" onclick="rangeFilter(this, 'novelty', 5, 20)">Medium (5-20%)</button>
+        <button class="filter-chip range" data-range="novelty" data-min="20" data-max="100" onclick="rangeFilter(this, 'novelty', 20, 100)">High (>20%)</button>
+    </div>
+    <div class="filter-row">
+        <span class="filter-label">Uncertainty:</span>
+        <button class="filter-chip range" data-range="uncertainty" data-min="0" data-max="2" onclick="rangeFilter(this, 'uncertainty', 0, 2)">Confident (<2%)</button>
+        <button class="filter-chip range" data-range="uncertainty" data-min="2" data-max="5" onclick="rangeFilter(this, 'uncertainty', 2, 5)">Moderate (2-5%)</button>
+        <button class="filter-chip range" data-range="uncertainty" data-min="5" data-max="100" onclick="rangeFilter(this, 'uncertainty', 5, 100)">Ambiguous (>5%)</button>
+    </div>
+    <div class="filter-row">
+        <span class="filter-label">Hits:</span>
+        <button class="filter-chip range" data-range="hits" data-min="0" data-max="1" onclick="rangeFilter(this, 'hits', 0, 1)">Single-hit</button>
+        <button class="filter-chip range" data-range="hits" data-min="2" data-max="9999" onclick="rangeFilter(this, 'hits', 2, 9999)">Multi-hit</button>
+    </div>
 </div>
 '''
 
 DATA_COLUMN_GUIDE_TEMPLATE: str = '''
 <details class="column-guide">
-    <summary>Column Guide</summary>
+    <summary>Column Guide (click to expand)</summary>
     <div class="guide-content">
-        <div class="guide-item">
-            <span class="guide-col">Identity %</span>
-            <span class="guide-desc">Sequence similarity to best-matching reference (higher = more similar)</span>
+        <div class="guide-section">
+            <h4>Core Metrics</h4>
+            <div class="guide-item">
+                <span class="guide-col">Identity %</span>
+                <span class="guide-desc">Sequence similarity to best-matching reference genome (higher = more similar)</span>
+            </div>
+            <div class="guide-item">
+                <span class="guide-col">Novelty</span>
+                <span class="guide-desc">100 - Identity%. Higher values indicate more divergent sequences. <5% = known species, 5-20% = novel species, >20% = novel genus</span>
+            </div>
+            <div class="guide-item">
+                <span class="guide-col">Uncertainty</span>
+                <span class="guide-desc">{similarity_type}-based placement uncertainty. Low (<2%) = confident single placement, High (>5%) = ambiguous between multiple references</span>
+            </div>
+            <div class="guide-item">
+                <span class="guide-col">Ambig. Hits</span>
+                <span class="guide-desc">Number of reference genomes within bitscore threshold. 1 = unique placement, >1 = competing placements</span>
+            </div>
+            <div class="guide-item">
+                <span class="guide-col">Identity Gap</span>
+                <span class="guide-desc">Absolute difference in identity between best and second-best hit. Larger gaps indicate more confident placement</span>
+            </div>
         </div>
-        <div class="guide-item">
-            <span class="guide-col">Novelty</span>
-            <span class="guide-desc">100 - Identity%. Higher values suggest more divergent/novel sequences</span>
+        <div class="guide-section">
+            <h4>Classification</h4>
+            <div class="guide-item">
+                <span class="guide-col">Classification</span>
+                <span class="guide-desc">Taxonomic call: Known Species, Novel Species, Novel Genus, Ambiguous, or Conserved Region</span>
+            </div>
+            <div class="guide-item">
+                <span class="guide-col">Is Novel</span>
+                <span class="guide-desc">Yes if classified as Novel Species or Novel Genus</span>
+            </div>
         </div>
-        <div class="guide-item">
-            <span class="guide-col">Uncertainty</span>
-            <span class="guide-desc">ANI-based placement confidence. Low = confident, High = ambiguous between references</span>
-        </div>
-        <div class="guide-item">
-            <span class="guide-col">Classification</span>
-            <span class="guide-desc">Final taxonomic call based on novelty and uncertainty thresholds</span>
+        <div class="guide-section enhanced-guide" id="enhancedGuide" style="display:none;">
+            <h4>Enhanced Scoring</h4>
+            <div class="guide-item">
+                <span class="guide-col">Unc. Type</span>
+                <span class="guide-desc">"measured" = from {similarity_type} between competing hits, "inferred" = estimated from novelty for single-hit reads</span>
+            </div>
+            <div class="guide-item">
+                <span class="guide-col">Inferred Unc.</span>
+                <span class="guide-desc">Estimated uncertainty for single-hit reads based on novelty level (higher novelty = higher uncertainty)</span>
+            </div>
+            <div class="guide-item">
+                <span class="guide-col">Discovery Score</span>
+                <span class="guide-desc">Priority score (0-100) for novel reads. >=75 = high priority, 50-74 = moderate, <50 = low confidence</span>
+            </div>
+            <div class="guide-item">
+                <span class="guide-col">Identity Conf.</span>
+                <span class="guide-desc">Confidence in identity measurement (0-100). Based on novelty and alignment quality</span>
+            </div>
+            <div class="guide-item">
+                <span class="guide-col">Placement Conf.</span>
+                <span class="guide-desc">Confidence in genome assignment (0-100). Lower for inferred uncertainty</span>
+            </div>
         </div>
     </div>
 </details>
@@ -475,6 +528,12 @@ DATA_TABLE_TEMPLATE: str = '''
                         <label><input type="checkbox" data-col="8" onchange="toggleColumn(8)"> Identity Gap</label>
                         <label><input type="checkbox" data-col="9" onchange="toggleColumn(9)"> Is Novel</label>
                         <label><input type="checkbox" data-col="10" checked onchange="toggleColumn(10)"> Classification</label>
+                        <div class="menu-divider" id="enhancedColsDivider" style="display:none; border-top: 1px solid #ddd; margin: 0.5rem 0; padding-top: 0.5rem;"><em>Enhanced Scoring</em></div>
+                        <label id="colLabel11" style="display:none;"><input type="checkbox" data-col="11" onchange="toggleColumn(11)"> Unc. Type</label>
+                        <label id="colLabel12" style="display:none;"><input type="checkbox" data-col="12" onchange="toggleColumn(12)"> Inferred Unc.</label>
+                        <label id="colLabel13" style="display:none;"><input type="checkbox" data-col="13" onchange="toggleColumn(13)"> Discovery Score</label>
+                        <label id="colLabel14" style="display:none;"><input type="checkbox" data-col="14" onchange="toggleColumn(14)"> Identity Conf.</label>
+                        <label id="colLabel15" style="display:none;"><input type="checkbox" data-col="15" onchange="toggleColumn(15)"> Placement Conf.</label>
                     </div>
                 </div>
                 <button class="export-btn" onclick="exportTableTSV()">Export TSV</button>
@@ -500,6 +559,11 @@ DATA_TABLE_TEMPLATE: str = '''
                     <th data-col="8" onclick="sortTable(8)" style="display:none;">Identity Gap <span class="sort-icon">-</span></th>
                     <th data-col="9" onclick="sortTable(9)" style="display:none;">Is Novel <span class="sort-icon">-</span></th>
                     <th data-col="10" onclick="sortTable(10)">Classification <span class="sort-icon">-</span></th>
+                    <th data-col="11" onclick="sortTable(11)" style="display:none;">Unc. Type <span class="sort-icon">-</span></th>
+                    <th data-col="12" onclick="sortTable(12)" style="display:none;">Inferred Unc. <span class="sort-icon">-</span></th>
+                    <th data-col="13" onclick="sortTable(13)" style="display:none;">Discovery <span class="sort-icon">-</span></th>
+                    <th data-col="14" onclick="sortTable(14)" style="display:none;">Id. Conf. <span class="sort-icon">-</span></th>
+                    <th data-col="15" onclick="sortTable(15)" style="display:none;">Pl. Conf. <span class="sort-icon">-</span></th>
                 </tr>
             </thead>
             <tbody id="tableBody">
@@ -530,7 +594,180 @@ TABLE_ROW_TEMPLATE: str = '''<tr class="data-row" data-class="{classification}">
     <td data-col="8" style="display:none;">{identity_gap}</td>
     <td data-col="9" style="display:none;">{is_novel}</td>
     <td data-col="10" class="{cell_class}">{classification}</td>
+    <td data-col="11" style="display:none;">{uncertainty_type}</td>
+    <td data-col="12" style="display:none;">{inferred_uncertainty}</td>
+    <td data-col="13" style="display:none;">{discovery_score}</td>
+    <td data-col="14" style="display:none;">{identity_confidence}</td>
+    <td data-col="15" style="display:none;">{placement_confidence}</td>
 </tr>'''
+
+# =============================================================================
+# Enhanced Scoring Templates
+# =============================================================================
+
+ENHANCED_SCORING_SUMMARY_TEMPLATE: str = '''
+<div class="enhanced-scoring-summary">
+    <div class="summary-intro">
+        <h3>Enhanced Scoring Analysis</h3>
+        <p class="intro-text">
+            Enhanced scoring provides additional confidence metrics and helps identify
+            high-priority novel discoveries. This analysis includes inferred uncertainty
+            for single-hit reads and multi-dimensional confidence scores.
+        </p>
+    </div>
+
+    <div class="metric-grid">
+        <div class="metric-box">
+            <div class="metric-title">Single-Hit Reads</div>
+            <div class="metric-value">{single_hit_pct:.1f}%</div>
+            <div class="metric-detail">{single_hit_count:,} of {total_reads:,} reads</div>
+            <div class="metric-note">Reads with only one database hit - uncertainty is inferred from novelty level</div>
+        </div>
+
+        <div class="metric-box">
+            <div class="metric-title">Mean Inferred Uncertainty</div>
+            <div class="metric-value">{mean_inferred_uncertainty:.1f}%</div>
+            <div class="metric-detail">For single-hit reads</div>
+            <div class="metric-note">Estimated placement uncertainty when no competing hits exist</div>
+        </div>
+
+        <div class="metric-box highlight">
+            <div class="metric-title">High-Priority Discoveries</div>
+            <div class="metric-value">{high_priority_count:,}</div>
+            <div class="metric-detail">Discovery score >= 75</div>
+            <div class="metric-note">Novel reads with high confidence - prioritize for validation</div>
+        </div>
+
+        <div class="metric-box">
+            <div class="metric-title">Mean Discovery Score</div>
+            <div class="metric-value">{mean_discovery_score:.1f}</div>
+            <div class="metric-detail">For {novel_count:,} novel reads</div>
+            <div class="metric-note">Combined metric of novelty, alignment quality, and confidence</div>
+        </div>
+    </div>
+</div>
+'''
+
+ENHANCED_SCORING_CONFIDENCE_TEMPLATE: str = '''
+<div class="confidence-dimensions">
+    <h3>Confidence Dimensions</h3>
+    <p class="section-intro">
+        Enhanced scoring separates confidence into orthogonal dimensions:
+        <strong>identity confidence</strong> (how reliable is the identity measurement)
+        and <strong>placement confidence</strong> (how confident is the genome assignment).
+    </p>
+
+    <div class="confidence-cards">
+        <div class="confidence-card">
+            <div class="card-header">Identity Confidence</div>
+            <div class="card-value">{mean_identity_confidence:.1f}</div>
+            <div class="card-desc">
+                Higher values indicate more reliable identity measurements.
+                Based on novelty level and alignment quality.
+            </div>
+            <div class="card-scale">
+                <span class="low">Low (&lt;50)</span>
+                <span class="mid">Moderate (50-75)</span>
+                <span class="high">High (&gt;75)</span>
+            </div>
+        </div>
+
+        <div class="confidence-card">
+            <div class="card-header">Placement Confidence</div>
+            <div class="card-value">{mean_placement_confidence:.1f}</div>
+            <div class="card-desc">
+                Higher values indicate more confident genome assignments.
+                Penalized for inferred (unmeasured) uncertainty.
+            </div>
+            <div class="card-scale">
+                <span class="low">Low (&lt;40)</span>
+                <span class="mid">Moderate (40-70)</span>
+                <span class="high">High (&gt;70)</span>
+            </div>
+        </div>
+
+        <div class="confidence-card">
+            <div class="card-header">Alignment Quality</div>
+            <div class="card-value">{mean_alignment_quality:.1f}</div>
+            <div class="card-desc">
+                Composite score from mismatch rate, gap complexity,
+                coverage, and e-value significance.
+            </div>
+            <div class="card-scale">
+                <span class="low">Low (&lt;50)</span>
+                <span class="mid">Moderate (50-75)</span>
+                <span class="high">High (&gt;75)</span>
+            </div>
+        </div>
+    </div>
+</div>
+'''
+
+ENHANCED_SCORING_DISCOVERY_GUIDE_TEMPLATE: str = '''
+<div class="discovery-guide">
+    <h3>Discovery Score Interpretation</h3>
+    <table class="guide-table">
+        <thead>
+            <tr>
+                <th>Score Range</th>
+                <th>Interpretation</th>
+                <th>Recommended Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr class="priority-high">
+                <td><strong>75-100</strong></td>
+                <td>High-confidence discovery</td>
+                <td>Prioritize for experimental validation (PCR, sequencing)</td>
+            </tr>
+            <tr class="priority-medium">
+                <td><strong>50-74</strong></td>
+                <td>Moderate discovery signal</td>
+                <td>Include in candidate list, may need additional evidence</td>
+            </tr>
+            <tr class="priority-low">
+                <td><strong>25-49</strong></td>
+                <td>Low-confidence discovery</td>
+                <td>Needs more evidence - look for corroborating reads</td>
+            </tr>
+            <tr class="priority-uncertain">
+                <td><strong>&lt;25</strong></td>
+                <td>Unreliable signal</td>
+                <td>Likely artifact or database gap - do not prioritize</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+'''
+
+ENHANCED_SCORING_UNCERTAINTY_TYPES_TEMPLATE: str = '''
+<div class="uncertainty-types">
+    <h3>Understanding Uncertainty Types</h3>
+    <div class="type-cards">
+        <div class="type-card measured">
+            <div class="type-header">Measured Uncertainty</div>
+            <div class="type-count">{measured_count:,} reads ({measured_pct:.1f}%)</div>
+            <div class="type-desc">
+                Calculated from ANI between competing genome hits.
+                <strong>More reliable</strong> - based on actual data.
+            </div>
+        </div>
+        <div class="type-card inferred">
+            <div class="type-header">Inferred Uncertainty</div>
+            <div class="type-count">{inferred_count:,} reads ({inferred_pct:.1f}%)</div>
+            <div class="type-desc">
+                Estimated from novelty level for single-hit reads.
+                <strong>Less reliable</strong> - no competing hits to measure.
+            </div>
+        </div>
+    </div>
+    <p class="uncertainty-note">
+        <strong>Note:</strong> Single-hit reads (~{single_hit_pct:.0f}% of environmental data)
+        previously reported 0% uncertainty, which conflated "no competing hits" with
+        "confident placement". Inferred uncertainty provides a more honest estimate.
+    </p>
+</div>
+'''
 
 # =============================================================================
 # JavaScript
@@ -557,20 +794,31 @@ let filteredRows = [];
 let allRows = [];
 let currentClassFilter = '';
 let currentSearchFilter = '';
+let rangeFilters = {{}}; // {{novelty: {{min: 0, max: 5}}, uncertainty: {{min: 0, max: 2}}, hits: {{min: 0, max: 1}}}}
 
 // Column visibility state (stored in localStorage)
-const columnNames = ['read_id', 'best_match', 'species', 'genus', 'identity', 'novelty', 'uncertainty', 'ambiguous_hits', 'identity_gap', 'is_novel', 'classification'];
-let columnVisibility = [true, true, false, false, true, true, true, false, false, false, true];
+// Includes enhanced scoring columns (11-15): uncertainty_type, inferred_uncertainty, discovery_score, identity_confidence, placement_confidence
+const columnNames = ['read_id', 'best_match', 'species', 'genus', 'identity', 'novelty', 'uncertainty', 'ambiguous_hits', 'identity_gap', 'is_novel', 'classification', 'uncertainty_type', 'inferred_uncertainty', 'discovery_score', 'identity_confidence', 'placement_confidence'];
+let columnVisibility = [true, true, false, false, true, true, true, false, false, false, true, false, false, false, false, false];
+
+// Column indices for range filtering
+const COL_NOVELTY = 5;
+const COL_UNCERTAINTY = 6;
+const COL_AMBIG_HITS = 7;
 
 document.addEventListener('DOMContentLoaded', function() {{
     allRows = Array.from(document.querySelectorAll('.data-row'));
     filteredRows = [...allRows];
 
     // Load saved column visibility from localStorage
-    const saved = localStorage.getItem('mdm_column_visibility');
+    const saved = localStorage.getItem('mdm_column_visibility_v2');
     if (saved) {{
         try {{
-            columnVisibility = JSON.parse(saved);
+            const savedVis = JSON.parse(saved);
+            // Merge with defaults (in case new columns were added)
+            savedVis.forEach((visible, col) => {{
+                if (col < columnVisibility.length) columnVisibility[col] = visible;
+            }});
             // Apply saved visibility
             columnVisibility.forEach((visible, col) => {{
                 const checkbox = document.querySelector(`input[data-col="${{col}}"]`);
@@ -605,7 +853,7 @@ function toggleColumn(col) {{
     columnVisibility[col] = visible;
 
     // Save to localStorage
-    localStorage.setItem('mdm_column_visibility', JSON.stringify(columnVisibility));
+    localStorage.setItem('mdm_column_visibility_v2', JSON.stringify(columnVisibility));
 
     applyColumnVisibility(col, visible);
 }}
@@ -621,21 +869,33 @@ function applyColumnVisibility(col, visible) {{
     }});
 }}
 
-function quickFilter(classification) {{
+function quickFilter(element, classification) {{
     currentClassFilter = classification;
     currentSearchFilter = document.getElementById('tableSearch').value.toLowerCase();
 
-    // Update chip active states
-    document.querySelectorAll('.filter-chip').forEach(chip => chip.classList.remove('active'));
-    if (!classification) {{
-        document.querySelector('.filter-chip.all').classList.add('active');
+    // Update chip active states for category chips only
+    document.querySelectorAll('.filter-chip[data-filter]').forEach(chip => chip.classList.remove('active'));
+    if (element) element.classList.add('active');
+
+    applyFilters();
+}}
+
+function rangeFilter(element, rangeType, min, max) {{
+    // Toggle range filter
+    const key = rangeType;
+    const currentRange = rangeFilters[key];
+
+    // If clicking same filter, remove it; otherwise set new filter
+    if (currentRange && currentRange.min === min && currentRange.max === max) {{
+        delete rangeFilters[key];
+        element.classList.remove('active');
     }} else {{
-        // Find the chip that matches the classification
-        document.querySelectorAll('.filter-chip').forEach(chip => {{
-            if (chip.textContent.includes(classification.split(' ')[0])) {{
-                chip.classList.add('active');
-            }}
+        // Remove active from other chips in same range group
+        document.querySelectorAll(`.filter-chip[data-range="${{rangeType}}"]`).forEach(chip => {{
+            chip.classList.remove('active');
         }});
+        rangeFilters[key] = {{ min: min, max: max }};
+        element.classList.add('active');
     }}
 
     applyFilters();
@@ -646,13 +906,49 @@ function filterTable() {{
     applyFilters();
 }}
 
+function getRowValue(row, colIndex) {{
+    const cell = row.querySelector(`td[data-col="${{colIndex}}"]`);
+    if (!cell) return null;
+    const val = parseFloat(cell.textContent);
+    return isNaN(val) ? null : val;
+}}
+
 function applyFilters() {{
     filteredRows = allRows.filter(row => {{
         const text = row.textContent.toLowerCase();
         const rowClass = row.dataset.class;
+
+        // Text search filter
         const matchSearch = !currentSearchFilter || text.includes(currentSearchFilter);
+
+        // Classification filter (exact match)
         const matchClass = !currentClassFilter || rowClass === currentClassFilter;
-        return matchSearch && matchClass;
+
+        // Range filters
+        let matchRanges = true;
+
+        if (rangeFilters.novelty) {{
+            const novelty = getRowValue(row, COL_NOVELTY);
+            if (novelty !== null) {{
+                matchRanges = matchRanges && (novelty >= rangeFilters.novelty.min && novelty < rangeFilters.novelty.max);
+            }}
+        }}
+
+        if (rangeFilters.uncertainty) {{
+            const uncertainty = getRowValue(row, COL_UNCERTAINTY);
+            if (uncertainty !== null) {{
+                matchRanges = matchRanges && (uncertainty >= rangeFilters.uncertainty.min && uncertainty < rangeFilters.uncertainty.max);
+            }}
+        }}
+
+        if (rangeFilters.hits) {{
+            const hits = getRowValue(row, COL_AMBIG_HITS);
+            if (hits !== null) {{
+                matchRanges = matchRanges && (hits >= rangeFilters.hits.min && hits <= rangeFilters.hits.max);
+            }}
+        }}
+
+        return matchSearch && matchClass && matchRanges;
     }});
 
     currentPage = 1;
@@ -663,11 +959,14 @@ function applyFilters() {{
 function clearAllFilters() {{
     currentClassFilter = '';
     currentSearchFilter = '';
+    rangeFilters = {{}};
     document.getElementById('tableSearch').value = '';
 
-    // Reset chip active states
+    // Reset all chip active states
     document.querySelectorAll('.filter-chip').forEach(chip => chip.classList.remove('active'));
-    document.querySelector('.filter-chip.all').classList.add('active');
+    // Set "All" as active
+    const allChip = document.querySelector('.filter-chip[data-filter=""]');
+    if (allChip) allChip.classList.add('active');
 
     filteredRows = [...allRows];
     currentPage = 1;
@@ -683,7 +982,7 @@ function updateFilterStatus() {{
         resultsCount.textContent = filteredRows.length.toLocaleString();
     }}
 
-    const hasFilters = currentClassFilter || currentSearchFilter;
+    const hasFilters = currentClassFilter || currentSearchFilter || Object.keys(rangeFilters).length > 0;
     if (clearBtn) {{
         clearBtn.style.display = hasFilters ? 'inline-block' : 'none';
     }}

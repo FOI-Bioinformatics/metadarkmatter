@@ -14,7 +14,14 @@ from typing import TYPE_CHECKING
 import numpy as np
 import polars as pl
 
-from metadarkmatter.core.constants import calculate_confidence_score
+from metadarkmatter.core.constants import (
+    NOVELTY_KNOWN_MAX,
+    NOVELTY_NOVEL_GENUS_MIN,
+    NOVELTY_NOVEL_GENUS_MAX,
+    NOVELTY_NOVEL_SPECIES_MAX,
+    NOVELTY_NOVEL_SPECIES_MIN,
+    calculate_confidence_score,
+)
 from metadarkmatter.core.io_utils import write_dataframe, write_dataframe_append
 from metadarkmatter.core.parsers import extract_genome_name_expr
 from metadarkmatter.models.classification import TaxonomicCall, TAXONOMIC_TO_DIVERSITY
@@ -391,12 +398,31 @@ class VectorizedClassifier:
                 how="left",
             )
 
-            # Max ANI per read (for genome-level placement uncertainty)
+            # Max ANI per read (for genome-level placement uncertainty - "max" mode)
             max_ani_per_read = (
                 secondary_with_ani
                 .group_by("qseqid")
                 .agg(pl.col("ani").max().fill_null(0.0).alias("max_ani"))
             )
+
+            # Second genome ANI per read (for "second" mode)
+            # Get ANI to the genome with highest bitscore among secondaries
+            # Filter out same-genome hits (different contigs) since ANI lookup
+            # doesn't have diagonal entries
+            second_genome_ani_per_read = (
+                secondary_with_ani
+                .filter(pl.col("genome_name") != pl.col("best_genome"))
+                .sort(["qseqid", "bitscore"], descending=[False, True])
+                .group_by("qseqid")
+                .agg(pl.col("ani").first().fill_null(0.0).alias("second_genome_ani"))
+            )
+
+            # Join second_genome_ani to max_ani_per_read
+            max_ani_per_read = max_ani_per_read.join(
+                second_genome_ani_per_read, on="qseqid", how="left"
+            ).with_columns([
+                pl.col("second_genome_ani").fill_null(0.0),
+            ])
 
             # Step 5b: Calculate phylogenetic context metrics
             # Count secondary genomes and their ANI relationship to best genome
@@ -418,8 +444,10 @@ class VectorizedClassifier:
                 ])
             )
         else:
-            max_ani_per_read = pl.DataFrame({"qseqid": [], "max_ani": []}).cast({
-                "qseqid": pl.Utf8, "max_ani": pl.Float64
+            max_ani_per_read = pl.DataFrame({
+                "qseqid": [], "max_ani": [], "second_genome_ani": []
+            }).cast({
+                "qseqid": pl.Utf8, "max_ani": pl.Float64, "second_genome_ani": pl.Float64
             })
             phylo_metrics = pl.DataFrame({
                 "qseqid": [],
@@ -445,6 +473,7 @@ class VectorizedClassifier:
             .with_columns([
                 pl.col("num_ambiguous_hits").fill_null(1),
                 pl.col("max_ani").fill_null(0.0),
+                pl.col("second_genome_ani").fill_null(0.0),
                 pl.col("num_secondary_genomes").fill_null(0).cast(pl.Int64),
                 pl.col("same_genus_count").fill_null(0).cast(pl.Int64),
                 pl.col("same_species_count").fill_null(0).cast(pl.Int64),
@@ -474,12 +503,22 @@ class VectorizedClassifier:
             .then(pl.col("top_hit_identity") - pl.col("second_hit_identity"))
             .otherwise(pl.lit(None))
             .alias("identity_gap"),
-            # Placement uncertainty (genome-level)
+            # Placement uncertainty (genome-level) - mode depends on config
+            # "max" mode: uses maximum ANI to any competing genome
+            # "second" mode: uses ANI to the second-best genome only
             pl.when(pl.col("num_ambiguous_hits") <= 1)
             .then(0.0)
-            .when(pl.col("max_ani") == 0.0)
-            .then(100.0)
-            .otherwise(100.0 - pl.col("max_ani"))
+            .when(pl.lit(cfg.uncertainty_mode == "second"))
+            .then(
+                pl.when(pl.col("second_genome_ani") == 0.0)
+                .then(100.0)
+                .otherwise(100.0 - pl.col("second_genome_ani"))
+            )
+            .otherwise(  # "max" mode (default)
+                pl.when(pl.col("max_ani") == 0.0)
+                .then(100.0)
+                .otherwise(100.0 - pl.col("max_ani"))
+            )
             .alias("placement_uncertainty"),
             # Genus uncertainty: based on min ANI to secondary genomes
             # Low genus_uncertainty = all ambiguous hits in same genus
@@ -642,9 +681,93 @@ class VectorizedClassifier:
             (pl.col("confidence_score") < cfg.confidence_threshold).alias("low_confidence"),
         ])
 
+        # Enhanced scoring: inferred uncertainty for single-hit reads
+        if cfg.infer_single_hit_uncertainty or cfg.enhanced_scoring:
+            result = result.with_columns([
+                # Inferred uncertainty: estimate for single-hit reads based on novelty
+                pl.when(pl.col("num_ambiguous_hits") <= 1)
+                .then(
+                    pl.when(pl.col("novelty_index") < eff["novelty_known_max"])
+                    .then(5.0 + pl.col("novelty_index") * 0.5)  # 5-7.5%
+                    .when(pl.col("novelty_index") < eff["novelty_novel_species_max"])
+                    .then(7.5 + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)  # 7.5-17.5%
+                    .when(pl.col("novelty_index") < eff["novelty_novel_genus_max"])
+                    .then(17.5 + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)  # 17.5-25%
+                    .otherwise(35.0)  # Maximum uncertainty
+                )
+                .otherwise(pl.lit(None))
+                .alias("inferred_uncertainty"),
+                # Uncertainty type: measured (from ANI) or inferred (from novelty)
+                pl.when(pl.col("num_ambiguous_hits") <= 1)
+                .then(pl.lit("inferred"))
+                .otherwise(pl.lit("measured"))
+                .alias("uncertainty_type"),
+            ])
+
+        # Enhanced scoring: alignment quality and confidence dimensions
+        if cfg.enhanced_scoring:
+            result = result.with_columns([
+                # Alignment quality score (0-100) - simplified for vectorized operations
+                # Uses alignment_fraction as proxy since we don't have mismatch/gap in this context
+                (pl.col("alignment_fraction") * 50.0 + 25.0).clip(0.0, 100.0).round(1)
+                .alias("alignment_quality"),
+            ]).with_columns([
+                # Identity confidence: how reliable is the identity measurement
+                (
+                    pl.when(pl.col("novelty_index") < 5).then(80.0)
+                    .when(pl.col("novelty_index") < 15).then(60.0 - (pl.col("novelty_index") - 5))
+                    .when(pl.col("novelty_index") < 25).then(50.0 - (pl.col("novelty_index") - 15) * 1.5)
+                    .otherwise(30.0)
+                    + pl.col("alignment_quality") * 0.2
+                ).clip(0.0, 100.0).round(1).alias("identity_confidence"),
+            ]).with_columns([
+                # Placement confidence: how confident are we about genome assignment
+                # Uses effective uncertainty (inferred for single-hit, measured for multi-hit)
+                pl.when(pl.col("num_ambiguous_hits") <= 1)
+                .then(
+                    # For single-hit reads, use inferred uncertainty
+                    pl.when(pl.col("inferred_uncertainty") < 2).then(65.0)  # 80 - 15 penalty
+                    .when(pl.col("inferred_uncertainty") < 5).then(45.0)
+                    .when(pl.col("inferred_uncertainty") < 10).then(25.0)
+                    .when(pl.col("inferred_uncertainty") < 20).then(10.0)
+                    .otherwise(0.0)
+                )
+                .otherwise(
+                    # For multi-hit reads, use measured uncertainty with identity gap bonus
+                    pl.when(pl.col("placement_uncertainty") < 2).then(80.0)
+                    .when(pl.col("placement_uncertainty") < 5).then(60.0)
+                    .when(pl.col("placement_uncertainty") < 10).then(40.0)
+                    .when(pl.col("placement_uncertainty") < 20).then(25.0)
+                    .otherwise(10.0)
+                    + pl.when((pl.col("identity_gap").is_not_null()) & (pl.col("identity_gap") >= 5)).then(20.0)
+                    .when((pl.col("identity_gap").is_not_null()) & (pl.col("identity_gap") >= 2)).then(10.0)
+                    .when((pl.col("identity_gap").is_not_null()) & (pl.col("identity_gap") >= 1)).then(5.0)
+                    .otherwise(0.0)
+                )
+                .clip(0.0, 100.0).round(1).alias("placement_confidence"),
+            ]).with_columns([
+                # Discovery score: priority for novel discoveries (null for non-novel)
+                pl.when(pl.col("taxonomic_call") == "Novel Species")
+                .then(
+                    # Novelty component (15-30 pts) + quality (0-30) + confidence (0-30)
+                    (15.0 + (pl.col("novelty_index") - eff["novelty_novel_species_min"]) * 1.5).clip(15.0, 30.0)
+                    + pl.col("alignment_quality") * 0.3
+                    + (pl.col("identity_confidence") + pl.col("placement_confidence")) / 2.0 * 0.3
+                )
+                .when(pl.col("taxonomic_call") == "Novel Genus")
+                .then(
+                    # Novelty component (30-40 pts) + quality (0-30) + confidence (0-30)
+                    (30.0 + (pl.col("novelty_index") - eff["novelty_novel_genus_min"]) * 2.0).clip(30.0, 40.0)
+                    + pl.col("alignment_quality") * 0.3
+                    + (pl.col("identity_confidence") + pl.col("placement_confidence")) / 2.0 * 0.3
+                )
+                .otherwise(pl.lit(None))
+                .round(1).alias("discovery_score"),
+            ])
+
         # Select and rename final columns
         # Note: num_competing_genera removed (redundant with ambiguity_scope)
-        return result.select([
+        base_columns = [
             pl.col("qseqid").alias("read_id"),
             pl.col("best_genome").alias("best_match_genome"),
             "top_hit_identity",
@@ -660,7 +783,21 @@ class VectorizedClassifier:
             "diversity_status",
             "is_novel",
             "low_confidence",
-        ])
+        ]
+
+        # Add enhanced scoring columns if enabled
+        if cfg.infer_single_hit_uncertainty or cfg.enhanced_scoring:
+            base_columns.extend(["inferred_uncertainty", "uncertainty_type"])
+
+        if cfg.enhanced_scoring:
+            base_columns.extend([
+                "alignment_quality",
+                "identity_confidence",
+                "placement_confidence",
+                "discovery_score",
+            ])
+
+        return result.select(base_columns)
 
     def _empty_dataframe(self) -> pl.DataFrame:
         """Return empty DataFrame with correct schema."""
@@ -805,14 +942,32 @@ class VectorizedClassifier:
                 right_on=["genome1", "genome2"],
                 how="left",
             )
+            # Max ANI per read (for "max" mode)
             max_ani_per_read = (
                 secondary_with_ani
                 .group_by("qseqid")
                 .agg(pl.col("ani").max().fill_null(0.0).alias("max_ani"))
             )
+            # Second genome ANI per read (for "second" mode)
+            # Filter out same-genome hits (different contigs) since ANI lookup
+            # doesn't have diagonal entries
+            second_genome_ani_per_read = (
+                secondary_with_ani
+                .filter(pl.col("genome_name") != pl.col("best_genome"))
+                .sort(["qseqid", "bitscore"], descending=[False, True])
+                .group_by("qseqid")
+                .agg(pl.col("ani").first().fill_null(0.0).alias("second_genome_ani"))
+            )
+            max_ani_per_read = max_ani_per_read.join(
+                second_genome_ani_per_read, on="qseqid", how="left"
+            ).with_columns([
+                pl.col("second_genome_ani").fill_null(0.0),
+            ])
         else:
-            max_ani_per_read = pl.DataFrame({"qseqid": [], "max_ani": []}).cast({
-                "qseqid": pl.Utf8, "max_ani": pl.Float64
+            max_ani_per_read = pl.DataFrame({
+                "qseqid": [], "max_ani": [], "second_genome_ani": []
+            }).cast({
+                "qseqid": pl.Utf8, "max_ani": pl.Float64, "second_genome_ani": pl.Float64
             })
 
         # Step 6: Combine metrics
@@ -824,6 +979,7 @@ class VectorizedClassifier:
             .with_columns([
                 pl.col("num_ambiguous_hits").fill_null(1),
                 pl.col("max_ani").fill_null(0.0),
+                pl.col("second_genome_ani").fill_null(0.0),
                 pl.col("second_hit_identity"),
             ])
         )
@@ -831,6 +987,7 @@ class VectorizedClassifier:
         # Step 7: Calculate metrics and classify
         # Use effective thresholds for protein vs nucleotide mode
         eff = self._effective_thresholds
+        cfg = self.config
         result = (
             result
             .with_columns([
@@ -838,11 +995,20 @@ class VectorizedClassifier:
             ])
             .with_columns([
                 (100.0 - pl.col("top_hit_identity")).alias("novelty_index"),
+                # Placement uncertainty - mode depends on config
                 pl.when(pl.col("num_ambiguous_hits") <= 1)
                 .then(0.0)
-                .when(pl.col("max_ani") == 0.0)
-                .then(100.0)
-                .otherwise(100.0 - pl.col("max_ani"))
+                .when(pl.lit(cfg.uncertainty_mode == "second"))
+                .then(
+                    pl.when(pl.col("second_genome_ani") == 0.0)
+                    .then(100.0)
+                    .otherwise(100.0 - pl.col("second_genome_ani"))
+                )
+                .otherwise(  # "max" mode (default)
+                    pl.when(pl.col("max_ani") == 0.0)
+                    .then(100.0)
+                    .otherwise(100.0 - pl.col("max_ani"))
+                )
                 .alias("placement_uncertainty"),
                 # Identity gap: difference between best hit and second-best hit to DIFFERENT genome
                 pl.when(pl.col("second_hit_identity").is_not_null())
