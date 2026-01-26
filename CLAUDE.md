@@ -23,15 +23,23 @@ metadarkmatter download genomes fetch --accessions genomes.tsv --output-dir geno
 metadarkmatter kraken2 extract --kraken-output sample.kraken --reads-1 sample_R1.fastq.gz \
   --reads-2 sample_R2.fastq.gz --taxid 119060 --output extraction/
 
-# 3. Build BLAST database and align (accepts FASTQ directly)
+# 3. Compute ANI matrix
+metadarkmatter ani compute --genomes genomes/ --output ani_matrix.csv --threads 16
+
+# 4. Sequence alignment (choose ONE option)
+
+# Option A: BLAST (single-end only, best for <100K reads)
 metadarkmatter blast makedb --genomes genomes/ --output blastdb/pangenome
 metadarkmatter blast align --query extraction/reads_R1.fastq.gz --database blastdb/pangenome \
   --output sample.blast.tsv.gz --threads 16
 
-# 4. Compute ANI matrix
-metadarkmatter ani compute --genomes genomes/ --output ani_matrix.csv --threads 16
+# Option B: MMseqs2 (supports paired-end, best for >100K reads, 5-100x faster)
+metadarkmatter mmseqs2 makedb --genomes genomes/ --output mmseqs_db/pangenome
+metadarkmatter mmseqs2 search \
+  --query-1 extraction/reads_R1.fastq.gz --query-2 extraction/reads_R2.fastq.gz \
+  --database mmseqs_db/pangenome --output sample.mmseqs2.tsv.gz --threads 16
 
-# 5. Classify reads (core algorithm)
+# 5. Classify reads (core algorithm - works with either BLAST or MMseqs2 output)
 metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani_matrix.csv \
   --metadata genome_metadata.tsv --output classifications.csv --parallel
 
@@ -42,16 +50,27 @@ metadarkmatter report generate --classifications classifications.csv \
 
 ## Workflow Notes
 
-**BLAST Input Formats:**
-- BLAST accepts FASTQ, FASTA, or gzipped versions (.gz)
-- FASTQ files are automatically converted to FASTA (transparent to user)
-- No manual conversion with seqtk required
+**Alignment Tool Selection:**
 
-**MMseqs2 for Large Datasets:**
-- Available for datasets with >100,000 reads
-- For <10K reads: MMseqs2 is slower than BLAST (use BLAST)
-- For 100K-1M+ reads: MMseqs2 provides 5-15x speedup
-- See [Tutorial](docs/TUTORIAL_ENVIRONMENTAL_SPECIES.md) Step 7 for decision guide
+| Tool | Input Support | Best For | Speed |
+|------|---------------|----------|-------|
+| BLAST | Single-end only (`--query`) | <100K reads | Baseline |
+| MMseqs2 | Single-end or paired-end (`--query-1`, `--query-2`) | >100K reads | 5-100x faster |
+
+**BLAST:**
+- Accepts FASTQ, FASTA, or gzipped versions (.gz)
+- FASTQ files are automatically converted to FASTA (transparent to user)
+- Single-end input only (`--query`)
+- Recommended for smaller datasets where setup time matters
+
+**MMseqs2:**
+- Accepts FASTQ, FASTA, or gzipped versions (.gz)
+- Supports both single-end (`--query`) and paired-end (`--query-1`, `--query-2`)
+- For paired-end: reads are concatenated internally (standard MMseqs2 approach)
+- 5-100x faster than BLAST for large datasets
+- Recommended for >100K reads
+
+See [Tutorial](docs/TUTORIAL_ENVIRONMENTAL_SPECIES.md) Step 7 for detailed decision guide
 
 ## Documentation
 
