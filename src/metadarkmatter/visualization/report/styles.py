@@ -3123,6 +3123,367 @@ NOVEL_SECTION_CSS: str = """
 }
 """
 
+# =============================================================================
+# Methods Section CSS
+# =============================================================================
+
+METHODS_SECTION_CSS: str = """
+/* Methods Section Styles */
+.methods-section {
+    max-width: 900px;
+    margin: 0 auto;
+    line-height: 1.7;
+}
+
+.methods-intro {
+    background: var(--card-bg);
+    padding: 1.5rem;
+    border-radius: 8px;
+    margin-bottom: 2rem;
+    border-left: 4px solid var(--primary-color);
+}
+
+.methods-intro p {
+    margin: 0;
+    color: var(--text-secondary);
+}
+
+.methods-intro a {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.methods-intro a:hover {
+    text-decoration: underline;
+}
+
+.methods-toc {
+    background: var(--card-bg);
+    padding: 1.5rem;
+    border-radius: 8px;
+    margin-bottom: 2rem;
+}
+
+.methods-toc h3 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    font-size: 1.1rem;
+    color: var(--text-primary);
+}
+
+.methods-toc ol {
+    margin: 0;
+    padding-left: 1.5rem;
+}
+
+.methods-toc li {
+    margin-bottom: 0.5rem;
+}
+
+.methods-toc a {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.methods-toc a:hover {
+    text-decoration: underline;
+}
+
+.method-section {
+    background: var(--card-bg);
+    padding: 2rem;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+}
+
+.method-section h3 {
+    margin-top: 0;
+    margin-bottom: 1.5rem;
+    font-size: 1.3rem;
+    color: var(--text-primary);
+    border-bottom: 2px solid var(--primary-color);
+    padding-bottom: 0.5rem;
+}
+
+.method-section h4 {
+    margin-top: 1.5rem;
+    margin-bottom: 1rem;
+    font-size: 1.1rem;
+    color: var(--text-primary);
+}
+
+.method-section p {
+    color: var(--text-secondary);
+    margin-bottom: 1rem;
+}
+
+.method-section ul, .method-section ol {
+    color: var(--text-secondary);
+    margin-bottom: 1rem;
+    padding-left: 1.5rem;
+}
+
+.method-section li {
+    margin-bottom: 0.5rem;
+}
+
+.method-highlight {
+    background: rgba(var(--primary-rgb), 0.1);
+    border-left: 4px solid var(--primary-color);
+    padding: 1rem 1.5rem;
+    margin: 1.5rem 0;
+    border-radius: 0 8px 8px 0;
+}
+
+.method-highlight strong {
+    color: var(--primary-color);
+}
+
+/* Formula boxes */
+.formula-box {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin: 1.5rem 0;
+    text-align: center;
+}
+
+.formula-box .formula-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 1rem;
+    text-align: left;
+}
+
+.formula-box .formula {
+    font-family: 'Courier New', Consolas, monospace;
+    font-size: 1.1rem;
+    color: var(--text-primary);
+    margin: 0.75rem 0;
+    padding: 0.5rem;
+    background: var(--card-bg);
+    border-radius: 4px;
+    display: inline-block;
+}
+
+.formula-box .formula-legend {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    margin-top: 0.75rem;
+    font-style: italic;
+}
+
+.formula-box .formula-table {
+    width: 100%;
+    margin-top: 1rem;
+    text-align: left;
+}
+
+.formula-box .formula-table td {
+    padding: 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+    font-family: 'Courier New', Consolas, monospace;
+    font-size: 0.95rem;
+}
+
+.formula-box .formula-table td:first-child {
+    width: 30%;
+    color: var(--text-muted);
+}
+
+.formula-box .formula-table td:last-child {
+    color: var(--text-muted);
+    font-family: inherit;
+}
+
+/* Methods tables */
+.methods-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0 1.5rem 0;
+    font-size: 0.95rem;
+}
+
+.methods-table.small {
+    max-width: 300px;
+}
+
+.methods-table th {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-weight: 600;
+    text-align: left;
+    padding: 0.75rem 1rem;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.methods-table td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-secondary);
+}
+
+.methods-table tr:hover {
+    background: var(--bg-hover);
+}
+
+.methods-table .row-known { background: rgba(34, 197, 94, 0.1); }
+.methods-table .row-novel-species { background: rgba(234, 179, 8, 0.1); }
+.methods-table .row-novel-genus { background: rgba(249, 115, 22, 0.1); }
+.methods-table .row-unclassified { background: rgba(148, 163, 184, 0.1); }
+.methods-table .row-confident { background: rgba(34, 197, 94, 0.1); }
+.methods-table .row-boundary { background: rgba(234, 179, 8, 0.1); }
+.methods-table .row-conserved { background: rgba(59, 130, 246, 0.1); }
+
+.methods-table .priority-high { background: rgba(34, 197, 94, 0.15); }
+.methods-table .priority-medium { background: rgba(234, 179, 8, 0.15); }
+.methods-table .priority-low { background: rgba(249, 115, 22, 0.15); }
+.methods-table .priority-uncertain { background: rgba(239, 68, 68, 0.15); }
+
+.methods-note {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    font-style: italic;
+    margin-top: 1rem;
+}
+
+/* Decision tree visualization */
+.decision-tree {
+    font-family: 'Courier New', Consolas, monospace;
+    padding: 1.5rem;
+    background: var(--bg-primary);
+    border-radius: 8px;
+    margin: 1.5rem 0;
+    line-height: 1.8;
+}
+
+.tree-node {
+    padding: 0.5rem 1rem;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    display: inline-block;
+    margin: 0.25rem 0;
+}
+
+.tree-node.start {
+    background: var(--primary-color);
+    color: white;
+    border-color: var(--primary-color);
+}
+
+.tree-node.result {
+    font-weight: 600;
+}
+
+.tree-arrow {
+    color: var(--text-muted);
+    margin: 0.25rem 0;
+    padding-left: 2rem;
+}
+
+.tree-branch {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.25rem 0;
+}
+
+.tree-condition {
+    padding: 0.5rem 1rem;
+    background: var(--bg-secondary);
+    border: 1px dashed var(--border-color);
+    border-radius: 4px;
+}
+
+.tree-yes {
+    color: var(--text-muted);
+}
+
+/* Category badges in decision tree */
+.cat-known { color: #22c55e; font-weight: 600; }
+.cat-novel-species { color: #eab308; font-weight: 600; }
+.cat-novel-genus { color: #f97316; font-weight: 600; }
+.cat-boundary { color: #3b82f6; font-weight: 600; }
+.cat-ambiguous { color: #6b7280; font-weight: 600; }
+.cat-unclassified { color: #94a3b8; font-weight: 600; }
+
+/* References list */
+.references-list {
+    padding-left: 1.5rem;
+}
+
+.references-list li {
+    margin-bottom: 1rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+.references-list strong {
+    color: var(--text-primary);
+}
+
+.references-list em {
+    color: var(--text-secondary);
+}
+
+.references-list a {
+    color: var(--primary-color);
+    text-decoration: none;
+    font-size: 0.9rem;
+}
+
+.references-list a:hover {
+    text-decoration: underline;
+}
+
+/* Code styling in methods */
+.method-section code {
+    font-family: 'Courier New', Consolas, monospace;
+    background: var(--bg-primary);
+    padding: 0.2rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.9rem;
+    color: var(--primary-color);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .method-section {
+        padding: 1.5rem;
+    }
+
+    .formula-box {
+        padding: 1rem;
+        overflow-x: auto;
+    }
+
+    .formula-box .formula {
+        font-size: 0.95rem;
+    }
+
+    .decision-tree {
+        font-size: 0.85rem;
+        overflow-x: auto;
+    }
+
+    .tree-branch {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .methods-table {
+        font-size: 0.85rem;
+    }
+
+    .methods-table th,
+    .methods-table td {
+        padding: 0.5rem;
+    }
+}
+"""
+
 
 def get_css_styles(theme: str = "light") -> str:
     """
@@ -3135,4 +3496,4 @@ def get_css_styles(theme: str = "light") -> str:
         CSS stylesheet string
     """
     base_theme = DARK_THEME if theme.lower() == "dark" else LIGHT_THEME
-    return base_theme + NOVEL_SECTION_CSS
+    return base_theme + NOVEL_SECTION_CSS + METHODS_SECTION_CSS

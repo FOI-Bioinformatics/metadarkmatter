@@ -265,6 +265,31 @@ class ScoringConfig(BaseModel):
         ),
     )
 
+    # Single-hit classification options
+    # These options use inferred uncertainty to gate classification decisions
+    # for reads with only one BLAST hit (no competing genomes to measure ANI)
+    use_inferred_for_single_hits: bool = Field(
+        default=False,
+        description=(
+            "Use inferred uncertainty for single-hit reads in classification decisions. "
+            "When enabled, single-hit reads in the Novel Species/Genus range with high "
+            "inferred uncertainty are reclassified as Ambiguous. This addresses the ~70% "
+            "of environmental reads that have only one hit and would otherwise be classified "
+            "with apparent confidence. Default False for backward compatibility."
+        ),
+    )
+    single_hit_uncertainty_threshold: float = Field(
+        default=10.0,
+        ge=0,
+        le=100,
+        description=(
+            "Inferred uncertainty threshold above which single-hit reads are flagged "
+            "as Ambiguous (only applies when use_inferred_for_single_hits=True). "
+            "Default 10% means reads with novelty ~7% or higher become Ambiguous. "
+            "Lower values are stricter, higher values are more permissive."
+        ),
+    )
+
     # AAI (Average Amino Acid Identity) thresholds for genus-level classification
     # Based on Riesco & Trujillo 2024: 58-65% AAI genus boundary
     # AAI is more reliable than ANI for genus-level decisions because

@@ -641,6 +641,25 @@ class VectorizedClassifier:
                 & (pl.col("placement_uncertainty") < eff["uncertainty_known_max"])
             )
             .then(pl.lit("Known Species"))
+            # Rule 0b: Single-hit inferred uncertainty check (when enabled)
+            # For single-hit reads with high inferred uncertainty, flag as Ambiguous
+            .when(
+                (pl.lit(cfg.use_inferred_for_single_hits))
+                & (pl.col("num_ambiguous_hits") <= 1)
+                & (pl.col("novelty_index") >= eff["novelty_novel_species_min"])
+                # Inferred uncertainty formula: higher novelty = higher uncertainty
+                & (
+                    pl.when(pl.col("novelty_index") < eff["novelty_known_max"])
+                    .then(5.0 + pl.col("novelty_index") * 0.5)
+                    .when(pl.col("novelty_index") < eff["novelty_novel_species_max"])
+                    .then(7.5 + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)
+                    .when(pl.col("novelty_index") < eff["novelty_novel_genus_max"])
+                    .then(17.5 + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)
+                    .otherwise(35.0)
+                    >= pl.lit(cfg.single_hit_uncertainty_threshold)
+                )
+            )
+            .then(pl.lit("Ambiguous"))
             .when(
                 (pl.col("novelty_index") >= eff["novelty_novel_species_min"])
                 & (pl.col("novelty_index") < eff["novelty_novel_species_max"])
@@ -1029,6 +1048,23 @@ class VectorizedClassifier:
                     & (pl.col("placement_uncertainty") < eff["uncertainty_known_max"])
                 )
                 .then(pl.lit("Known Species"))
+                # Rule 0b: Single-hit inferred uncertainty check (when enabled)
+                .when(
+                    (pl.lit(cfg.use_inferred_for_single_hits))
+                    & (pl.col("num_ambiguous_hits") <= 1)
+                    & (pl.col("novelty_index") >= eff["novelty_novel_species_min"])
+                    & (
+                        pl.when(pl.col("novelty_index") < eff["novelty_known_max"])
+                        .then(5.0 + pl.col("novelty_index") * 0.5)
+                        .when(pl.col("novelty_index") < eff["novelty_novel_species_max"])
+                        .then(7.5 + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)
+                        .when(pl.col("novelty_index") < eff["novelty_novel_genus_max"])
+                        .then(17.5 + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)
+                        .otherwise(35.0)
+                        >= pl.lit(cfg.single_hit_uncertainty_threshold)
+                    )
+                )
+                .then(pl.lit("Ambiguous"))
                 .when(
                     (pl.col("novelty_index") >= eff["novelty_novel_species_min"])
                     & (pl.col("novelty_index") < eff["novelty_novel_species_max"])

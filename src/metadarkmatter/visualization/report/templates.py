@@ -1105,6 +1105,403 @@ RECRUITMENT_NOT_PROVIDED_MESSAGE: str = (
     "BAM file not provided. Use --bam option to include recruitment plot."
 )
 
+# =============================================================================
+# Methods Section Template
+# =============================================================================
+
+METHODS_SECTION_TEMPLATE: str = '''
+<div class="methods-section">
+    <div class="methods-intro">
+        <p>This section describes the computational methods used for classifying metagenomic reads.
+        All calculations are presented with their mathematical formulations and biological interpretations.
+        For complete technical details, see the
+        <a href="https://github.com/FOI-Bioinformatics/metadarkmatter/blob/main/docs/METHODS.md" target="_blank">full methods documentation</a>.</p>
+    </div>
+
+    <div class="methods-toc">
+        <h3>Contents</h3>
+        <ol>
+            <li><a href="#methods-overview">Algorithm Overview</a></li>
+            <li><a href="#methods-novelty">Novelty Index</a></li>
+            <li><a href="#methods-uncertainty">Placement Uncertainty</a></li>
+            <li><a href="#methods-decision">Classification Decision Tree</a></li>
+            <li><a href="#methods-confidence">Confidence Score</a></li>
+            <li><a href="#methods-inferred">Inferred Uncertainty</a></li>
+            <li><a href="#methods-thresholds">Threshold Summary</a></li>
+            <li><a href="#methods-references">References</a></li>
+        </ol>
+    </div>
+
+    <div class="methods-content">
+
+        <section id="methods-overview" class="method-section">
+            <h3>1. Algorithm Overview</h3>
+            <p>metadarkmatter classifies metagenomic reads by combining sequence alignment scores with
+            pre-computed genome similarity matrices. The core innovation is <strong>ANI-weighted placement
+            uncertainty</strong>, which distinguishes confident identification of novel taxa from ambiguous
+            placement within known taxa.</p>
+
+            <div class="method-highlight">
+                <strong>Key insight:</strong> A read aligning to multiple reference genomes with similar
+                scores could indicate either: (1) a conserved gene shared across genera, or (2) a read
+                from a species closely related to multiple references. ANI between competing genomes
+                resolves this ambiguity.
+            </div>
+
+            <h4>Input Data</h4>
+            <ul>
+                <li><strong>Alignment results</strong> - BLAST or MMseqs2 tabular output</li>
+                <li><strong>ANI matrix</strong> - Pre-computed Average Nucleotide Identity between reference genomes</li>
+                <li><strong>AAI matrix</strong> (optional) - Average Amino Acid Identity for protein-level analysis</li>
+            </ul>
+        </section>
+
+        <section id="methods-novelty" class="method-section">
+            <h3>2. Novelty Index (N)</h3>
+            <p>The Novelty Index quantifies sequence divergence from the closest reference genome.</p>
+
+            <div class="formula-box">
+                <div class="formula">N = 100 - pident<sub>top</sub></div>
+                <div class="formula-legend">
+                    where pident<sub>top</sub> = percent identity of the best BLAST hit (highest bitscore)
+                </div>
+            </div>
+
+            <table class="methods-table">
+                <thead>
+                    <tr>
+                        <th>Novelty Index</th>
+                        <th>BLAST Identity</th>
+                        <th>Biological Interpretation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="row-known">
+                        <td>N &lt; 5%</td>
+                        <td>pident &gt; 95%</td>
+                        <td>At or above species boundary</td>
+                    </tr>
+                    <tr class="row-novel-species">
+                        <td>5% &le; N &lt; 20%</td>
+                        <td>80% &lt; pident &le; 95%</td>
+                        <td>Below species boundary (novel species candidate)</td>
+                    </tr>
+                    <tr class="row-novel-genus">
+                        <td>20% &le; N &le; 25%</td>
+                        <td>75% &le; pident &le; 80%</td>
+                        <td>Genus-level divergence (novel genus candidate)</td>
+                    </tr>
+                    <tr class="row-unclassified">
+                        <td>N &gt; 25%</td>
+                        <td>pident &lt; 75%</td>
+                        <td>Very high divergence</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <p class="methods-note"><strong>Note:</strong> Read-level BLAST identity can be 10-20% lower
+            than genome-level ANI due to partial alignments. The 20% threshold for novel genus accounts
+            for this systematic offset.</p>
+        </section>
+
+        <section id="methods-uncertainty" class="method-section">
+            <h3>3. Placement Uncertainty (U)</h3>
+            <p>Placement Uncertainty measures classification ambiguity when a read aligns to multiple
+            reference genomes with similar scores.</p>
+
+            <h4>Step 1: Identify competing hits</h4>
+            <div class="formula-box">
+                <div class="formula">threshold = 0.95 &times; bitscore<sub>top</sub></div>
+                <div class="formula">ambiguous_hits = {hit : hit.bitscore &ge; threshold}</div>
+                <div class="formula">competing_genomes = unique genomes from ambiguous_hits</div>
+            </div>
+
+            <h4>Step 2: Calculate uncertainty from ANI</h4>
+            <div class="formula-box">
+                <div class="formula">
+                    U = 100 - max(ANI(G<sub>top</sub>, G<sub>i</sub>)) for all G<sub>i</sub> in secondary_genomes
+                </div>
+                <div class="formula-legend">
+                    where G<sub>top</sub> = genome with highest bitscore hit
+                </div>
+            </div>
+
+            <table class="methods-table">
+                <thead>
+                    <tr>
+                        <th>Uncertainty</th>
+                        <th>ANI Between Competitors</th>
+                        <th>Biological Interpretation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="row-confident">
+                        <td>U &lt; 2%</td>
+                        <td>ANI &gt; 98%</td>
+                        <td>Same species (confident placement)</td>
+                    </tr>
+                    <tr class="row-boundary">
+                        <td>2% &le; U &lt; 5%</td>
+                        <td>95% &lt; ANI &le; 98%</td>
+                        <td>Species boundary zone (ambiguous)</td>
+                    </tr>
+                    <tr class="row-conserved">
+                        <td>U &ge; 5%</td>
+                        <td>ANI &le; 95%</td>
+                        <td>Different species (conserved gene region)</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="method-highlight">
+                <strong>Biological rationale:</strong> When competing genomes share high ANI (&gt;98%),
+                they represent the same species and placement ambiguity reflects strain-level variation.
+                When competing genomes share low ANI (&lt;95%), the read likely originates from a
+                conserved gene present across multiple species.
+            </div>
+        </section>
+
+        <section id="methods-decision" class="method-section">
+            <h3>4. Classification Decision Tree</h3>
+            <p>Classification follows a hierarchical decision tree where uncertainty takes priority over novelty:</p>
+
+            <div class="decision-tree">
+                <div class="tree-node start">Read with BLAST hits</div>
+                <div class="tree-arrow">&darr;</div>
+                <div class="tree-node">Calculate N and U</div>
+                <div class="tree-arrow">&darr;</div>
+                <div class="tree-branch">
+                    <div class="tree-condition">U &ge; 5%?</div>
+                    <div class="tree-yes">&rarr; YES &rarr; <span class="cat-ambiguous">AMBIGUOUS</span></div>
+                </div>
+                <div class="tree-arrow">&darr; NO</div>
+                <div class="tree-branch">
+                    <div class="tree-condition">2% &le; U &lt; 5%?</div>
+                    <div class="tree-yes">&rarr; YES &rarr; <span class="cat-boundary">SPECIES BOUNDARY</span></div>
+                </div>
+                <div class="tree-arrow">&darr; NO (U &lt; 2%)</div>
+                <div class="tree-branch">
+                    <div class="tree-condition">N &lt; 5%?</div>
+                    <div class="tree-yes">&rarr; YES &rarr; <span class="cat-known">KNOWN SPECIES</span></div>
+                </div>
+                <div class="tree-arrow">&darr; NO</div>
+                <div class="tree-branch">
+                    <div class="tree-condition">5% &le; N &lt; 20%?</div>
+                    <div class="tree-yes">&rarr; YES &rarr; <span class="cat-novel-species">NOVEL SPECIES</span></div>
+                </div>
+                <div class="tree-arrow">&darr; NO</div>
+                <div class="tree-branch">
+                    <div class="tree-condition">20% &le; N &le; 25%?</div>
+                    <div class="tree-yes">&rarr; YES &rarr; <span class="cat-novel-genus">NOVEL GENUS</span></div>
+                </div>
+                <div class="tree-arrow">&darr; NO</div>
+                <div class="tree-node result"><span class="cat-unclassified">UNCLASSIFIED</span></div>
+            </div>
+
+            <h4>Classification Categories Summary</h4>
+            <table class="methods-table">
+                <thead>
+                    <tr>
+                        <th>Category</th>
+                        <th>Criteria</th>
+                        <th>Biological Interpretation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><span class="cat-known">Known Species</span></td>
+                        <td>N &lt; 5% AND U &lt; 2%</td>
+                        <td>Matches characterized species</td>
+                    </tr>
+                    <tr>
+                        <td><span class="cat-novel-species">Novel Species</span></td>
+                        <td>5% &le; N &lt; 20% AND U &lt; 2%</td>
+                        <td>Significant divergence, confident placement</td>
+                    </tr>
+                    <tr>
+                        <td><span class="cat-novel-genus">Novel Genus</span></td>
+                        <td>20% &le; N &le; 25% AND U &lt; 2%</td>
+                        <td>Genus-level divergence, confident placement</td>
+                    </tr>
+                    <tr>
+                        <td><span class="cat-boundary">Species Boundary</span></td>
+                        <td>2% &le; U &lt; 5%</td>
+                        <td>Matches multiple closely related species</td>
+                    </tr>
+                    <tr>
+                        <td><span class="cat-ambiguous">Ambiguous</span></td>
+                        <td>U &ge; 5%</td>
+                        <td>Conserved gene or highly uncertain placement</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section id="methods-confidence" class="method-section">
+            <h3>5. Confidence Score</h3>
+            <p>The confidence score (0-100) quantifies classification reliability without changing the
+            classification category.</p>
+
+            <div class="formula-box">
+                <div class="formula">confidence = margin_score + placement_score + alignment_score</div>
+            </div>
+
+            <h4>Component 1: Margin from threshold boundaries (0-40 points)</h4>
+            <p>Measures how far the read is from classification boundaries. Reads near boundaries have
+            lower margin scores.</p>
+
+            <h4>Component 2: Placement certainty (0-40 points)</h4>
+            <table class="methods-table small">
+                <thead>
+                    <tr><th>Ambiguous Hits</th><th>Points</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>1</td><td>20</td></tr>
+                    <tr><td>2-3</td><td>15</td></tr>
+                    <tr><td>4-5</td><td>10</td></tr>
+                    <tr><td>6-10</td><td>5</td></tr>
+                    <tr><td>&gt;10</td><td>0</td></tr>
+                </tbody>
+            </table>
+
+            <h4>Component 3: Alignment quality (0-20 points)</h4>
+            <p>Based on top hit identity, rewarding higher identity alignments.</p>
+
+            <h4>Score Interpretation</h4>
+            <table class="methods-table">
+                <thead>
+                    <tr><th>Score</th><th>Interpretation</th><th>Recommended Action</th></tr>
+                </thead>
+                <tbody>
+                    <tr class="priority-high"><td>80-100</td><td>High confidence</td><td>Suitable for downstream analysis</td></tr>
+                    <tr class="priority-medium"><td>60-79</td><td>Moderate confidence</td><td>Review recommended</td></tr>
+                    <tr class="priority-low"><td>40-59</td><td>Low confidence</td><td>Manual verification needed</td></tr>
+                    <tr class="priority-uncertain"><td>&lt;40</td><td>Very low confidence</td><td>Treat with caution</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section id="methods-inferred" class="method-section">
+            <h3>6. Inferred Uncertainty for Single-Hit Reads</h3>
+            <p>For reads with only one BLAST hit (~70% of environmental reads), placement uncertainty
+            cannot be measured from ANI between competing genomes. Instead, uncertainty is inferred
+            from the novelty level.</p>
+
+            <div class="method-highlight">
+                <strong>Rationale:</strong> Higher novelty suggests either novel diversity OR database
+                incompleteness, both of which increase placement uncertainty. A read with 95% identity
+                to a single reference is more reliably placed than one with 85% identity.
+            </div>
+
+            <div class="formula-box">
+                <div class="formula-title">Inferred Uncertainty Formula</div>
+                <table class="formula-table">
+                    <tr>
+                        <td>N &lt; 5%</td>
+                        <td>U<sub>inferred</sub> = 5.0 + N &times; 0.5</td>
+                        <td>Range: 5.0-7.5%</td>
+                    </tr>
+                    <tr>
+                        <td>5% &le; N &lt; 20%</td>
+                        <td>U<sub>inferred</sub> = 7.5 + (N - 5) &times; 1.0</td>
+                        <td>Range: 7.5-22.5%</td>
+                    </tr>
+                    <tr>
+                        <td>20% &le; N &lt; 25%</td>
+                        <td>U<sub>inferred</sub> = 22.5 + (N - 20) &times; 1.5</td>
+                        <td>Range: 22.5-30%</td>
+                    </tr>
+                    <tr>
+                        <td>N &ge; 25%</td>
+                        <td>U<sub>inferred</sub> = 35.0</td>
+                        <td>Maximum</td>
+                    </tr>
+                </table>
+            </div>
+
+            <h4>Single-Hit Classification Gating (Optional)</h4>
+            <p>When <code>--use-inferred-for-single-hits</code> is enabled, single-hit reads with high
+            inferred uncertainty are reclassified as Ambiguous. This reduces novel species overestimation
+            by acknowledging that absence of competing hits does not equal confident placement.</p>
+        </section>
+
+        <section id="methods-thresholds" class="method-section">
+            <h3>7. Threshold Summary</h3>
+
+            <h4>Nucleotide Mode (Default)</h4>
+            <table class="methods-table">
+                <thead>
+                    <tr><th>Parameter</th><th>Value</th><th>Biological Basis</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Species boundary (ANI)</td><td>95%</td><td>Jain et al. 2018</td></tr>
+                    <tr><td>Confident placement (ANI)</td><td>&gt;98%</td><td>Same species threshold</td></tr>
+                    <tr><td>Genus boundary (ANI)</td><td>~75-80%</td><td>Qin et al. 2014</td></tr>
+                    <tr><td>Bitscore threshold</td><td>95%</td><td>Competitive recruitment</td></tr>
+                </tbody>
+            </table>
+
+            <h4>Protein Mode (BLASTX + AAI)</h4>
+            <p>Wider thresholds account for slower protein evolution:</p>
+            <table class="methods-table">
+                <thead>
+                    <tr><th>Parameter</th><th>Nucleotide</th><th>Protein</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Known species max</td><td>5%</td><td>10%</td></tr>
+                    <tr><td>Novel species range</td><td>5-20%</td><td>10-25%</td></tr>
+                    <tr><td>Novel genus range</td><td>20-25%</td><td>25-40%</td></tr>
+                    <tr><td>Uncertainty (confident)</td><td>&lt;2%</td><td>&lt;5%</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section id="methods-references" class="method-section">
+            <h3>8. References</h3>
+            <ol class="references-list">
+                <li>
+                    <strong>Jain C, Rodriguez-R LM, Phillippy AM, Konstantinidis KT, Aluru S.</strong> (2018).
+                    High throughput ANI analysis of 90K prokaryotic genomes reveals clear species boundaries.
+                    <em>Nature Communications</em> 9:5114.
+                    <a href="https://doi.org/10.1038/s41467-018-07641-9" target="_blank">doi:10.1038/s41467-018-07641-9</a>
+                </li>
+                <li>
+                    <strong>Goris J, Konstantinidis KT, Klappenbach JA, et al.</strong> (2007).
+                    DNA-DNA hybridization values and their relationship to whole-genome sequence similarities.
+                    <em>Int J Syst Evol Microbiol</em> 57:81-91.
+                    <a href="https://doi.org/10.1099/ijs.0.64483-0" target="_blank">doi:10.1099/ijs.0.64483-0</a>
+                </li>
+                <li>
+                    <strong>Konstantinidis KT, Tiedje JM.</strong> (2005).
+                    Genomic insights that advance the species definition for prokaryotes.
+                    <em>PNAS</em> 102:2567-2572.
+                    <a href="https://doi.org/10.1073/pnas.0409727102" target="_blank">doi:10.1073/pnas.0409727102</a>
+                </li>
+                <li>
+                    <strong>Qin QL, Xie BB, Zhang XY, et al.</strong> (2014).
+                    A proposed genus boundary for the prokaryotes based on genomic insights.
+                    <em>J Bacteriol</em> 196:2210-2215.
+                    <a href="https://doi.org/10.1128/JB.01688-14" target="_blank">doi:10.1128/JB.01688-14</a>
+                </li>
+                <li>
+                    <strong>Parks DH, Chuvochina M, Waite DW, et al.</strong> (2018).
+                    A standardized bacterial taxonomy based on genome phylogeny substantially revises the tree of life.
+                    <em>Nature Biotechnology</em> 36:996-1004.
+                    <a href="https://doi.org/10.1038/nbt.4229" target="_blank">doi:10.1038/nbt.4229</a>
+                </li>
+                <li>
+                    <strong>Riesco R, Trujillo ME.</strong> (2024).
+                    Update on the proposed minimal standards for the use of genome data for the taxonomy of prokaryotes.
+                    <em>Int J Syst Evol Microbiol</em> 74:006300.
+                    <a href="https://doi.org/10.1099/ijsem.0.006300" target="_blank">doi:10.1099/ijsem.0.006300</a>
+                </li>
+            </ol>
+        </section>
+
+    </div>
+</div>
+'''
+
 
 # =============================================================================
 # Helper Functions
