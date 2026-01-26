@@ -529,6 +529,19 @@ class ANIWeightedClassifier:
         ):
             return TaxonomicCall.AMBIGUOUS
 
+        # Rule 0b: Single-hit inferred uncertainty check
+        # For single-hit reads, no ANI-based uncertainty is measurable.
+        # Use inferred uncertainty based on novelty level to flag ambiguous cases.
+        # This addresses the ~70% of environmental reads that have only one hit.
+        if (
+            cfg.use_inferred_for_single_hits
+            and num_ambiguous_hits <= 1
+            and novelty_index >= eff["novelty_novel_species_min"]  # Only for novel range
+        ):
+            inferred = calculate_inferred_uncertainty(novelty_index)
+            if inferred >= cfg.single_hit_uncertainty_threshold:
+                return TaxonomicCall.AMBIGUOUS
+
         # Uncertainty-based checks come first (ANI-based, more biologically meaningful)
         # High uncertainty indicates conserved region shared within genus
         # Note: Cross-genera conserved regions are handled in Polars classifier
@@ -1123,6 +1136,10 @@ def _classify_chunk_worker(
     enhanced_scoring = config_dict.get("enhanced_scoring", False)
     infer_single_hit_uncertainty = config_dict.get("infer_single_hit_uncertainty", False)
 
+    # Single-hit classification options
+    use_inferred_for_single_hits = config_dict.get("use_inferred_for_single_hits", False)
+    single_hit_uncertainty_threshold = config_dict.get("single_hit_uncertainty_threshold", 10.0)
+
     for read_id, hits_data in chunk_data:
         if not hits_data:
             continue
@@ -1230,6 +1247,48 @@ def _classify_chunk_worker(
         ):
             call = "Ambiguous"
             is_novel = False
+        # Rule 0b: Single-hit inferred uncertainty check
+        # For single-hit reads, use inferred uncertainty to flag ambiguous cases.
+        elif (
+            use_inferred_for_single_hits
+            and num_ambiguous_hits <= 1
+            and novelty_index >= novelty_novel_species_min  # Only for novel range
+        ):
+            inferred = _calculate_inferred_uncertainty_inline(
+                novelty_index, novelty_known_max, novelty_novel_species_max, novelty_novel_genus_max
+            )
+            if inferred >= single_hit_uncertainty_threshold:
+                call = "Ambiguous"
+                is_novel = False
+            elif placement_uncertainty >= uncertainty_conserved_min:
+                call = "Ambiguous"
+                is_novel = False
+            elif placement_uncertainty >= uncertainty_novel_genus_max:
+                call = "Species Boundary"
+                is_novel = False
+            elif (
+                novelty_novel_species_min <= novelty_index < novelty_novel_species_max
+                and placement_uncertainty < uncertainty_novel_species_max
+            ):
+                call = "Novel Species"
+                is_novel = True
+            elif (
+                novelty_novel_genus_min <= novelty_index <= novelty_novel_genus_max
+                and placement_uncertainty < uncertainty_novel_genus_max
+            ):
+                if (
+                    genus_uncertainty is not None
+                    and num_genus_hits > 1
+                    and genus_uncertainty >= genus_uncertainty_ambiguous_min
+                ):
+                    call = "Ambiguous Within Genus"
+                    is_novel = False
+                else:
+                    call = "Novel Genus"
+                    is_novel = True
+            else:
+                call = "Unclassified"
+                is_novel = False
         elif placement_uncertainty >= uncertainty_conserved_min:
             # High uncertainty - conserved within genus (can't distinguish cross-genera here)
             call = "Ambiguous"
@@ -1348,6 +1407,48 @@ def _classify_chunk_worker(
         results.append(result_dict)
 
     return results
+
+
+def _calculate_inferred_uncertainty_inline(
+    novelty_index: float,
+    novelty_known_max: float,
+    novelty_novel_species_max: float,
+    novelty_novel_genus_max: float,
+) -> float:
+    """
+    Inline inferred uncertainty calculation for parallel workers.
+
+    Duplicated from constants.calculate_inferred_uncertainty to avoid
+    import issues with multiprocessing pickling.
+
+    For single-hit reads, we cannot measure placement uncertainty from ANI
+    between competing genomes. Instead, we infer uncertainty from novelty:
+    higher novelty suggests either novel diversity OR database incompleteness.
+
+    Args:
+        novelty_index: Novelty index value (100 - top_hit_identity)
+        novelty_known_max: Threshold for known species (default 5.0)
+        novelty_novel_species_max: Threshold for novel species (default 20.0)
+        novelty_novel_genus_max: Threshold for novel genus (default 25.0)
+
+    Returns:
+        Inferred uncertainty value (5-35%)
+    """
+    inferred_uncertainty_base = 5.0
+    inferred_uncertainty_max = 35.0
+
+    if novelty_index < novelty_known_max:
+        # High identity: database likely complete for this species
+        return inferred_uncertainty_base + novelty_index * 0.5  # 5-7.5%
+    elif novelty_index < novelty_novel_species_max:
+        # Novel species range: uncertain if truly novel or database gap
+        return 7.5 + (novelty_index - novelty_known_max) * 1.0  # 7.5-17.5%
+    elif novelty_index < novelty_novel_genus_max:
+        # Novel genus range: high uncertainty
+        return 17.5 + (novelty_index - novelty_novel_species_max) * 1.5  # 17.5-25%
+    else:
+        # Very high divergence: maximum uncertainty
+        return inferred_uncertainty_max
 
 
 def _calculate_confidence_score_inline(

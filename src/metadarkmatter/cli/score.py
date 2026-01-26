@@ -108,6 +108,28 @@ THRESHOLD_PRESETS: dict[str, ScoringConfig] = {
         min_alignment_fraction=0.5,
     ),
     "default": ScoringConfig(),
+    # Balanced-conservative preset
+    # Reduces novel species overestimation by using stricter thresholds
+    # and flagging single-hit reads with high inferred uncertainty
+    "balanced-conservative": ScoringConfig(
+        # Stricter novelty thresholds (96% species boundary)
+        novelty_known_max=4.0,
+        novelty_novel_species_min=4.0,
+        novelty_novel_species_max=15.0,
+        novelty_novel_genus_min=15.0,
+        novelty_novel_genus_max=22.0,
+        # Stricter uncertainty requirement
+        uncertainty_known_max=1.5,
+        uncertainty_novel_species_max=1.5,
+        uncertainty_novel_genus_max=1.5,
+        # Lower bitscore threshold to capture more competing hits
+        bitscore_threshold_pct=92.0,
+        # Enable single-hit uncertainty handling
+        use_inferred_for_single_hits=True,
+        single_hit_uncertainty_threshold=12.0,
+        # Moderate alignment quality filter
+        min_alignment_fraction=0.3,
+    ),
     # Coverage-weighted presets
     # These prioritize longer alignments over short conserved domains
     "coverage-linear": ScoringConfig(
@@ -398,7 +420,8 @@ def classify(
             "Use predefined threshold preset: 'gtdb-strict' (95% ANI, AF>=50%), "
             "'gtdb-relaxed' (97% ANI), 'conservative' (96% ANI), "
             "'literature-strict' (96% ANI, 1.5% uncertainty, high confidence), "
-            "'coverage-linear' (linear coverage weighting), "
+            "'balanced-conservative' (reduces novel species overestimation with "
+            "single-hit gating), 'coverage-linear' (linear coverage weighting), "
             "'coverage-strict' (sigmoid coverage weighting, stricter thresholds), "
             "'coverage-gentle' (log coverage weighting), "
             "'gtdb-coverage' (GTDB + linear coverage weighting), or 'default'"
@@ -476,6 +499,27 @@ def classify(
             "conflates 'no competing hits' with 'confident placement'. Adds "
             "inferred_uncertainty and uncertainty_type columns."
         ),
+    ),
+    use_inferred_for_single_hits: bool = typer.Option(
+        False,
+        "--use-inferred-for-single-hits",
+        help=(
+            "Use inferred uncertainty for single-hit reads in classification decisions. "
+            "When enabled, single-hit reads in the novel range with high inferred "
+            "uncertainty are reclassified as Ambiguous. This reduces novel species "
+            "overestimation for the ~70%% of environmental reads that have only one hit."
+        ),
+    ),
+    single_hit_uncertainty_threshold: float = typer.Option(
+        10.0,
+        "--single-hit-threshold",
+        help=(
+            "Inferred uncertainty threshold for single-hit Ambiguous classification "
+            "(only applies when --use-inferred-for-single-hits is enabled). "
+            "Default 10%% means reads with novelty ~7%% or higher become Ambiguous."
+        ),
+        min=0.0,
+        max=100.0,
     ),
     output_format: str = typer.Option(
         "csv",
@@ -716,7 +760,7 @@ def classify(
         config = THRESHOLD_PRESETS[preset_lower]
         out.print(f"[dim]Using preset: {preset_lower}[/dim]")
         # Override bitscore threshold and alignment mode if explicitly provided
-        if bitscore_threshold != 95.0 or alignment_mode_lower != "nucleotide" or coverage_weight_mode != "none" or uncertainty_mode_lower != "second" or enhanced_scoring or infer_single_hit_uncertainty:
+        if bitscore_threshold != 95.0 or alignment_mode_lower != "nucleotide" or coverage_weight_mode != "none" or uncertainty_mode_lower != "second" or enhanced_scoring or infer_single_hit_uncertainty or use_inferred_for_single_hits:
             config = ScoringConfig(
                 alignment_mode=alignment_mode_lower,
                 bitscore_threshold_pct=bitscore_threshold,
@@ -736,6 +780,8 @@ def classify(
                 uncertainty_mode=uncertainty_mode_lower,
                 enhanced_scoring=enhanced_scoring,
                 infer_single_hit_uncertainty=infer_single_hit_uncertainty,
+                use_inferred_for_single_hits=use_inferred_for_single_hits,
+                single_hit_uncertainty_threshold=single_hit_uncertainty_threshold,
             )
     else:
         config = ScoringConfig(
@@ -748,6 +794,8 @@ def classify(
             uncertainty_mode=uncertainty_mode_lower,
             enhanced_scoring=enhanced_scoring,
             infer_single_hit_uncertainty=infer_single_hit_uncertainty,
+            use_inferred_for_single_hits=use_inferred_for_single_hits,
+            single_hit_uncertainty_threshold=single_hit_uncertainty_threshold,
         )
 
     # Log alignment filter settings if non-default
@@ -767,6 +815,14 @@ def classify(
         out.print(
             "[bold]Single-hit uncertainty inference enabled[/bold] - adds "
             "inferred_uncertainty, uncertainty_type"
+        )
+    if config.use_inferred_for_single_hits:
+        out.print(
+            f"[bold]Single-hit classification gating enabled[/bold] - "
+            f"threshold {config.single_hit_uncertainty_threshold}%"
+        )
+        out.print(
+            "[dim]  Single-hit reads with high inferred uncertainty become Ambiguous[/dim]"
         )
 
     # Load ANI matrix
@@ -1122,8 +1178,9 @@ def batch(
         "--preset",
         help=(
             "Use predefined threshold preset: 'gtdb-strict', 'gtdb-relaxed', "
-            "'conservative', 'literature-strict', 'coverage-linear', "
-            "'coverage-strict', 'coverage-gentle', 'gtdb-coverage', or 'default'"
+            "'conservative', 'literature-strict', 'balanced-conservative', "
+            "'coverage-linear', 'coverage-strict', 'coverage-gentle', "
+            "'gtdb-coverage', or 'default'"
         ),
     ),
     alignment_mode: str = typer.Option(

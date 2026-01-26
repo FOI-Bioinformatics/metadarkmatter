@@ -66,6 +66,7 @@ from metadarkmatter.visualization.report.templates import (
     GENOMES_SUMMARY_TEMPLATE,
     METRIC_CARD_TEMPLATE,
     METRIC_CARDS_CONTAINER,
+    METHODS_SECTION_TEMPLATE,
     PLOT_CONTAINER_SIMPLE_TEMPLATE,
     PLOT_CONTAINER_TEMPLATE,
     PLOT_ROW_TEMPLATE,
@@ -484,6 +485,9 @@ class ReportGenerator:
         # Data table tab
         content_sections.append(self._build_data_section())
 
+        # Methods tab (always visible - comprehensive documentation)
+        content_sections.append(self._build_methods_section())
+
         content = "\n".join(content_sections)
 
         # Build dynamic navigation
@@ -538,6 +542,7 @@ class ReportGenerator:
         tabs.extend([
             ("recruitment", "Recruitment", False),
             ("data", "Data", False),
+            ("methods", "Methods", False),
         ])
 
         nav_items = []
@@ -1852,6 +1857,15 @@ document.addEventListener('DOMContentLoaded', function() {
             active_class="",
             section_title="Classification Data",
             content=content,
+        )
+
+    def _build_methods_section(self) -> str:
+        """Build the Methods tab with comprehensive documentation of calculations."""
+        return TAB_SECTION_TEMPLATE.format(
+            tab_id="methods",
+            active_class="",
+            section_title="Methods",
+            content=METHODS_SECTION_TEMPLATE,
         )
 
     def _register_plot(self, plot_id: str, fig: go.Figure) -> None:
