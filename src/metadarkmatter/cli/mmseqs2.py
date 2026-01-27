@@ -248,12 +248,87 @@ def make_database(
     out.print()
 
 
+def _concatenate_paired_reads(
+    reads_1: Path,
+    reads_2: Path,
+    output_path: Path,
+    console: Console,
+    quiet: bool = False,
+) -> int:
+    """Concatenate paired-end reads into a single file for MMseqs2.
+
+    MMseqs2 does not have native paired-end support, so reads are concatenated
+    and searched independently. This is the standard approach recommended by
+    the MMseqs2 community.
+
+    Args:
+        reads_1: Forward reads file (FASTA/FASTQ, optionally gzipped)
+        reads_2: Reverse reads file (FASTA/FASTQ, optionally gzipped)
+        output_path: Output file path (uncompressed)
+        console: Rich console for output
+        quiet: Suppress progress output
+
+    Returns:
+        Total number of reads combined from both files
+    """
+    import shutil
+
+    out = QuietConsole(console, quiet=quiet)
+
+    # Determine if input is gzipped
+    is_gzipped = str(reads_1).lower().endswith((".gz", ".gzip"))
+
+    out.print("  [dim]Concatenating paired-end reads...[/dim]")
+
+    if is_gzipped:
+        # For gzipped input, decompress and concatenate
+        with output_path.open("wb") as out_f:
+            for reads_file in [reads_1, reads_2]:
+                with gzip.open(reads_file, "rb") as in_f:
+                    shutil.copyfileobj(in_f, out_f)
+    else:
+        # For plain input, just concatenate
+        with output_path.open("wb") as out_f:
+            for reads_file in [reads_1, reads_2]:
+                with reads_file.open("rb") as in_f:
+                    shutil.copyfileobj(in_f, out_f)
+
+    # Count reads (FASTQ has 4 lines per read, FASTA has 2)
+    is_fastq = any(
+        str(reads_1).lower().endswith(ext)
+        for ext in [".fastq", ".fq", ".fastq.gz", ".fq.gz"]
+    )
+    lines_per_read = 4 if is_fastq else 2
+
+    with output_path.open("rb") as f:
+        line_count = sum(1 for _ in f)
+    read_count = line_count // lines_per_read
+
+    out.print(f"  [dim]Combined {read_count:,} reads from paired-end files[/dim]")
+
+    return read_count
+
+
 @app.command(name="search")
 def search_reads(
-    query: Path = typer.Option(
-        ...,
+    query: Path | None = typer.Option(
+        None,
         "--query", "-q",
-        help="Query reads file (FASTA/FASTQ)",
+        help="Query reads file (FASTA/FASTQ). Use this OR --query-1/--query-2.",
+        exists=True,
+        dir_okay=False,
+    ),
+    query_1: Path | None = typer.Option(
+        None,
+        "--query-1", "-1",
+        help="Forward reads for paired-end data (FASTA/FASTQ, gzipped OK)",
+        exists=True,
+        dir_okay=False,
+    ),
+    query_2: Path | None = typer.Option(
+        None,
+        "--query-2", "-2",
+        help="Reverse reads for paired-end data (FASTA/FASTQ, gzipped OK)",
         exists=True,
         dir_okay=False,
     ),
@@ -353,24 +428,35 @@ def search_reads(
     MMseqs2 provides 100-1000x speedup over BLAST. Default sensitivity (5.7) provides
     a good balance between speed and accuracy for metagenomic dark matter analysis.
 
+    Supports both single-end (--query) and paired-end (--query-1, --query-2) input.
+    For paired-end data, reads are concatenated internally before searching.
+
     Example:
 
-        # Basic search
+        # Single-end search
         metadarkmatter mmseqs2 search \\
             --query extracted_reads.fasta \\
             --database mmseqs_db/pangenome \\
             --output sample.mmseqs2.tsv.gz
 
+        # Paired-end search (reads concatenated internally)
+        metadarkmatter mmseqs2 search \\
+            --query-1 extracted_R1.fastq.gz \\
+            --query-2 extracted_R2.fastq.gz \\
+            --database mmseqs_db/pangenome \\
+            --output sample.mmseqs2.tsv.gz
+
         # High-sensitivity search
         metadarkmatter mmseqs2 search \\
-            --query extracted_reads.fasta \\
+            --query-1 extracted_R1.fastq.gz \\
+            --query-2 extracted_R2.fastq.gz \\
             --database mmseqs_db/pangenome \\
             --output sample.mmseqs2.tsv.gz \\
             --sensitivity 7.0 \\
-            --evalue 1e-5 \\
-            --max-seqs 100 \\
             --threads 16
     """
+    import tempfile
+
     out = QuietConsole(console, quiet=quiet)
 
     out.print("\n[bold blue]Metadarkmatter MMseqs2 Search[/bold blue]\n")
@@ -382,8 +468,57 @@ def search_reads(
         console.print("\n[dim]Install with: conda install -c bioconda mmseqs2[/dim]")
         raise typer.Exit(code=1) from None
 
+    # Validate input options (mutual exclusivity)
+    has_single_end = query is not None
+    has_paired_end = query_1 is not None or query_2 is not None
+
+    if has_single_end and has_paired_end:
+        console.print(
+            "[red]Error: Cannot use --query with --query-1/--query-2. "
+            "Choose one input mode.[/red]"
+        )
+        raise typer.Exit(code=1) from None
+
+    if not has_single_end and not has_paired_end:
+        console.print(
+            "[red]Error: Must provide either --query (single-end) or "
+            "--query-1 and --query-2 (paired-end).[/red]"
+        )
+        raise typer.Exit(code=1) from None
+
+    if has_paired_end and (query_1 is None or query_2 is None):
+        console.print(
+            "[red]Error: Paired-end mode requires both --query-1 and --query-2.[/red]"
+        )
+        raise typer.Exit(code=1) from None
+
+    # Handle paired-end input by concatenating reads
+    temp_query_file: Path | None = None
+    if has_paired_end:
+        # Create temporary file for concatenated reads
+        _, temp_path = tempfile.mkstemp(suffix=".fastq")
+        temp_query_file = Path(temp_path)
+        _concatenate_paired_reads(query_1, query_2, temp_query_file, console, quiet)
+        query_for_search = temp_query_file
+        out.print(f"[bold]Input:[/bold] Paired-end reads")
+        out.print(f"  R1: {query_1}")
+        out.print(f"  R2: {query_2}")
+    else:
+        query_for_search = query
+        out.print("[bold]Input:[/bold]")
+        out.print(f"  Query: {query}")
+
+    def _cleanup_temp_query() -> None:
+        """Clean up temporary concatenated query file."""
+        if temp_query_file and temp_query_file.exists():
+            try:
+                temp_query_file.unlink()
+            except OSError:
+                pass  # Best effort cleanup
+
     # Validate database exists
     if not database.exists():
+        _cleanup_temp_query()
         console.print(f"[red]Error: MMseqs2 database not found at {database}[/red]")
         console.print(
             "[dim]Run 'metadarkmatter mmseqs2 makedb' first to create the database[/dim]"
@@ -400,12 +535,11 @@ def search_reads(
 
     # Check skip-if-exists
     if skip_if_exists and output.exists():
+        _cleanup_temp_query()
         out.print(f"[yellow]Skipping: Output file already exists: {output}[/yellow]")
         raise typer.Exit(code=0)
 
-    # Show parameters
-    out.print("[bold]Input:[/bold]")
-    out.print(f"  Query:    {query}")
+    # Show database
     out.print(f"  Database: {database}")
 
     out.print("\n[bold]Parameters:[/bold]")
@@ -423,8 +557,12 @@ def search_reads(
     temp_output = output.with_suffix("").with_suffix(".tsv") if should_compress else output
 
     if dry_run:
+        _cleanup_temp_query()
         console.print("\n[dim]Would run the following MMseqs2 workflow:[/dim]")
-        console.print(f"[dim]  1. Create query DB: {query} -> queryDB[/dim]")
+        if has_paired_end:
+            console.print(f"[dim]  0. Concatenate: {query_1} + {query_2} -> temp.fastq[/dim]")
+        query_display = f"{query_1} + {query_2}" if has_paired_end else str(query)
+        console.print(f"[dim]  1. Create query DB: {query_display} -> queryDB[/dim]")
         console.print(f"[dim]  2. Run search: queryDB + {database} -> resultDB[/dim]")
         console.print(f"[dim]  3. Convert to TSV: resultDB -> {temp_output}[/dim]")
         if should_compress:
@@ -438,7 +576,7 @@ def search_reads(
     try:
         # Use multistep workflow for better performance
         result_dict = mmseqs.search_multistep(
-            query=query,
+            query=query_for_search,
             database=database,
             output=temp_output,
             query_db=query_db,  # Will be cached if provided
@@ -454,22 +592,26 @@ def search_reads(
 
         # Report timing
         if result_dict["createdb_time"] > 0:
-            out.print(f"  [green]✓ Query DB created ({result_dict['createdb_time']:.1f}s)[/green]")
+            out.print(f"  [green]Query DB created ({result_dict['createdb_time']:.1f}s)[/green]")
         else:
-            out.print(f"  [green]✓ Query DB reused (cached at {result_dict['query_db']})[/green]")
+            out.print(f"  [green]Query DB reused (cached at {result_dict['query_db']})[/green]")
 
-        out.print(f"  [green]✓ Search complete ({result_dict['search_time']:.1f}s)[/green]")
-        out.print(f"  [green]✓ Results converted ({result_dict['convertalis_time']:.1f}s)[/green]")
+        out.print(f"  [green]Search complete ({result_dict['search_time']:.1f}s)[/green]")
+        out.print(f"  [green]Results converted ({result_dict['convertalis_time']:.1f}s)[/green]")
         out.print(f"  [bold green]Total: {result_dict['total_time']:.1f}s[/bold green]")
 
-        # Save query_db path for future caching
-        if query_db is None and verbose:
+        # Save query_db path for future caching (only for single-end, as paired-end uses temp file)
+        if query_db is None and verbose and not has_paired_end:
             out.print(f"\n[dim]Tip: Use --query-db {result_dict['query_db']} to cache the query database[/dim]")
-            out.print(f"[dim]This speeds up subsequent searches with the same query file.[/dim]")
+            out.print("[dim]This speeds up subsequent searches with the same query file.[/dim]")
 
     except Exception as e:
+        _cleanup_temp_query()
         console.print(f"\n[red]MMseqs2 search failed:[/red]\n{str(e)}")
         raise typer.Exit(code=1) from None
+
+    # Clean up temporary concatenated query file
+    _cleanup_temp_query()
 
     # Compress output if needed
     if should_compress and temp_output.exists():
@@ -498,16 +640,15 @@ def search_reads(
     out.print(f"  {final_output} ({file_size:.1f} MB)")
 
     if verbose:
-        out.print(f"\n[dim]Command: {result.command_string}[/dim]")
-        out.print("[dim]Output format: BLAST-compatible tabular[/dim]")
+        out.print("\n[dim]Output format: BLAST-compatible tabular[/dim]")
         out.print(
             "[dim]Columns: query, target, pident, alnlen, mismatch, gapopen, "
-            "qstart, qend, tstart, tend, evalue, bits[/dim]"
+            "qstart, qend, tstart, tend, evalue, bits, qlen[/dim]"
         )
 
     out.print(
         f"\n[dim]Next step: metadarkmatter score classify "
-        f"--blast {final_output} --ani <ani_matrix.csv> "
+        f"--alignment {final_output} --ani <ani_matrix.csv> "
         f"--output classifications.csv[/dim]"
     )
     out.print()

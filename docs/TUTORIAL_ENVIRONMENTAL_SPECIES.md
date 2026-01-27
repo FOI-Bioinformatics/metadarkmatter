@@ -29,10 +29,7 @@ metadarkmatter ani compute --genomes genomes/ --output ani_matrix.csv --threads 
 # 2b. Build AAI matrix (optional, for genus-level disambiguation)
 metadarkmatter aai compute --genomes genomes/ --output aai_matrix.csv --threads $THREADS
 
-# 3. Build BLAST database (standardizes headers for multi-contig genomes)
-metadarkmatter blast makedb --genomes genomes/ --output blastdb/pangenome
-
-# 4. Classify metagenome and extract family reads
+# 3. Classify metagenome and extract family reads
 metadarkmatter kraken2 classify \
   --reads-1 ${SAMPLE}_R1.fastq.gz --reads-2 ${SAMPLE}_R2.fastq.gz \
   --kraken-db /path/to/kraken2_db --output kraken_out/ --threads $THREADS
@@ -42,18 +39,28 @@ metadarkmatter kraken2 extract \
   --reads-1 ${SAMPLE}_R1.fastq.gz --reads-2 ${SAMPLE}_R2.fastq.gz \
   --taxid $TAXID --output extracted/
 
-# 5. Sequence alignment with BLAST
+# 4. Sequence alignment (choose ONE option)
+
+# Option A: BLAST (single-end only, best for <100K reads)
+metadarkmatter blast makedb --genomes genomes/ --output blastdb/pangenome
 metadarkmatter blast align \
   --query extracted/${SAMPLE}_taxid${TAXID}_R1.fastq.gz \
   --database blastdb/pangenome --output ${SAMPLE}.blast.tsv.gz --threads $THREADS
 
-# 6. ANI-weighted classification (with species-level tracking and AAI)
+# Option B: MMseqs2 (supports paired-end, best for >100K reads, 5-100x faster)
+metadarkmatter mmseqs2 makedb --genomes genomes/ --output mmseqs_db/pangenome
+metadarkmatter mmseqs2 search \
+  --query-1 extracted/${SAMPLE}_taxid${TAXID}_R1.fastq.gz \
+  --query-2 extracted/${SAMPLE}_taxid${TAXID}_R2.fastq.gz \
+  --database mmseqs_db/pangenome --output ${SAMPLE}.mmseqs2.tsv.gz --threads $THREADS
+
+# 5. ANI-weighted classification (works with either BLAST or MMseqs2 output)
 metadarkmatter score classify \
   --alignment ${SAMPLE}.blast.tsv.gz --ani ani_matrix.csv --aai aai_matrix.csv \
   --metadata genome_metadata.tsv \
   --output classifications.csv --summary summary.json --parallel
 
-# 7. Extract novel candidates and generate report (with species breakdown)
+# 6. Extract novel candidates and generate report (with species breakdown)
 metadarkmatter score extract-novel \
   --classifications classifications.csv \
   --output novel_candidates.csv --read-ids novel_reads.txt
