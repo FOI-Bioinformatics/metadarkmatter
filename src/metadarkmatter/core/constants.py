@@ -316,8 +316,8 @@ def calculate_inferred_uncertainty(novelty_index: float) -> float:
 
     Interpretation:
         - Low novelty (< 5%): Database likely complete for this species
-        - Novel species range (5-15%): Uncertain if truly novel or database gap
-        - Novel genus range (15-25%): High uncertainty about placement
+        - Novel species range (5-20%): Uncertain if truly novel or database gap
+        - Novel genus range (20-25%): High uncertainty about placement
         - Very high divergence (> 25%): Maximum uncertainty
     """
     if novelty_index < NOVELTY_KNOWN_MAX:
@@ -325,10 +325,10 @@ def calculate_inferred_uncertainty(novelty_index: float) -> float:
         return INFERRED_UNCERTAINTY_BASE + novelty_index * 0.5  # 5-7.5%
     elif novelty_index < NOVELTY_NOVEL_SPECIES_MAX:
         # Novel species range: uncertain if truly novel or database gap
-        return 7.5 + (novelty_index - NOVELTY_KNOWN_MAX) * INFERRED_UNCERTAINTY_NOVEL_SPECIES_SLOPE  # 7.5-17.5%
+        return 7.5 + (novelty_index - NOVELTY_KNOWN_MAX) * INFERRED_UNCERTAINTY_NOVEL_SPECIES_SLOPE  # 7.5-22.5%
     elif novelty_index < NOVELTY_NOVEL_GENUS_MAX:
         # Novel genus range: high uncertainty
-        return 17.5 + (novelty_index - NOVELTY_NOVEL_SPECIES_MAX) * INFERRED_UNCERTAINTY_NOVEL_GENUS_SLOPE  # 17.5-25%
+        return 22.5 + (novelty_index - NOVELTY_NOVEL_SPECIES_MAX) * INFERRED_UNCERTAINTY_NOVEL_GENUS_SLOPE  # 22.5-30%
     else:
         # Very high divergence: maximum uncertainty
         return INFERRED_UNCERTAINTY_MAX

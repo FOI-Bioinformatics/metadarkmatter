@@ -101,8 +101,8 @@ These metrics enable classification into biologically meaningful categories:
 | Category | Novelty | Uncertainty | Interpretation |
 |----------|---------|-------------|----------------|
 | Known Species | < 5% | < 2% | Matches a sequenced species |
-| Novel Species | 5-15% | < 2% | Likely a new species within a known genus |
-| Novel Genus | 15-25% | < 2% | Likely a new genus within the family |
+| Novel Species | 5-20% | < 2% | Likely a new species within a known genus |
+| Novel Genus | 20-25% | < 2% | Likely a new genus within the family |
 | Conserved Region | any | > 5% | Conserved gene, placement ambiguous |
 
 ### Threshold Basis

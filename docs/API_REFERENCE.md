@@ -293,7 +293,7 @@ classifier = ANIWeightedClassifier(ani_matrix)
 config = ScoringConfig(
     bitscore_threshold_pct=95.0,
     novelty_novel_species_min=5.0,
-    novelty_novel_species_max=15.0,
+    novelty_novel_species_max=20.0,
 )
 classifier = ANIWeightedClassifier(ani_matrix, config)
 ```
@@ -1559,8 +1559,8 @@ class ScoringConfig(BaseModel):
     bitscore_threshold_pct: float = 95.0
     novelty_known_max: float = 2.0
     novelty_novel_species_min: float = 5.0
-    novelty_novel_species_max: float = 15.0
-    novelty_novel_genus_min: float = 15.0
+    novelty_novel_species_max: float = 20.0
+    novelty_novel_genus_min: float = 20.0
     novelty_novel_genus_max: float = 25.0
     uncertainty_known_max: float = 0.5
     uncertainty_novel_species_max: float = 0.5
@@ -1575,8 +1575,8 @@ Thresholds define boundaries between different taxonomic classifications based o
 - `bitscore_threshold_pct` (float): Percentage of top bitscore for ambiguous hits (default: 95%)
 - `novelty_known_max` (float): Maximum novelty index for known species (default: 2.0)
 - `novelty_novel_species_min` (float): Minimum novelty index for novel species (default: 5.0)
-- `novelty_novel_species_max` (float): Maximum novelty index for novel species (default: 15.0)
-- `novelty_novel_genus_min` (float): Minimum novelty index for novel genus (default: 15.0)
+- `novelty_novel_species_max` (float): Maximum novelty index for novel species (default: 20.0)
+- `novelty_novel_genus_min` (float): Minimum novelty index for novel genus (default: 20.0)
 - `novelty_novel_genus_max` (float): Maximum novelty index for novel genus (default: 25.0)
 - `uncertainty_known_max` (float): Maximum placement uncertainty for known species (default: 0.5)
 - `uncertainty_novel_species_max` (float): Maximum uncertainty for novel species (default: 0.5)
@@ -1600,7 +1600,7 @@ config = ScoringConfig()
 config = ScoringConfig(
     bitscore_threshold_pct=95.0,
     novelty_novel_species_min=5.0,
-    novelty_novel_species_max=15.0,
+    novelty_novel_species_max=20.0,
     uncertainty_novel_species_max=0.5,
 )
 ```

@@ -603,8 +603,8 @@ GCA_000111222.1,82.3,83.1,100.0
 
 **Taxonomic Call Values:**
 - `Known Species`: High identity, unambiguous placement
-- `Novel Species`: Moderate divergence (5-15% novelty)
-- `Novel Genus`: High divergence (15-25% novelty)
+- `Novel Species`: Moderate divergence (5-20% novelty)
+- `Novel Genus`: High divergence (20-25% novelty)
 - `Conserved Region`: Ambiguous placement across genomes
 
 ### Summary Output (JSON)

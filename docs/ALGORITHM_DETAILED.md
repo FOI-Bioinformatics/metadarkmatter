@@ -371,7 +371,7 @@ secondary_genomes = {} (empty)
 U = 0.0  # No competition
 
 # Classify
-U < 2% and 15% <= N <= 25% → NOVEL GENUS
+U < 2% and 20% <= N <= 25% → NOVEL GENUS
 ```
 
 **Interpretation:** Read shows genus-level divergence with confident placement to single genome lineage.

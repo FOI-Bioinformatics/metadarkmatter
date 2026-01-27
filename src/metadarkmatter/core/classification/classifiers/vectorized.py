@@ -654,7 +654,7 @@ class VectorizedClassifier:
                     .when(pl.col("novelty_index") < eff["novelty_novel_species_max"])
                     .then(7.5 + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)
                     .when(pl.col("novelty_index") < eff["novelty_novel_genus_max"])
-                    .then(17.5 + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)
+                    .then(22.5 + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)
                     .otherwise(35.0)
                     >= pl.lit(cfg.single_hit_uncertainty_threshold)
                 )
@@ -709,9 +709,9 @@ class VectorizedClassifier:
                     pl.when(pl.col("novelty_index") < eff["novelty_known_max"])
                     .then(5.0 + pl.col("novelty_index") * 0.5)  # 5-7.5%
                     .when(pl.col("novelty_index") < eff["novelty_novel_species_max"])
-                    .then(7.5 + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)  # 7.5-17.5%
+                    .then(7.5 + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)  # 7.5-22.5%
                     .when(pl.col("novelty_index") < eff["novelty_novel_genus_max"])
-                    .then(17.5 + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)  # 17.5-25%
+                    .then(22.5 + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)  # 22.5-30%
                     .otherwise(35.0)  # Maximum uncertainty
                 )
                 .otherwise(pl.lit(None))
@@ -1059,7 +1059,7 @@ class VectorizedClassifier:
                         .when(pl.col("novelty_index") < eff["novelty_novel_species_max"])
                         .then(7.5 + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)
                         .when(pl.col("novelty_index") < eff["novelty_novel_genus_max"])
-                        .then(17.5 + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)
+                        .then(22.5 + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)
                         .otherwise(35.0)
                         >= pl.lit(cfg.single_hit_uncertainty_threshold)
                     )

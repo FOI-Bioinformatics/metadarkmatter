@@ -18,7 +18,9 @@ import numpy as np
 import polars as pl
 
 from metadarkmatter.core.classification.ani_matrix import ANIMatrix
+from metadarkmatter.core.classification.classifiers.base import _classify_chunk_worker
 from metadarkmatter.core.constants import calculate_confidence_score
+from metadarkmatter.core.io_utils import write_dataframe
 from metadarkmatter.core.parsers import StreamingBlastParser
 from metadarkmatter.models.classification import TaxonomicCall, TAXONOMIC_TO_DIVERSITY
 from metadarkmatter.models.config import ScoringConfig

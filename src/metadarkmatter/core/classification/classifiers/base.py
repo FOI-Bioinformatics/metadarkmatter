@@ -1442,10 +1442,10 @@ def _calculate_inferred_uncertainty_inline(
         return inferred_uncertainty_base + novelty_index * 0.5  # 5-7.5%
     elif novelty_index < novelty_novel_species_max:
         # Novel species range: uncertain if truly novel or database gap
-        return 7.5 + (novelty_index - novelty_known_max) * 1.0  # 7.5-17.5%
+        return 7.5 + (novelty_index - novelty_known_max) * 1.0  # 7.5-22.5%
     elif novelty_index < novelty_novel_genus_max:
         # Novel genus range: high uncertainty
-        return 17.5 + (novelty_index - novelty_novel_species_max) * 1.5  # 17.5-25%
+        return 22.5 + (novelty_index - novelty_novel_species_max) * 1.5  # 22.5-30%
     else:
         # Very high divergence: maximum uncertainty
         return inferred_uncertainty_max
@@ -1543,32 +1543,6 @@ def _calculate_confidence_score_inline(
     score += identity_score
 
     return round(min(100.0, max(0.0, score)), 1)
-
-
-def _calculate_inferred_uncertainty_inline(
-    novelty_index: float,
-    novelty_known_max: float,
-    novelty_novel_species_max: float,
-    novelty_novel_genus_max: float,
-) -> float:
-    """
-    Inline inferred uncertainty calculation for parallel workers.
-
-    For single-hit reads, infers uncertainty from novelty level since
-    there are no competing hits to measure ANI-based uncertainty.
-    """
-    if novelty_index < novelty_known_max:
-        # High identity: database likely complete
-        return 5.0 + novelty_index * 0.5  # 5-7.5%
-    elif novelty_index < novelty_novel_species_max:
-        # Novel species range: uncertain if truly novel or database gap
-        return 7.5 + (novelty_index - novelty_known_max) * 1.0  # 7.5-17.5%
-    elif novelty_index < novelty_novel_genus_max:
-        # Novel genus range: high uncertainty
-        return 17.5 + (novelty_index - novelty_novel_species_max) * 1.5  # 17.5-25%
-    else:
-        # Very high divergence: maximum uncertainty
-        return 35.0
 
 
 def _calculate_identity_confidence_inline(

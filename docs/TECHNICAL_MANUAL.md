@@ -866,8 +866,8 @@ class ScoringConfig(BaseModel):
     # Novelty thresholds
     novelty_known_max: float = 2.0
     novelty_novel_species_min: float = 5.0
-    novelty_novel_species_max: float = 15.0
-    novelty_novel_genus_min: float = 15.0
+    novelty_novel_species_max: float = 20.0
+    novelty_novel_genus_min: float = 20.0
     novelty_novel_genus_max: float = 25.0
 
     # Uncertainty thresholds
@@ -2339,8 +2339,8 @@ scoring:
   bitscore_threshold_pct: 95.0
   novelty_known_max: 2.0
   novelty_novel_species_min: 5.0
-  novelty_novel_species_max: 15.0
-  novelty_novel_genus_min: 15.0
+  novelty_novel_species_max: 20.0
+  novelty_novel_genus_min: 20.0
   novelty_novel_genus_max: 25.0
   uncertainty_known_max: 0.5
   uncertainty_novel_species_max: 0.5

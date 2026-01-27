@@ -121,8 +121,8 @@ Metadarkmatter automatically tracks species metadata throughout the pipeline:
 
 ### Novel Diversity Detection
 
-- Identify **Novel Species** candidates (5-15% novelty, <2% uncertainty)
-- Identify **Novel Genus** candidates (15-25% novelty, <2% uncertainty)
+- Identify **Novel Species** candidates (5-20% novelty, <2% uncertainty)
+- Identify **Novel Genus** candidates (20-25% novelty, <2% uncertainty)
 - Extract candidate reads with `score extract-novel` for targeted assembly
 - Literature-backed thresholds based on 95-96% ANI species boundary
 

@@ -9,6 +9,7 @@ Provides Python interfaces for:
 from __future__ import annotations
 
 import gzip
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -296,7 +297,9 @@ class BlastN(ExternalTool):
         # Check if we need to convert FASTQ to FASTA
         if query and isinstance(query, Path) and self._is_fastq_file(query):
             # Create temporary FASTA file
-            temp_fasta = Path(tempfile.mktemp(suffix='.fasta', prefix='blast_query_'))
+            fd, temp_fasta_str = tempfile.mkstemp(suffix='.fasta', prefix='blast_query_')
+            os.close(fd)
+            temp_fasta = Path(temp_fasta_str)
 
             try:
                 # Convert FASTQ to FASTA
