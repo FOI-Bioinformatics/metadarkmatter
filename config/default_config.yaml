@@ -20,12 +20,12 @@ scoring:
 
   # Novelty index thresholds (N = 100 - percent identity)
   # N < 5%: Known Species (pident > 95%, same species)
-  # 5% <= N <= 15%: Novel Species (pident 85-95%)
-  # 15% <= N <= 25%: Novel Genus (pident 75-85%)
+  # 5% <= N <= 20%: Novel Species (pident 80-95%)
+  # 20% <= N <= 25%: Novel Genus (pident 75-80%)
   novelty_known_max: 5.0            # Maximum for known species (CLI default)
   novelty_novel_species_min: 5.0    # Minimum for novel species
-  novelty_novel_species_max: 15.0   # Maximum for novel species
-  novelty_novel_genus_min: 15.0     # Minimum for novel genus
+  novelty_novel_species_max: 20.0   # Maximum for novel species
+  novelty_novel_genus_min: 20.0     # Minimum for novel genus
   novelty_novel_genus_max: 25.0     # Maximum for novel genus
 
   # Placement uncertainty thresholds (U = 100 - ANI between competing genomes)

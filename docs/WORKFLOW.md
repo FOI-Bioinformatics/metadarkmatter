@@ -487,8 +487,8 @@ metadarkmatter report multi \
 | Category | Novelty Index | Placement Uncertainty | Interpretation |
 |----------|---------------|----------------------|----------------|
 | Known Species | < 2% | < 0.5% | Matches reference genome |
-| Novel Species | 5-15% | < 0.5% | New species in known genus |
-| Novel Genus | 15-25% | < 2% | New genus in family |
+| Novel Species | 5-20% | < 0.5% | New species in known genus |
+| Novel Genus | 20-25% | < 2% | New genus in family |
 | Conserved Region | any | > 5% | Ambiguous (rRNA, etc.) |
 
 ### Key Metrics

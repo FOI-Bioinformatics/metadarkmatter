@@ -126,7 +126,7 @@ class BlastDataFactory:
         bitscore: float = 220.0,
     ) -> list[BlastRecord]:
         """
-        Create a read with moderate identity (novel species, 5-15% divergence).
+        Create a read with moderate identity (novel species, 5-20% divergence).
 
         Args:
             read_id: Read identifier (auto-generated if None)
@@ -170,7 +170,7 @@ class BlastDataFactory:
         bitscore: float = 180.0,
     ) -> list[BlastRecord]:
         """
-        Create a read with low identity (novel genus, 15-25% divergence).
+        Create a read with low identity (novel genus, 20-25% divergence).
 
         Args:
             read_id: Read identifier (auto-generated if None)

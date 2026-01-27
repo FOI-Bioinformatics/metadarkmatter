@@ -1701,8 +1701,8 @@ def extract_novel(
     targeted assembly or further validation of novel lineages.
 
     Categories:
-      - species: Novel species candidates (5-15% novelty, <2% uncertainty)
-      - genus: Novel genus candidates (15-25% novelty, <2% uncertainty)
+      - species: Novel species candidates (5-20% novelty, <2% uncertainty)
+      - genus: Novel genus candidates (20-25% novelty, <2% uncertainty)
       - all: Both novel species and genus candidates
 
     Example:
@@ -1783,10 +1783,10 @@ def extract_novel(
         filter_desc = f"novelty >= {min_novelty}%, uncertainty < {max_uncertainty}%"
     elif category == "species":
         filter_expr = pl.col("taxonomic_call") == "Novel Species"
-        filter_desc = "Novel Species (5-15% novelty, <2% uncertainty)"
+        filter_desc = "Novel Species (5-20% novelty, <2% uncertainty)"
     elif category == "genus":
         filter_expr = pl.col("taxonomic_call") == "Novel Genus"
-        filter_desc = "Novel Genus (15-25% novelty, <2% uncertainty)"
+        filter_desc = "Novel Genus (20-25% novelty, <2% uncertainty)"
     else:  # all
         filter_expr = (
             (pl.col("taxonomic_call") == "Novel Species") |

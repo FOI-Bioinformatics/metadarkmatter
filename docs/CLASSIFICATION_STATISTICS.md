@@ -21,8 +21,8 @@ Where `pident` is the percent identity of the best BLAST hit (highest bitscore).
 | Novelty Index | BLAST Identity | Interpretation |
 |---------------|----------------|----------------|
 | N < 5% | pident > 95% | At or above species boundary |
-| 5% <= N < 15% | 85% < pident <= 95% | Below species boundary |
-| 15% <= N <= 25% | 75% <= pident <= 85% | Genus-level divergence |
+| 5% <= N < 20% | 80% < pident <= 95% | Below species boundary |
+| 20% <= N <= 25% | 75% <= pident <= 80% | Genus-level divergence |
 | N > 25% | pident < 75% | Very high divergence |
 
 ### Placement Uncertainty (U)
@@ -59,7 +59,7 @@ Uncertainty (U)
  <2% |  [Known Species]      [Novel Species]      [Novel Genus]
      |
      +------------------------------------------------------> Novelty (N)
-         0%    5%           15%           25%
+         0%    5%           20%           25%
 ```
 
 ## Classification Categories
@@ -70,12 +70,12 @@ Uncertainty (U)
 - **Biological interpretation:** The read originates from a characterized species in the reference database
 
 ### Novel Species
-- **Criteria:** 5% <= N < 15% AND U < 2%
+- **Criteria:** 5% <= N < 20% AND U < 2%
 - **Meaning:** Moderate divergence from reference (85-95% identity) with confident placement
 - **Biological interpretation:** Potential novel species - significant divergence from known taxa but placement is unambiguous
 
 ### Novel Genus
-- **Criteria:** 15% <= N <= 25% AND U < 2%
+- **Criteria:** 20% <= N <= 25% AND U < 2%
 - **Meaning:** High divergence (75-85% identity) with confident placement
 - **Biological interpretation:** Potential novel genus - substantial divergence suggesting higher taxonomic novelty
 
@@ -115,11 +115,11 @@ START: Read with BLAST hits
          |
         NO
          v
-   Is 5% <= N < 15%? --YES--> NOVEL SPECIES
+   Is 5% <= N < 20%? --YES--> NOVEL SPECIES
          |
         NO
          v
-   Is 15% <= N <= 25%? --YES--> NOVEL GENUS
+   Is 20% <= N <= 25%? --YES--> NOVEL GENUS
          |
         NO
          v
@@ -148,7 +148,7 @@ When competing genomes share >98% ANI:
 The genus boundary is less precisely defined than species:
 - **Qin et al. 2014**: Found genus boundaries vary from 65-83% ANI
 - We use 75% (N=25%) as a conservative genus boundary
-- Combined with 85% (N=15%) for novel species maximum
+- Combined with 80% (N=20%) for novel species maximum
 
 ## GTDB Method Comparison
 
@@ -303,7 +303,7 @@ Best hit: GCF_000234567 at 91.2% identity
 Second hit: GCF_000345678 at 90.5% identity
 ANI(GCF_000234567, GCF_000345678) = 98.5%
 
-N = 100 - 91.2 = 8.8% (5-15%)
+N = 100 - 91.2 = 8.8% (5-20%)
 U = 100 - 98.5 = 1.5% (< 2%)
 
 Classification: NOVEL SPECIES
@@ -331,7 +331,7 @@ Best hit: GCF_000678901 at 94.2% identity
 Second hit: GCF_000789012 at 93.8% identity
 ANI(GCF_000678901, GCF_000789012) = 96.5%
 
-N = 100 - 94.2 = 5.8% (5-15%)
+N = 100 - 94.2 = 5.8% (5-20%)
 U = 100 - 96.5 = 3.5% (2-5%)
 
 Classification: AMBIGUOUS
@@ -343,8 +343,8 @@ Interpretation: Competing genomes are at species boundary; cannot confidently pl
 | Category | Novelty (N) | Uncertainty (U) | BLAST Identity | ANI Range |
 |----------|-------------|-----------------|----------------|-----------|
 | Known Species | < 5% | < 2% | > 95% | > 98% |
-| Novel Species | 5% to <15% | < 2% | 85-95% | > 98% |
-| Novel Genus | 15-25% | < 2% | 75-85% | > 98% |
+| Novel Species | 5% to <20% | < 2% | 80-95% | > 98% |
+| Novel Genus | 20-25% | < 2% | 75-80% | > 98% |
 | Ambiguous | any | 2% to <5% | any | >95% to 98% |
 | Conserved Region | any | >= 5% | any | <= 95% |
 | Unclassified | > 25% or edge | < 2% | < 75% | > 98% |
