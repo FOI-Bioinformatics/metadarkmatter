@@ -250,3 +250,30 @@ class TestHTMLTemplates:
         assert get_cell_class("Known Species") == "cell-known"
         assert get_cell_class("Novel Species") == "cell-novel-species"
         assert get_cell_class("Unknown") == ""
+
+
+class TestPhylogenyTemplates:
+    """Test phylogeny-related templates."""
+
+    def test_phylogeny_section_template_exists(self):
+        from metadarkmatter.visualization.report.templates import PHYLOGENY_SECTION_TEMPLATE
+
+        assert "phylogeny-container" in PHYLOGENY_SECTION_TEMPLATE
+        assert "TREE_DATA" in PHYLOGENY_SECTION_TEMPLATE
+
+    def test_phylotree_js_template_exists(self):
+        from metadarkmatter.visualization.report.templates import PHYLOTREE_JS_TEMPLATE
+
+        assert "d3" in PHYLOTREE_JS_TEMPLATE
+
+    def test_phylogeny_not_provided_message_exists(self):
+        from metadarkmatter.visualization.report.templates import PHYLOGENY_NOT_PROVIDED_MESSAGE
+
+        assert "phylogeny" in PHYLOGENY_NOT_PROVIDED_MESSAGE.lower() or \
+               "tree" in PHYLOGENY_NOT_PROVIDED_MESSAGE.lower()
+
+    def test_phylogeny_styles_included(self):
+        from metadarkmatter.visualization.report.styles import get_css_styles
+
+        css = get_css_styles("light")
+        assert ".phylogeny-section" in css or "phylogeny-container" in css

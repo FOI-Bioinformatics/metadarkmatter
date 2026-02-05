@@ -1528,3 +1528,335 @@ def get_metric_color_class(metric_type: str) -> str:
         "conserved": "info",
     }
     return color_map.get(metric_type, "")
+
+
+# =============================================================================
+# Phylogeny Tab Templates
+# =============================================================================
+
+PHYLOGENY_SECTION_TEMPLATE: str = '''
+<div class="phylogeny-section">
+    <div class="phylogeny-header">
+        <h3>Phylogenetic Placement</h3>
+        <p class="phylogeny-description">
+            Interactive phylogenetic tree showing the placement of novel taxa relative to
+            reference genomes. Novel clusters are highlighted based on their classification
+            confidence. Hover over nodes for detailed information.
+        </p>
+    </div>
+
+    <div class="phylogeny-controls">
+        <button class="btn btn-secondary" id="toggleLayoutBtn" onclick="toggleTreeLayout()">
+            Toggle Layout
+        </button>
+        <button class="btn btn-secondary" id="expandAllBtn" onclick="expandAllNodes()">
+            Expand All
+        </button>
+        <button class="btn btn-secondary" id="collapseGeneraBtn" onclick="collapseToGenera()">
+            Collapse to Genera
+        </button>
+    </div>
+
+    <div class="phylogeny-legend">
+        <div class="legend-title">Legend</div>
+        <div class="legend-items">
+            <div class="legend-item">
+                <span class="legend-circle reference"></span>
+                <span class="legend-label">Reference Genome</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-circle novel-species"></span>
+                <span class="legend-label">Novel Species</span>
+            </div>
+            <div class="legend-item">
+                <span class="legend-circle novel-genus"></span>
+                <span class="legend-label">Novel Genus</span>
+            </div>
+        </div>
+        <div class="legend-badges">
+            <span class="confidence-badge high">High Confidence</span>
+            <span class="confidence-badge medium">Medium</span>
+            <span class="confidence-badge low">Low</span>
+        </div>
+    </div>
+
+    <div class="phylogeny-tree-container" id="phylogeny-container">
+        <!-- Tree will be rendered here by D3 -->
+    </div>
+
+    <div class="phylogeny-tooltip" id="phylogeny-tooltip" style="display: none;">
+        <!-- Tooltip content populated dynamically -->
+    </div>
+
+    <script>
+        var TREE_DATA = {tree_data_json};
+    </script>
+</div>
+'''
+
+PHYLOTREE_JS_TEMPLATE: str = '''
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script>
+// Phylogenetic tree visualization using D3.js
+(function() {{
+    'use strict';
+
+    // Check if tree data is available
+    if (typeof TREE_DATA === 'undefined' || !TREE_DATA) {{
+        console.warn('No tree data available for phylogeny visualization');
+        return;
+    }}
+
+    // Configuration
+    var config = {{
+        width: 900,
+        height: 600,
+        margin: {{ top: 20, right: 120, bottom: 20, left: 120 }},
+        nodeRadius: 6,
+        linkColor: '#ccc',
+        novelLinkColor: '#f39c12',
+        colors: {{
+            reference: '#2ecc71',
+            novelSpecies: '#f39c12',
+            novelGenus: '#e74c3c',
+            unknown: '#95a5a6'
+        }}
+    }};
+
+    var container = document.getElementById('phylogeny-container');
+    if (!container) {{
+        console.error('Phylogeny container not found');
+        return;
+    }}
+
+    var tooltip = document.getElementById('phylogeny-tooltip');
+    var currentLayout = 'cluster';  // or 'radial'
+
+    // Parse Newick string into hierarchical structure
+    function parseNewick(newick) {{
+        var tokens = newick.split(/\\s*(;|\\(|\\)|,|:)\\s*/);
+        var stack = [];
+        var root = {{ name: '', children: [] }};
+        var current = root;
+
+        for (var i = 0; i < tokens.length; i++) {{
+            var token = tokens[i];
+            switch (token) {{
+                case '(':
+                    var newNode = {{ name: '', children: [] }};
+                    current.children.push(newNode);
+                    stack.push(current);
+                    current = newNode;
+                    break;
+                case ',':
+                    var sibling = {{ name: '', children: [] }};
+                    stack[stack.length - 1].children.push(sibling);
+                    current = sibling;
+                    break;
+                case ')':
+                    current = stack.pop();
+                    break;
+                case ':':
+                    break;
+                case ';':
+                    break;
+                default:
+                    if (token.length > 0) {{
+                        var num = parseFloat(token);
+                        if (!isNaN(num)) {{
+                            current.branchLength = num;
+                        }} else {{
+                            current.name = token;
+                        }}
+                    }}
+            }}
+        }}
+
+        return root.children.length === 1 ? root.children[0] : root;
+    }}
+
+    // Create SVG element
+    var svg = d3.select(container)
+        .append('svg')
+        .attr('width', config.width)
+        .attr('height', config.height)
+        .append('g')
+        .attr('transform', 'translate(' + config.margin.left + ',' + config.margin.top + ')');
+
+    // Parse tree data
+    var treeData;
+    if (typeof TREE_DATA === 'string') {{
+        treeData = parseNewick(TREE_DATA);
+    }} else {{
+        treeData = TREE_DATA;
+    }}
+
+    // Create hierarchy
+    var root = d3.hierarchy(treeData);
+
+    // Create tree layout
+    var treeLayout = d3.cluster()
+        .size([config.height - config.margin.top - config.margin.bottom,
+               config.width - config.margin.left - config.margin.right]);
+
+    treeLayout(root);
+
+    // Draw links
+    var link = svg.selectAll('.link')
+        .data(root.links())
+        .enter()
+        .append('path')
+        .attr('class', 'link')
+        .attr('d', function(d) {{
+            return 'M' + d.source.y + ',' + d.source.x +
+                   'C' + (d.source.y + d.target.y) / 2 + ',' + d.source.x +
+                   ' ' + (d.source.y + d.target.y) / 2 + ',' + d.target.x +
+                   ' ' + d.target.y + ',' + d.target.x;
+        }})
+        .style('fill', 'none')
+        .style('stroke', function(d) {{
+            // Check if this is a novel cluster link
+            var targetData = d.target.data;
+            if (targetData && targetData.isNovel) {{
+                return config.novelLinkColor;
+            }}
+            return config.linkColor;
+        }})
+        .style('stroke-width', function(d) {{
+            var targetData = d.target.data;
+            if (targetData && targetData.isNovel) {{
+                return '2px';
+            }}
+            return '1.5px';
+        }})
+        .style('stroke-dasharray', function(d) {{
+            var targetData = d.target.data;
+            if (targetData && targetData.isNovel) {{
+                return '5,3';
+            }}
+            return 'none';
+        }});
+
+    // Draw nodes
+    var node = svg.selectAll('.node')
+        .data(root.descendants())
+        .enter()
+        .append('g')
+        .attr('class', function(d) {{
+            var classes = 'node';
+            if (d.data.isNovel) classes += ' novel';
+            if (!d.children) classes += ' leaf';
+            return classes;
+        }})
+        .attr('transform', function(d) {{
+            return 'translate(' + d.y + ',' + d.x + ')';
+        }});
+
+    // Add circles for nodes
+    node.append('circle')
+        .attr('r', function(d) {{
+            // Size based on read count if available
+            var readCount = d.data.readCount || 0;
+            if (readCount > 100) return config.nodeRadius + 3;
+            if (readCount > 10) return config.nodeRadius + 1;
+            return config.nodeRadius;
+        }})
+        .style('fill', function(d) {{
+            if (!d.data) return config.colors.unknown;
+            if (d.data.nodeType === 'novel_genus') return config.colors.novelGenus;
+            if (d.data.nodeType === 'novel_species') return config.colors.novelSpecies;
+            if (d.data.nodeType === 'reference') return config.colors.reference;
+            return config.colors.unknown;
+        }})
+        .style('stroke', '#fff')
+        .style('stroke-width', '1.5px');
+
+    // Add labels for leaf nodes
+    node.filter(function(d) {{ return !d.children; }})
+        .append('text')
+        .attr('dy', '0.35em')
+        .attr('x', 10)
+        .style('font-size', '10px')
+        .style('font-family', 'sans-serif')
+        .text(function(d) {{
+            var name = d.data.name || '';
+            // Truncate long names
+            if (name.length > 30) {{
+                return name.substring(0, 27) + '...';
+            }}
+            return name;
+        }});
+
+    // Add confidence badges for novel nodes
+    node.filter(function(d) {{ return d.data && d.data.isNovel; }})
+        .append('text')
+        .attr('class', 'confidence-badge')
+        .attr('dy', '-12')
+        .attr('dx', '-5')
+        .style('font-size', '8px')
+        .style('fill', function(d) {{
+            var confidence = d.data.confidence || 0;
+            if (confidence >= 75) return '#2ecc71';
+            if (confidence >= 50) return '#f39c12';
+            return '#e74c3c';
+        }})
+        .text(function(d) {{
+            var confidence = d.data.confidence || 0;
+            if (confidence >= 75) return 'H';
+            if (confidence >= 50) return 'M';
+            return 'L';
+        }});
+
+    // Tooltip interactions
+    node.on('mouseover', function(event, d) {{
+        if (!tooltip) return;
+
+        var content = '<strong>' + (d.data.name || 'Internal node') + '</strong>';
+        if (d.data.readCount) {{
+            content += '<br>Reads: ' + d.data.readCount;
+        }}
+        if (d.data.noveltyIndex !== undefined) {{
+            content += '<br>Novelty: ' + d.data.noveltyIndex.toFixed(1) + '%';
+        }}
+        if (d.data.confidence !== undefined) {{
+            content += '<br>Confidence: ' + d.data.confidence.toFixed(0);
+        }}
+        if (d.data.nodeType) {{
+            content += '<br>Type: ' + d.data.nodeType.replace('_', ' ');
+        }}
+
+        tooltip.innerHTML = content;
+        tooltip.style.display = 'block';
+        tooltip.style.left = (event.pageX + 10) + 'px';
+        tooltip.style.top = (event.pageY - 10) + 'px';
+    }})
+    .on('mouseout', function() {{
+        if (tooltip) {{
+            tooltip.style.display = 'none';
+        }}
+    }});
+
+    // Global functions for button controls
+    window.toggleTreeLayout = function() {{
+        console.log('Toggle layout requested');
+        // Layout toggle implementation would go here
+    }};
+
+    window.expandAllNodes = function() {{
+        console.log('Expand all nodes requested');
+        // Expand implementation would go here
+    }};
+
+    window.collapseToGenera = function() {{
+        console.log('Collapse to genera requested');
+        // Collapse implementation would go here
+    }};
+
+}})();
+</script>
+'''
+
+PHYLOGENY_NOT_PROVIDED_MESSAGE: str = (
+    "Phylogenetic tree not provided. Use --tree option with a Newick file "
+    "to include the phylogeny visualization."
+)
