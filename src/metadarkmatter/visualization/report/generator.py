@@ -1950,6 +1950,12 @@ document.addEventListener('DOMContentLoaded', function() {
             else:
                 final_newick = newick
 
+            # Strip BioPython comment blocks from Newick (JavaScript parser can't handle them)
+            # Comments look like: NSP_001:0.1[{"classification": "novel_species", ...}]
+            # We already have this data in the annotations dict
+            import re
+            final_newick = re.sub(r'\[[^\]]*\]', '', final_newick)
+
             # Build annotations dict for novel clusters
             annotations: dict[str, dict[str, Any]] = {}
             for cluster in novel_clusters:
