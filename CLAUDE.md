@@ -87,6 +87,33 @@ See [Tutorial](docs/TUTORIAL_ENVIRONMENTAL_SPECIES.md) Step 7 for detailed decis
 - FASTA headers are standardized to `{accession}|{contig_id}` format in BLAST databases
 - Classification thresholds differ between nucleotide (default) and protein mode (`--alignment-mode protein`)
 
+## Phylogeny Tab
+
+The HTML report includes an interactive phylogenetic tree tab showing novel clusters in evolutionary context.
+
+**CLI Options:**
+```bash
+# Default: auto-generate NJ tree from ANI matrix
+metadarkmatter report generate --classifications results.csv --ani ani.csv --output report.html
+
+# Use custom tree
+metadarkmatter report generate --classifications results.csv --ani ani.csv --tree custom.nwk --output report.html
+
+# Skip phylogeny tab (faster for large datasets)
+metadarkmatter report generate --classifications results.csv --ani ani.csv --no-phylogeny --output report.html
+```
+
+**Key Files:**
+- `core/phylogeny/tree_builder.py` - `ani_to_newick()`, `load_user_tree()`
+- `core/phylogeny/placement.py` - `NovelCluster`, `extract_novel_clusters()`, `place_novel_clusters()`
+- `visualization/report/templates.py` - `PHYLOGENY_SECTION_TEMPLATE`, `PHYLOTREE_JS_TEMPLATE`
+- `visualization/report/generator.py` - `_build_phylogeny_section()`
+
+**Requirements:**
+- ANI matrix with >= 3 genomes
+- BioPython (dependency in pyproject.toml)
+- D3.js loaded from CDN in report
+
 ## Critical Known Issues
 
 ### ANI/AAI Heatmap Clustering (FIXED)
@@ -122,13 +149,16 @@ src/metadarkmatter/
 ├── cli/              # Typer CLI commands (entry points)
 ├── core/             # Core algorithms (ANI classification, parsers, metadata)
 │   ├── constants.py          # Nucleotide thresholds (default mode)
-│   └── protein_constants.py  # Protein thresholds (--alignment-mode protein)
+│   ├── protein_constants.py  # Protein thresholds (--alignment-mode protein)
+│   └── phylogeny/            # Phylogenetic tree building and novel cluster placement
+│       ├── tree_builder.py   # ANI-to-Newick conversion, user tree loading
+│       └── placement.py      # Novel cluster extraction and tree placement
 ├── external/         # External tool wrappers (BLAST, MMseqs2, Kraken2, etc.)
 ├── models/           # Pydantic data models
 ├── clients/          # API clients (GTDB with retry logic)
 └── visualization/    # Plotly charts and HTML report generation
     └── report/
-        └── generator.py  # Single-sample reports with heatmap clustering
+        └── generator.py  # Single-sample reports with heatmap clustering, phylogeny tab
 ```
 
 ## Classification Thresholds
