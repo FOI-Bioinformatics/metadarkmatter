@@ -1632,6 +1632,32 @@ PHYLOTREE_JS_TEMPLATE: str = '''
     var tooltip = document.getElementById('phylogeny-tooltip');
     var currentLayout = 'cluster';  // or 'radial'
 
+    // Get annotations from TREE_DATA (keyed by node name)
+    var annotations = (TREE_DATA && TREE_DATA.annotations) || {{}};
+
+    // Helper function to look up annotation data for a node
+    function getNodeAnnotation(nodeName) {{
+        if (!nodeName || !annotations[nodeName]) {{
+            return null;
+        }}
+        var ann = annotations[nodeName];
+        // Convert Python snake_case keys to JavaScript camelCase/expected format
+        return {{
+            isNovel: ann.is_novel || false,
+            nodeType: ann.type === 'Novel Species' ? 'novel_species' :
+                      ann.type === 'Novel Genus' ? 'novel_genus' : 'reference',
+            readCount: ann.read_count || 0,
+            noveltyIndex: ann.mean_novelty || 0,
+            confidence: typeof ann.confidence === 'string' ?
+                (ann.confidence === 'High' ? 85 :
+                 ann.confidence === 'Medium' ? 65 : 35) :
+                (ann.confidence || 0),
+            meanUncertainty: ann.mean_uncertainty || 0,
+            nearestRef: ann.nearest_ref || '',
+            estAni: ann.est_ani || 0
+        }};
+    }}
+
     // Parse Newick string into hierarchical structure
     function parseNewick(newick) {{
         var tokens = newick.split(/\\s*(;|\\(|\\)|,|:)\\s*/);
@@ -1675,6 +1701,24 @@ PHYLOTREE_JS_TEMPLATE: str = '''
         return root.children.length === 1 ? root.children[0] : root;
     }}
 
+    // Recursively merge annotations into tree nodes
+    function mergeAnnotations(node) {{
+        if (node.name) {{
+            var ann = getNodeAnnotation(node.name);
+            if (ann) {{
+                // Merge annotation properties into the node
+                Object.assign(node, ann);
+            }} else {{
+                // Reference genome (no annotation) - mark as reference
+                node.isNovel = false;
+                node.nodeType = 'reference';
+            }}
+        }}
+        if (node.children) {{
+            node.children.forEach(mergeAnnotations);
+        }}
+    }}
+
     // Create SVG element
     var svg = d3.select(container)
         .append('svg')
@@ -1683,13 +1727,18 @@ PHYLOTREE_JS_TEMPLATE: str = '''
         .append('g')
         .attr('transform', 'translate(' + config.margin.left + ',' + config.margin.top + ')');
 
-    // Parse tree data
+    // Parse tree data - TREE_DATA is an object with newick property
     var treeData;
-    if (typeof TREE_DATA === 'string') {{
+    if (TREE_DATA.newick) {{
+        treeData = parseNewick(TREE_DATA.newick);
+    }} else if (typeof TREE_DATA === 'string') {{
         treeData = parseNewick(TREE_DATA);
     }} else {{
         treeData = TREE_DATA;
     }}
+
+    // Merge annotations into tree nodes after parsing
+    mergeAnnotations(treeData);
 
     // Create hierarchy
     var root = d3.hierarchy(treeData);
