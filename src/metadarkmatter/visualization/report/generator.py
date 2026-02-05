@@ -1980,7 +1980,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 tree_data_json=json.dumps(tree_data),
             )
 
-            return section_html + PHYLOTREE_JS_TEMPLATE
+            # PHYLOTREE_JS_TEMPLATE uses {{ and }} for JS braces, call .format() to convert
+            return section_html + PHYLOTREE_JS_TEMPLATE.format()
 
         except ImportError as e:
             logger.warning(f"Phylogeny dependencies not available: {e}")
