@@ -122,6 +122,19 @@ def generate_report(
         min=10,
         max=200,
     ),
+    tree: Path | None = typer.Option(
+        None,
+        "--tree",
+        help="Newick tree file for phylogenetic context. "
+             "If not provided, neighbor-joining tree is built from ANI matrix.",
+        exists=True,
+        dir_okay=False,
+    ),
+    no_phylogeny: bool = typer.Option(
+        False,
+        "--no-phylogeny",
+        help="Skip phylogeny tab generation (faster for large datasets).",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose", "-v",
@@ -144,6 +157,7 @@ def generate_report(
     - Species: Species-level breakdown charts (if metadata provided)
     - Genomes: Per-genome breakdown charts
     - ANI Matrix: Heatmap of genome-genome ANI values (if provided)
+    - Phylogeny: Interactive phylogenetic tree with novel cluster placement (if ANI provided)
     - Data: Interactive searchable/sortable classification table
 
     Example:
@@ -169,6 +183,13 @@ def generate_report(
             --metadata genome_metadata.tsv \\
             --bam mapped.bam \\
             --sample-name "Environmental Sample"
+
+        # Report with custom phylogenetic tree
+        metadarkmatter report generate \\
+            --classifications results.csv \\
+            --ani ani_matrix.csv \\
+            --tree custom_tree.nwk \\
+            --output report.html
 
         # Dark theme report
         metadarkmatter report generate \\
@@ -310,6 +331,8 @@ def generate_report(
                 max_table_rows=max_table_rows,
                 max_phylo_clusters=max_phylo_clusters,
                 max_phylo_references=max_phylo_references,
+                skip_phylogeny=no_phylogeny,
+                user_tree_path=tree,
                 plot_config=PlotConfig(),
                 thresholds=ThresholdConfig(),
             )

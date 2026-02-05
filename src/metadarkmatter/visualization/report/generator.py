@@ -229,6 +229,10 @@ class ReportConfig:
     max_phylo_clusters: int = 20  # Maximum novel clusters in heatmap
     max_phylo_references: int = 50  # Maximum reference genomes in heatmap
 
+    # Phylogeny tab options
+    skip_phylogeny: bool = False  # Skip phylogeny tab generation
+    user_tree_path: Path | None = None  # Path to user-provided Newick tree
+
     plot_config: PlotConfig = field(default_factory=PlotConfig)
     thresholds: ThresholdConfig = field(default_factory=ThresholdConfig)
 
@@ -476,13 +480,16 @@ class ReportGenerator:
         # Reference AAI tab
         content_sections.append(self._build_aai_section())
 
-        # Phylogeny tab (only if ANI matrix provided with >= 3 genomes)
+        # Phylogeny tab (only if ANI matrix provided with >= 3 genomes and not skipped)
         self._phylogeny_html = None
-        if self.ani_matrix is not None and len(self.ani_matrix) >= 3:
+        if not self.config.skip_phylogeny and self.ani_matrix is not None and len(self.ani_matrix) >= 3:
             ani_pd = self.ani_matrix.to_pandas()
             if "genome" in ani_pd.columns:
                 ani_pd = ani_pd.set_index("genome")
-            self._phylogeny_html = self._build_phylogeny_section(ani_pd)
+            self._phylogeny_html = self._build_phylogeny_section(
+                ani_pd,
+                user_tree_path=self.config.user_tree_path,
+            )
             if self._phylogeny_html:
                 content_sections.append(
                     TAB_SECTION_TEMPLATE.format(
