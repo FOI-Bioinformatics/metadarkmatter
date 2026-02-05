@@ -90,6 +90,7 @@ from metadarkmatter.visualization.report.novel_section import (
 )
 
 if TYPE_CHECKING:
+    import pandas as pd
     import plotly.graph_objects as go
 
 
@@ -475,6 +476,23 @@ class ReportGenerator:
         # Reference AAI tab
         content_sections.append(self._build_aai_section())
 
+        # Phylogeny tab (only if ANI matrix provided with >= 3 genomes)
+        self._phylogeny_html = None
+        if self.ani_matrix is not None and len(self.ani_matrix) >= 3:
+            ani_pd = self.ani_matrix.to_pandas()
+            if "genome" in ani_pd.columns:
+                ani_pd = ani_pd.set_index("genome")
+            self._phylogeny_html = self._build_phylogeny_section(ani_pd)
+            if self._phylogeny_html:
+                content_sections.append(
+                    TAB_SECTION_TEMPLATE.format(
+                        tab_id="phylogeny",
+                        active_class="",
+                        section_title="Phylogeny",
+                        content=self._phylogeny_html,
+                    )
+                )
+
         # Discovery Scores tab (only if enhanced scoring data available)
         if self.summary.has_enhanced_scoring or self.summary.has_inferred_uncertainty:
             content_sections.append(self._build_enhanced_scoring_section())
@@ -534,6 +552,10 @@ class ReportGenerator:
             ("ani", "Reference ANI", False),
             ("aai", "Reference AAI", False),
         ])
+
+        # Add Phylogeny tab if phylogeny section was built
+        if hasattr(self, "_phylogeny_html") and self._phylogeny_html is not None:
+            tabs.append(("phylogeny", "Phylogeny", False))
 
         # Add Discovery Scores tab if data available (renamed from Enhanced Scoring)
         if self.summary.has_enhanced_scoring or self.summary.has_inferred_uncertainty:
@@ -1858,6 +1880,107 @@ document.addEventListener('DOMContentLoaded', function() {
             section_title="Classification Data",
             content=content,
         )
+
+    def _build_phylogeny_section(
+        self,
+        ani_matrix_pd: pd.DataFrame | None,
+        user_tree_path: Path | None = None,
+    ) -> str | None:
+        """Build interactive phylogenetic tree section.
+
+        Generates a phylogenetic tree from the ANI matrix (or loads a user-provided
+        tree) and places novel clusters at estimated positions. The tree is rendered
+        using D3.js for interactive exploration.
+
+        Args:
+            ani_matrix_pd: Pandas DataFrame with ANI values. Rows and columns
+                should be genome accessions. Should be pre-indexed (no 'genome'
+                column as index).
+            user_tree_path: Optional path to user-provided Newick tree file.
+                If provided, this tree is used instead of building from ANI.
+
+        Returns:
+            HTML string with phylogeny section content and D3.js visualization
+            code, or None if the tree cannot be built (e.g., fewer than 3 genomes).
+        """
+        import json
+
+        from metadarkmatter.visualization.report.templates import (
+            PHYLOGENY_SECTION_TEMPLATE,
+            PHYLOTREE_JS_TEMPLATE,
+        )
+
+        if ani_matrix_pd is None or len(ani_matrix_pd) < 3:
+            return None
+
+        try:
+            from metadarkmatter.core.phylogeny import (
+                ani_to_newick,
+                extract_novel_clusters,
+                load_user_tree,
+                place_novel_clusters,
+            )
+
+            # Build or load tree
+            if user_tree_path is not None:
+                newick = load_user_tree(user_tree_path, ani_matrix_pd)
+                tree_source_note = "Tree source: user-provided Newick file."
+            else:
+                newick = ani_to_newick(ani_matrix_pd)
+                tree_source_note = "Tree source: neighbor-joining from ANI matrix."
+
+            if newick is None:
+                return None
+
+            # Extract novel clusters from classifications
+            novel_clusters = extract_novel_clusters(self.df, min_reads=3)
+
+            # Place novel clusters on the tree
+            if novel_clusters:
+                final_newick = place_novel_clusters(
+                    newick, novel_clusters, ani_matrix_pd
+                )
+            else:
+                final_newick = newick
+
+            # Build annotations dict for novel clusters
+            annotations: dict[str, dict[str, Any]] = {}
+            for cluster in novel_clusters:
+                # Novel clusters are named by their cluster_id
+                node_name = cluster.cluster_id
+                annotations[node_name] = {
+                    "type": cluster.classification,
+                    "read_count": cluster.read_count,
+                    "mean_novelty": cluster.mean_novelty,
+                    "mean_uncertainty": cluster.mean_uncertainty,
+                    "confidence": cluster.confidence_rating,
+                    "nearest_ref": cluster.best_match_genome,
+                    "est_ani": cluster.mean_identity,
+                    "is_novel": True,
+                }
+
+            # Build tree data JSON for D3.js visualization
+            tree_data = {
+                "newick": final_newick,
+                "annotations": annotations,
+                "tip_count": len(ani_matrix_pd) + len(novel_clusters),
+                "novel_count": len(novel_clusters),
+                "source_note": tree_source_note,
+            }
+
+            section_html = PHYLOGENY_SECTION_TEMPLATE.format(
+                tree_source_note=tree_source_note,
+                tree_data_json=json.dumps(tree_data),
+            )
+
+            return section_html + PHYLOTREE_JS_TEMPLATE
+
+        except ImportError as e:
+            logger.warning(f"Phylogeny dependencies not available: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"Error building phylogeny section: {e}")
+            return None
 
     def _build_methods_section(self) -> str:
         """Build the Methods tab with comprehensive documentation of calculations."""
