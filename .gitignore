@@ -221,3 +221,6 @@ test_data/
 *.tmp
 tmp/
 temp/
+
+# Git worktrees
+.worktrees/

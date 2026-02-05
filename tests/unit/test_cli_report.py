@@ -347,6 +347,108 @@ class TestReportMulti:
         assert result.exit_code == 0 or "error" not in result.output.lower()
 
 
+class TestPhylogenyCLI:
+    """Test phylogeny-related CLI options."""
+
+    def test_tree_option_exists(self, cli_runner):
+        """--tree option is available in generate command."""
+        result = cli_runner.invoke(
+            app,
+            ["report", "generate", "--help"],
+        )
+
+        assert result.exit_code == 0
+        assert "--tree" in result.output
+
+    def test_no_phylogeny_option_exists(self, cli_runner):
+        """--no-phylogeny option is available in generate command."""
+        result = cli_runner.invoke(
+            app,
+            ["report", "generate", "--help"],
+        )
+
+        assert result.exit_code == 0
+        assert "--no-phylogeny" in result.output
+
+    def test_generate_with_no_phylogeny_flag(
+        self,
+        cli_runner,
+        temp_classification_file,
+        temp_ani_file,
+        temp_dir,
+    ):
+        """Test report generation with --no-phylogeny flag."""
+        output = temp_dir / "report_no_phylo.html"
+        result = cli_runner.invoke(
+            app,
+            [
+                "report",
+                "generate",
+                "--classifications",
+                str(temp_classification_file),
+                "--ani",
+                str(temp_ani_file),
+                "--output",
+                str(output),
+                "--no-phylogeny",
+            ],
+        )
+        assert result.exit_code == 0 or "error" not in result.output.lower()
+
+    def test_generate_with_tree_file(
+        self,
+        cli_runner,
+        temp_classification_file,
+        temp_ani_file,
+        temp_dir,
+    ):
+        """Test report generation with --tree option."""
+        # Create a simple Newick tree file
+        tree_file = temp_dir / "tree.nwk"
+        tree_file.write_text("((GCF_000001.1:0.1,GCF_000002.1:0.2):0.3,GCF_000003.1:0.4);")
+
+        output = temp_dir / "report_with_tree.html"
+        result = cli_runner.invoke(
+            app,
+            [
+                "report",
+                "generate",
+                "--classifications",
+                str(temp_classification_file),
+                "--ani",
+                str(temp_ani_file),
+                "--tree",
+                str(tree_file),
+                "--output",
+                str(output),
+            ],
+        )
+        assert result.exit_code == 0 or "error" not in result.output.lower()
+
+    def test_tree_option_requires_existing_file(
+        self,
+        cli_runner,
+        temp_classification_file,
+        temp_dir,
+    ):
+        """Test that --tree option validates file existence."""
+        output = temp_dir / "report.html"
+        result = cli_runner.invoke(
+            app,
+            [
+                "report",
+                "generate",
+                "--classifications",
+                str(temp_classification_file),
+                "--tree",
+                str(temp_dir / "nonexistent.nwk"),
+                "--output",
+                str(output),
+            ],
+        )
+        assert result.exit_code != 0
+
+
 class TestReportOutputValidation:
     """Tests for output file validation."""
 

@@ -250,3 +250,185 @@ class TestHTMLTemplates:
         assert get_cell_class("Known Species") == "cell-known"
         assert get_cell_class("Novel Species") == "cell-novel-species"
         assert get_cell_class("Unknown") == ""
+
+
+class TestPhylogenyTemplates:
+    """Test phylogeny-related templates."""
+
+    def test_phylogeny_section_template_exists(self):
+        from metadarkmatter.visualization.report.templates import PHYLOGENY_SECTION_TEMPLATE
+
+        assert "phylogeny-container" in PHYLOGENY_SECTION_TEMPLATE
+        assert "TREE_DATA" in PHYLOGENY_SECTION_TEMPLATE
+
+    def test_phylotree_js_template_exists(self):
+        from metadarkmatter.visualization.report.templates import PHYLOTREE_JS_TEMPLATE
+
+        assert "d3" in PHYLOTREE_JS_TEMPLATE
+
+    def test_phylogeny_not_provided_message_exists(self):
+        from metadarkmatter.visualization.report.templates import PHYLOGENY_NOT_PROVIDED_MESSAGE
+
+        assert "phylogeny" in PHYLOGENY_NOT_PROVIDED_MESSAGE.lower() or \
+               "tree" in PHYLOGENY_NOT_PROVIDED_MESSAGE.lower()
+
+    def test_phylogeny_styles_included(self):
+        from metadarkmatter.visualization.report.styles import get_css_styles
+
+        css = get_css_styles("light")
+        assert ".phylogeny-section" in css or "phylogeny-container" in css
+
+
+class TestPhylogenySection:
+    """Test phylogeny section generation in reports."""
+
+    @pytest.fixture
+    def sample_ani_matrix_large(self):
+        """Create sample ANI matrix with 4 genomes (minimum for tree building)."""
+        return pl.DataFrame({
+            "genome": ["GCF_000001.1", "GCF_000002.1", "GCF_000003.1", "GCF_000004.1"],
+            "GCF_000001.1": [100.0, 95.5, 85.2, 78.0],
+            "GCF_000002.1": [95.5, 100.0, 84.1, 77.5],
+            "GCF_000003.1": [85.2, 84.1, 100.0, 92.0],
+            "GCF_000004.1": [78.0, 77.5, 92.0, 100.0],
+        })
+
+    @pytest.fixture
+    def classifications_with_novel(self):
+        """Create classification data with novel species and genus clusters."""
+        return pl.DataFrame({
+            "read_id": [f"read_{i}" for i in range(100)],
+            "best_match_genome": (
+                ["GCF_000001.1"] * 30 +  # Known species
+                ["GCF_000002.1"] * 40 +  # Novel species (enough for cluster)
+                ["GCF_000003.1"] * 30    # Novel genus (enough for cluster)
+            ),
+            "top_hit_identity": [99.0] * 30 + [91.0] * 40 + [78.0] * 30,
+            "novelty_index": [1.0] * 30 + [9.0] * 40 + [22.0] * 30,
+            "placement_uncertainty": [0.5] * 30 + [0.8] * 40 + [1.2] * 30,
+            "num_ambiguous_hits": [1] * 30 + [2] * 40 + [2] * 30,
+            "taxonomic_call": (
+                ["Known Species"] * 30 +
+                ["Novel Species"] * 40 +
+                ["Novel Genus"] * 30
+            ),
+            "is_novel": [False] * 30 + [True] * 70,
+        })
+
+    def test_build_phylogeny_section_with_ani(
+        self, classifications_with_novel, sample_ani_matrix_large
+    ):
+        """Phylogeny section is built when ANI matrix provided."""
+        from metadarkmatter.visualization.report.generator import ReportGenerator
+
+        generator = ReportGenerator(
+            classifications_with_novel,
+            ani_matrix=sample_ani_matrix_large,
+        )
+
+        # Convert ANI matrix to pandas for the method
+        ani_pd = sample_ani_matrix_large.to_pandas()
+        if "genome" in ani_pd.columns:
+            ani_pd = ani_pd.set_index("genome")
+
+        section = generator._build_phylogeny_section(ani_pd)
+
+        # Should return HTML content when ANI matrix is provided
+        assert section is not None
+        assert "phylogeny" in section.lower() or "tree" in section.lower()
+        assert "TREE_DATA" in section
+
+    def test_phylogeny_section_skipped_without_ani(self, classifications_with_novel):
+        """Phylogeny section returns None without ANI matrix."""
+        from metadarkmatter.visualization.report.generator import ReportGenerator
+
+        generator = ReportGenerator(classifications_with_novel)
+
+        # Should return None when no ANI matrix
+        section = generator._build_phylogeny_section(None)
+        assert section is None
+
+    def test_phylogeny_section_skipped_with_small_matrix(
+        self, classifications_with_novel
+    ):
+        """Phylogeny section returns None when ANI matrix has < 3 genomes."""
+        from metadarkmatter.visualization.report.generator import ReportGenerator
+        import pandas as pd
+
+        generator = ReportGenerator(classifications_with_novel)
+
+        # Create a small 2x2 ANI matrix (too small for NJ tree)
+        small_ani = pd.DataFrame(
+            [[100.0, 95.0], [95.0, 100.0]],
+            index=["GCF_000001.1", "GCF_000002.1"],
+            columns=["GCF_000001.1", "GCF_000002.1"],
+        )
+
+        section = generator._build_phylogeny_section(small_ani)
+        assert section is None
+
+    def test_phylogeny_section_with_novel_clusters(
+        self, classifications_with_novel, sample_ani_matrix_large
+    ):
+        """Phylogeny section includes novel clusters when present."""
+        from metadarkmatter.visualization.report.generator import ReportGenerator
+
+        generator = ReportGenerator(
+            classifications_with_novel,
+            ani_matrix=sample_ani_matrix_large,
+        )
+
+        # Convert ANI matrix to pandas
+        ani_pd = sample_ani_matrix_large.to_pandas()
+        if "genome" in ani_pd.columns:
+            ani_pd = ani_pd.set_index("genome")
+
+        section = generator._build_phylogeny_section(ani_pd)
+
+        # Should contain annotations for novel clusters
+        assert section is not None
+        # The section should have tree data JSON embedded
+        assert "annotations" in section or "tree_data" in section.lower()
+
+    def test_phylogeny_section_includes_d3_script(
+        self, classifications_with_novel, sample_ani_matrix_large
+    ):
+        """Phylogeny section includes D3.js for tree rendering."""
+        from metadarkmatter.visualization.report.generator import ReportGenerator
+
+        generator = ReportGenerator(
+            classifications_with_novel,
+            ani_matrix=sample_ani_matrix_large,
+        )
+
+        ani_pd = sample_ani_matrix_large.to_pandas()
+        if "genome" in ani_pd.columns:
+            ani_pd = ani_pd.set_index("genome")
+
+        section = generator._build_phylogeny_section(ani_pd)
+
+        assert section is not None
+        # Should include D3 library reference
+        assert "d3" in section.lower()
+
+    def test_phylogeny_tab_in_generated_report(
+        self, classifications_with_novel, sample_ani_matrix_large, tmp_path
+    ):
+        """Full report includes phylogeny tab when ANI matrix provided."""
+        from metadarkmatter.visualization.report.generator import ReportGenerator
+
+        generator = ReportGenerator(
+            classifications_with_novel,
+            ani_matrix=sample_ani_matrix_large,
+        )
+
+        output_path = tmp_path / "report_with_phylogeny.html"
+        generator.generate(output_path)
+
+        assert output_path.exists()
+        content = output_path.read_text()
+
+        # Should have phylogeny tab in navigation
+        assert "Phylogeny" in content
+        # Should have phylogeny section content
+        assert "phylogeny" in content.lower()

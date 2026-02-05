@@ -3485,6 +3485,256 @@ METHODS_SECTION_CSS: str = """
 """
 
 
+# =============================================================================
+# Phylogeny Section Styles
+# =============================================================================
+
+PHYLOGENY_STYLES: str = """
+/* Phylogeny Section */
+.phylogeny-section {
+    background: var(--bg-primary);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border-light);
+}
+
+.phylogeny-header {
+    margin-bottom: 1.5rem;
+}
+
+.phylogeny-header h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.5rem;
+}
+
+.phylogeny-description {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+/* Phylogeny Controls */
+.phylogeny-controls {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.phylogeny-controls .btn {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.phylogeny-controls .btn:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-color);
+}
+
+.phylogeny-controls .btn:active {
+    background: var(--accent-color);
+    color: white;
+}
+
+.phylogeny-controls .btn-primary {
+    background: var(--accent-color);
+    color: white;
+    border-color: var(--accent-color);
+}
+
+.phylogeny-controls .btn-primary:hover {
+    background: var(--accent-hover);
+}
+
+/* Phylogeny Legend */
+.phylogeny-legend {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.phylogeny-legend .legend-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.75rem;
+}
+
+.phylogeny-legend .legend-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.phylogeny-legend .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.phylogeny-legend .legend-circle {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+.phylogeny-legend .legend-circle.reference {
+    background-color: var(--success-color);
+}
+
+.phylogeny-legend .legend-circle.novel-species {
+    background-color: var(--warning-color);
+}
+
+.phylogeny-legend .legend-circle.novel-genus {
+    background-color: var(--danger-color);
+}
+
+.phylogeny-legend .legend-badges {
+    display: flex;
+    gap: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border-light);
+}
+
+/* Confidence Badges */
+.confidence-badge {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.confidence-badge.high {
+    background-color: rgba(46, 204, 113, 0.2);
+    color: var(--success-color);
+    border: 1px solid var(--success-color);
+}
+
+.confidence-badge.medium {
+    background-color: rgba(243, 156, 18, 0.2);
+    color: var(--warning-color);
+    border: 1px solid var(--warning-color);
+}
+
+.confidence-badge.low {
+    background-color: rgba(231, 76, 60, 0.2);
+    color: var(--danger-color);
+    border: 1px solid var(--danger-color);
+}
+
+/* Tree Container */
+.phylogeny-tree-container {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    min-height: 400px;
+    overflow: auto;
+    border: 1px solid var(--border-light);
+}
+
+.phylogeny-tree-container svg {
+    display: block;
+    margin: 0 auto;
+}
+
+/* Tree Links */
+.phylogeny-tree-container .link {
+    fill: none;
+    stroke: var(--border-color);
+    stroke-width: 1.5px;
+}
+
+.phylogeny-tree-container .link.novel {
+    stroke: var(--warning-color);
+    stroke-dasharray: 5, 3;
+    stroke-width: 2px;
+}
+
+/* Tree Nodes */
+.phylogeny-tree-container .node circle {
+    stroke: white;
+    stroke-width: 1.5px;
+}
+
+.phylogeny-tree-container .node.leaf text {
+    font-size: 10px;
+    fill: var(--text-primary);
+}
+
+.phylogeny-tree-container .node.novel circle {
+    stroke: var(--warning-color);
+    stroke-width: 2px;
+}
+
+/* Phylogeny Tooltip */
+.phylogeny-tooltip {
+    position: absolute;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 0.75rem 1rem;
+    box-shadow: var(--shadow-md);
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    max-width: 280px;
+    z-index: 1000;
+    pointer-events: none;
+}
+
+.phylogeny-tooltip strong {
+    display: block;
+    margin-bottom: 0.35rem;
+    color: var(--text-primary);
+}
+
+.phylogeny-tooltip br {
+    line-height: 1.8;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .phylogeny-controls {
+        flex-direction: column;
+    }
+
+    .phylogeny-controls .btn {
+        width: 100%;
+        text-align: center;
+    }
+
+    .phylogeny-legend .legend-items {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .phylogeny-tree-container {
+        min-height: 300px;
+    }
+}
+"""
+
+
 def get_css_styles(theme: str = "light") -> str:
     """
     Get CSS styles for specified theme.
@@ -3496,4 +3746,4 @@ def get_css_styles(theme: str = "light") -> str:
         CSS stylesheet string
     """
     base_theme = DARK_THEME if theme.lower() == "dark" else LIGHT_THEME
-    return base_theme + NOVEL_SECTION_CSS + METHODS_SECTION_CSS
+    return base_theme + NOVEL_SECTION_CSS + METHODS_SECTION_CSS + PHYLOGENY_STYLES
