@@ -25,12 +25,12 @@ class ScoringConfig(BaseModel):
     Literature Support:
         - 95-96% ANI is the widely accepted prokaryotic species boundary
           (Jain et al. 2018, Nature Communications; Goris et al. 2007, PNAS)
-        - >95% identity = same species (includes strain variants)
+        - >96% identity = same species (stricter boundary per Jain et al.)
         - 70-80% ANI is the approximate genus boundary range
 
     Novelty Thresholds (N = 100 - pident, read-to-reference identity):
-        - N < 5%: Known Species (pident >95%, at or above species boundary)
-        - 5% <= N <= 20%: Novel Species (pident 80-95%)
+        - N < 4%: Known Species (pident >96%, at or above species boundary)
+        - 4% <= N <= 20%: Novel Species (pident 80-96%)
         - 20% <= N <= 25%: Novel Genus (pident 75-80%)
 
     Note: Read-level BLAST identity can be 10-20% lower than genome-level ANI
@@ -38,9 +38,15 @@ class ScoringConfig(BaseModel):
     accounts for this discrepancy.
 
     Uncertainty Thresholds (U = 100 - ANI between competing genomes):
-        - U < 2%: Confident placement (competitors >98% ANI, same species)
-        - 2% <= U < 5%: Ambiguous (competitors 95-98% ANI, species boundary)
+        - U < 1.5%: Confident placement (competitors >98.5% ANI, same species)
+        - 1.5% <= U < 5%: Ambiguous (competitors 95-98.5% ANI, species boundary)
         - U >= 5%: Conserved region (competitors <95% ANI, different species)
+
+    Enhanced scoring (always enabled):
+        - Inferred uncertainty for single-hit reads (based on novelty level)
+        - Alignment quality, identity confidence, placement confidence
+        - Discovery score for prioritizing novel findings
+        - Linear coverage weighting to reduce conserved-domain bias
 
     Protein-Level Classification:
         When alignment_mode is "protein", wider thresholds are used because
@@ -48,19 +54,6 @@ class ScoringConfig(BaseModel):
         - Protein N < 10%: Known Species (protein identity > 90%)
         - Protein 10% <= N <= 25%: Novel Species (protein identity 75-90%)
         - Protein 25% <= N <= 40%: Novel Genus (protein identity 60-75%)
-
-    Attributes:
-        alignment_mode: Alignment type ("nucleotide" or "protein")
-        bitscore_threshold_pct: Percentage of top bitscore for ambiguous hits (default: 95%)
-        novelty_known_max: Maximum novelty index for known species (default: 5.0)
-        novelty_novel_species_min: Minimum novelty index for novel species (default: 5.0)
-        novelty_novel_species_max: Maximum novelty index for novel species (default: 20.0)
-        novelty_novel_genus_min: Minimum novelty index for novel genus (default: 20.0)
-        novelty_novel_genus_max: Maximum novelty index for novel genus (default: 25.0)
-        uncertainty_known_max: Maximum placement uncertainty for known species (default: 2.0)
-        uncertainty_novel_species_max: Maximum uncertainty for novel species (default: 2.0)
-        uncertainty_novel_genus_max: Maximum uncertainty for novel genus (default: 2.0)
-        uncertainty_conserved_min: Minimum uncertainty for conserved regions (default: 5.0)
     """
 
     # Alignment mode - determines which threshold set to use
@@ -99,14 +92,14 @@ class ScoringConfig(BaseModel):
     # Based on: 95% pident = species boundary (Jain et al. 2018)
     # N = 100 - pident, so N < 5% means pident > 95% (same species)
     novelty_known_max: float = Field(
-        default=5.0,
+        default=4.0,
         ge=0,
-        description="Maximum novelty index for known species (pident >95%)",
+        description="Maximum novelty index for known species (pident >96%)",
     )
     novelty_novel_species_min: float = Field(
-        default=5.0,
+        default=4.0,
         ge=0,
-        description="Minimum novelty index for novel species (pident <=95%)",
+        description="Minimum novelty index for novel species (pident <=96%)",
     )
     novelty_novel_species_max: float = Field(
         default=20.0,
@@ -130,19 +123,19 @@ class ScoringConfig(BaseModel):
     # 2% <= U < 5% means 95-98% ANI (species boundary zone, ambiguous)
     # U >= 5% means <95% ANI (different species, conserved gene)
     uncertainty_known_max: float = Field(
-        default=2.0,
+        default=1.5,
         ge=0,
-        description="Maximum placement uncertainty for known species (ANI >98%)",
+        description="Maximum placement uncertainty for known species (ANI >98.5%)",
     )
     uncertainty_novel_species_max: float = Field(
-        default=2.0,
+        default=1.5,
         ge=0,
-        description="Maximum placement uncertainty for novel species (ANI >98%)",
+        description="Maximum placement uncertainty for novel species (ANI >98.5%)",
     )
     uncertainty_novel_genus_max: float = Field(
-        default=2.0,
+        default=1.5,
         ge=0,
-        description="Maximum placement uncertainty for novel genus (ANI >98%)",
+        description="Maximum placement uncertainty for novel genus (ANI >98.5%)",
     )
     uncertainty_conserved_min: float = Field(
         default=5.0,
@@ -199,23 +192,24 @@ class ScoringConfig(BaseModel):
         description="Minimum alignment length in bp (0 = no filter)",
     )
     min_alignment_fraction: float = Field(
-        default=0.0,
+        default=0.3,
         ge=0.0,
         le=1.0,
         description=(
             "Minimum fraction of read aligned (like GTDB's AF). "
-            "Set to 0.5 for GTDB-compatible filtering. Default 0.0 = no filter."
+            "Set to 0.5 for GTDB-compatible filtering. Default 0.3 filters "
+            "short conserved domain hits."
         ),
     )
 
     # Coverage weighting for hit selection
     # Prioritizes longer alignments over short conserved domains
     coverage_weight_mode: Literal["none", "linear", "log", "sigmoid"] = Field(
-        default="none",
+        default="linear",
         description=(
             "Coverage weighting mode for hit selection. "
-            "'none' uses raw bitscore (default, backward compatible). "
-            "'linear' increases weight linearly with coverage. "
+            "'linear' increases weight linearly with coverage (default). "
+            "'none' uses raw bitscore only. "
             "'log' provides diminishing returns for increasing coverage. "
             "'sigmoid' applies sharp threshold around 60% coverage."
         ),
@@ -244,47 +238,16 @@ class ScoringConfig(BaseModel):
         ),
     )
 
-    # Enhanced scoring options
-    enhanced_scoring: bool = Field(
-        default=False,
-        description=(
-            "Enable enhanced scoring metrics: alignment quality, orthogonal "
-            "confidence dimensions (identity_confidence, placement_confidence), "
-            "and discovery score. Default False for backward compatibility."
-        ),
-    )
-    infer_single_hit_uncertainty: bool = Field(
-        default=False,
-        description=(
-            "Infer uncertainty for single-hit reads based on novelty level "
-            "instead of reporting 0%. Single-hit reads (~70% of environmental data) "
-            "normally report placement_uncertainty=0%, which conflates 'no competing "
-            "hits to measure' with 'confident placement'. When enabled, adds "
-            "inferred_uncertainty and uncertainty_type fields. Default False for "
-            "backward compatibility."
-        ),
-    )
-
     # Single-hit classification options
-    # These options use inferred uncertainty to gate classification decisions
-    # for reads with only one BLAST hit (no competing genomes to measure ANI)
-    use_inferred_for_single_hits: bool = Field(
-        default=False,
-        description=(
-            "Use inferred uncertainty for single-hit reads in classification decisions. "
-            "When enabled, single-hit reads in the Novel Species/Genus range with high "
-            "inferred uncertainty are reclassified as Ambiguous. This addresses the ~70% "
-            "of environmental reads that have only one hit and would otherwise be classified "
-            "with apparent confidence. Default False for backward compatibility."
-        ),
-    )
+    # Single-hit reads (~70% of environmental data) get inferred uncertainty
+    # and are gated by threshold to reduce novel species overestimation.
     single_hit_uncertainty_threshold: float = Field(
         default=10.0,
         ge=0,
         le=100,
         description=(
             "Inferred uncertainty threshold above which single-hit reads are flagged "
-            "as Ambiguous (only applies when use_inferred_for_single_hits=True). "
+            "as Ambiguous. Inferred uncertainty is always computed for single-hit reads. "
             "Default 10% means reads with novelty ~7% or higher become Ambiguous. "
             "Lower values are stricter, higher values are more permissive."
         ),

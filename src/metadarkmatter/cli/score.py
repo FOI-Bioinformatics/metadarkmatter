@@ -69,19 +69,12 @@ THRESHOLD_PRESETS: dict[str, ScoringConfig] = {
         min_alignment_fraction=0.3,
     ),
     "conservative": ScoringConfig(
-        # 96% species boundary (middle ground)
-        novelty_known_max=4.0,
-        novelty_novel_species_min=4.0,
+        # Conservative genus boundary (more restrictive)
         novelty_novel_species_max=15.0,
         novelty_novel_genus_min=15.0,
         novelty_novel_genus_max=25.0,
-        # Stricter placement uncertainty
-        uncertainty_known_max=1.5,
-        uncertainty_novel_species_max=1.5,
-        uncertainty_novel_genus_max=1.5,
         # Standard alignment quality
         min_alignment_length=100,
-        min_alignment_fraction=0.0,
     ),
     # Literature-strict preset based on comprehensive literature review
     # See docs/CLASSIFICATION_STATISTICS.md for references:
@@ -89,74 +82,23 @@ THRESHOLD_PRESETS: dict[str, ScoringConfig] = {
     # - Riesco & Trujillo 2024: Genus delineation considerations
     # - GTDB standards (Parks et al. 2020)
     "literature-strict": ScoringConfig(
-        # 96% ANI species boundary (stricter than 95%)
-        novelty_known_max=4.0,
-        novelty_novel_species_min=4.0,
         # 85% identity = conservative novel species cutoff
         novelty_novel_species_max=15.0,
         novelty_novel_genus_min=15.0,
         # 78% identity = genus boundary (more conservative than default 75%)
         novelty_novel_genus_max=22.0,
-        # Stricter placement confidence (98.5% ANI required)
-        uncertainty_known_max=1.5,
-        uncertainty_novel_species_max=1.5,
-        uncertainty_novel_genus_max=1.5,
         # Higher confidence threshold
         confidence_threshold=60.0,
         # GTDB-compatible alignment requirements
         min_alignment_length=100,
         min_alignment_fraction=0.5,
     ),
-    "default": ScoringConfig(),
-    # Balanced-conservative preset
-    # Reduces novel species overestimation by using stricter thresholds
-    # and flagging single-hit reads with high inferred uncertainty
-    "balanced-conservative": ScoringConfig(
-        # Stricter novelty thresholds (96% species boundary)
-        novelty_known_max=4.0,
-        novelty_novel_species_min=4.0,
-        novelty_novel_species_max=15.0,
-        novelty_novel_genus_min=15.0,
-        novelty_novel_genus_max=22.0,
-        # Stricter uncertainty requirement
-        uncertainty_known_max=1.5,
-        uncertainty_novel_species_max=1.5,
-        uncertainty_novel_genus_max=1.5,
-        # Lower bitscore threshold to capture more competing hits
-        bitscore_threshold_pct=92.0,
-        # Enable single-hit uncertainty handling
-        use_inferred_for_single_hits=True,
-        single_hit_uncertainty_threshold=12.0,
-        # Moderate alignment quality filter
-        min_alignment_fraction=0.3,
-    ),
-    # Coverage-weighted presets
-    # These prioritize longer alignments over short conserved domains
-    "coverage-linear": ScoringConfig(
-        coverage_weight_mode="linear",
-        coverage_weight_strength=0.5,
-    ),
     "coverage-strict": ScoringConfig(
         coverage_weight_mode="sigmoid",
         coverage_weight_strength=0.7,
-        novelty_known_max=4.0,
-        novelty_novel_species_min=4.0,
         novelty_novel_species_max=15.0,
         novelty_novel_genus_min=15.0,
         novelty_novel_genus_max=25.0,
-        uncertainty_known_max=1.5,
-        uncertainty_novel_species_max=1.5,
-        uncertainty_novel_genus_max=1.5,
-    ),
-    "coverage-gentle": ScoringConfig(
-        coverage_weight_mode="log",
-        coverage_weight_strength=0.3,
-    ),
-    "gtdb-coverage": ScoringConfig(
-        coverage_weight_mode="linear",
-        coverage_weight_strength=0.5,
-        min_alignment_length=100,
-        min_alignment_fraction=0.5,
     ),
 }
 
@@ -418,13 +360,9 @@ def classify(
         "--preset",
         help=(
             "Use predefined threshold preset: 'gtdb-strict' (95% ANI, AF>=50%), "
-            "'gtdb-relaxed' (97% ANI), 'conservative' (96% ANI), "
-            "'literature-strict' (96% ANI, 1.5% uncertainty, high confidence), "
-            "'balanced-conservative' (reduces novel species overestimation with "
-            "single-hit gating), 'coverage-linear' (linear coverage weighting), "
-            "'coverage-strict' (sigmoid coverage weighting, stricter thresholds), "
-            "'coverage-gentle' (log coverage weighting), "
-            "'gtdb-coverage' (GTDB + linear coverage weighting), or 'default'"
+            "'gtdb-relaxed' (97% ANI), 'conservative' (narrower genus range), "
+            "'literature-strict' (narrow genus, high confidence, AF>=50%), "
+            "'coverage-strict' (sigmoid coverage weighting)"
         ),
     ),
     alignment_mode: str = typer.Option(
@@ -444,21 +382,22 @@ def classify(
         min=0,
     ),
     min_alignment_fraction: float = typer.Option(
-        0.0,
+        0.3,
         "--min-alignment-fraction",
         help=(
             "Minimum fraction of read aligned (like GTDB's AF). "
-            "Set to 0.5 for GTDB-compatible filtering. Default 0.0 = no filter."
+            "Set to 0.5 for GTDB-compatible filtering. Default 0.3 filters "
+            "short conserved domain hits."
         ),
         min=0.0,
         max=1.0,
     ),
     coverage_weight_mode: str = typer.Option(
-        "none",
+        "linear",
         "--coverage-weight-mode",
         help=(
-            "Coverage weighting mode for hit selection: 'none' (default, raw bitscore), "
-            "'linear' (gradual weight increase), 'log' (diminishing returns), "
+            "Coverage weighting mode for hit selection: 'linear' (default, gradual weight increase), "
+            "'none' (raw bitscore only), 'log' (diminishing returns), "
             "'sigmoid' (sharp 60%% threshold). Prioritizes longer alignments over short conserved domains."
         ),
     ),
@@ -479,35 +418,6 @@ def classify(
             "Mode for calculating placement uncertainty: "
             "'max' uses maximum ANI to any competing genome, "
             "'second' uses ANI to the second-best genome only (default)."
-        ),
-    ),
-    enhanced_scoring: bool = typer.Option(
-        False,
-        "--enhanced-scoring",
-        help=(
-            "Enable enhanced scoring with alignment quality, orthogonal confidence "
-            "dimensions (identity_confidence, placement_confidence), and discovery_score "
-            "for prioritizing novel findings."
-        ),
-    ),
-    infer_single_hit_uncertainty: bool = typer.Option(
-        False,
-        "--infer-single-hit-uncertainty",
-        help=(
-            "Infer uncertainty for single-hit reads based on novelty level. Single-hit "
-            "reads (~70%% of environmental data) normally report 0%% uncertainty which "
-            "conflates 'no competing hits' with 'confident placement'. Adds "
-            "inferred_uncertainty and uncertainty_type columns."
-        ),
-    ),
-    use_inferred_for_single_hits: bool = typer.Option(
-        False,
-        "--use-inferred-for-single-hits",
-        help=(
-            "Use inferred uncertainty for single-hit reads in classification decisions. "
-            "When enabled, single-hit reads in the novel range with high inferred "
-            "uncertainty are reclassified as Ambiguous. This reduces novel species "
-            "overestimation for the ~70%% of environmental reads that have only one hit."
         ),
     ),
     single_hit_uncertainty_threshold: float = typer.Option(
@@ -553,6 +463,29 @@ def classify(
         False,
         "--dry-run",
         help="Validate inputs and show what would be processed without running",
+    ),
+    qc_output: Path | None = typer.Option(
+        None,
+        "--qc-output",
+        help="Output path for QC metrics (JSON). Computes alignment statistics, genome coverage, and classification quality checks.",
+    ),
+    adaptive_thresholds: bool = typer.Option(
+        False,
+        "--adaptive-thresholds",
+        help=(
+            "Detect species boundary from ANI matrix distribution using "
+            "Gaussian Mixture Model. Overrides novelty_known_max with "
+            "detected value. Requires scikit-learn."
+        ),
+    ),
+    bayesian: bool = typer.Option(
+        False,
+        "--bayesian",
+        help=(
+            "Add Bayesian posterior probability columns to output. "
+            "Provides continuous confidence (p_known_species, p_novel_species, "
+            "p_novel_genus, p_ambiguous) rather than hard category labels."
+        ),
     ),
     quiet: bool = typer.Option(
         False,
@@ -760,7 +693,7 @@ def classify(
         config = THRESHOLD_PRESETS[preset_lower]
         out.print(f"[dim]Using preset: {preset_lower}[/dim]")
         # Override bitscore threshold and alignment mode if explicitly provided
-        if bitscore_threshold != 95.0 or alignment_mode_lower != "nucleotide" or coverage_weight_mode != "none" or uncertainty_mode_lower != "second" or enhanced_scoring or infer_single_hit_uncertainty or use_inferred_for_single_hits:
+        if bitscore_threshold != 95.0 or alignment_mode_lower != "nucleotide" or coverage_weight_mode != "linear" or uncertainty_mode_lower != "second":
             config = ScoringConfig(
                 alignment_mode=alignment_mode_lower,
                 bitscore_threshold_pct=bitscore_threshold,
@@ -778,9 +711,6 @@ def classify(
                 coverage_weight_mode=coverage_weight_mode,
                 coverage_weight_strength=coverage_weight_strength,
                 uncertainty_mode=uncertainty_mode_lower,
-                enhanced_scoring=enhanced_scoring,
-                infer_single_hit_uncertainty=infer_single_hit_uncertainty,
-                use_inferred_for_single_hits=use_inferred_for_single_hits,
                 single_hit_uncertainty_threshold=single_hit_uncertainty_threshold,
             )
     else:
@@ -792,9 +722,6 @@ def classify(
             coverage_weight_mode=coverage_weight_mode,
             coverage_weight_strength=coverage_weight_strength,
             uncertainty_mode=uncertainty_mode_lower,
-            enhanced_scoring=enhanced_scoring,
-            infer_single_hit_uncertainty=infer_single_hit_uncertainty,
-            use_inferred_for_single_hits=use_inferred_for_single_hits,
             single_hit_uncertainty_threshold=single_hit_uncertainty_threshold,
         )
 
@@ -803,26 +730,6 @@ def classify(
         out.print(
             f"[dim]Alignment filters: length >= {config.min_alignment_length}bp, "
             f"fraction >= {config.min_alignment_fraction:.0%}[/dim]"
-        )
-
-    # Log enhanced scoring settings
-    if config.enhanced_scoring:
-        out.print(
-            "[bold]Enhanced scoring enabled[/bold] - adds alignment_quality, "
-            "identity_confidence, placement_confidence, discovery_score"
-        )
-    if config.infer_single_hit_uncertainty:
-        out.print(
-            "[bold]Single-hit uncertainty inference enabled[/bold] - adds "
-            "inferred_uncertainty, uncertainty_type"
-        )
-    if config.use_inferred_for_single_hits:
-        out.print(
-            f"[bold]Single-hit classification gating enabled[/bold] - "
-            f"threshold {config.single_hit_uncertainty_threshold}%"
-        )
-        out.print(
-            "[dim]  Single-hit reads with high inferred uncertainty become Ambiguous[/dim]"
         )
 
     # Load ANI matrix
@@ -840,6 +747,35 @@ def classify(
             raise typer.Exit(code=1) from None
 
     out.print(f"[green]Loaded ANI matrix for {num_genomes} genomes[/green]\n")
+
+    # Adaptive threshold detection (override config if enabled)
+    if adaptive_thresholds:
+        try:
+            from metadarkmatter.core.classification.adaptive import (
+                build_adaptive_config,
+                detect_species_boundary,
+            )
+
+            adaptive = detect_species_boundary(ani_matrix)
+            if adaptive.method == "gmm":
+                config = build_adaptive_config(config, adaptive)
+                out.print(
+                    f"[green]Adaptive threshold:[/green] species boundary at "
+                    f"{adaptive.species_boundary:.1f}% ANI "
+                    f"(novelty_known_max={adaptive.novelty_known_max:.1f}%, "
+                    f"confidence={adaptive.confidence:.2f})\n"
+                )
+            else:
+                out.print(
+                    f"[yellow]Adaptive threshold detection fell back to default "
+                    f"({adaptive.species_boundary:.1f}% ANI)[/yellow]\n"
+                )
+        except ImportError:
+            console.print(
+                "[red]scikit-learn required for adaptive thresholds. "
+                "Install with: pip install metadarkmatter[adaptive][/red]"
+            )
+            raise typer.Exit(code=1) from None
 
     # Load AAI matrix if provided (for genus-level classification)
     aai_matrix: AAIMatrix | None = None
@@ -956,6 +892,7 @@ def classify(
 
     # Run classification - keep DataFrame in memory to avoid redundant I/O
     classification_df: pl.DataFrame | None = None
+    qc_metrics = None
     num_classified = 0
 
     try:
@@ -1016,6 +953,7 @@ def classify(
 
         elif parallel:
             # Use vectorized classifier (Polars-native, auto-parallel)
+            qc_metrics = None
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
@@ -1026,7 +964,15 @@ def classify(
                     total=None,
                 )
                 vectorized = VectorizedClassifier(ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config)
-                classification_df = vectorized.classify_file(alignment, id_mapping=contig_mapping)
+                result = vectorized.classify_file(
+                    alignment,
+                    id_mapping=contig_mapping,
+                    compute_qc=qc_output is not None,
+                )
+                if qc_output is not None:
+                    classification_df, qc_metrics = result
+                else:
+                    classification_df = result
 
             num_classified = _finalize_classification(
                 classification_df, genome_metadata, output, output_format
@@ -1101,6 +1047,21 @@ def classify(
             console.print_exception()
         raise typer.Exit(code=1) from None
 
+    # Apply Bayesian posterior probabilities if requested
+    if bayesian and classification_df is not None:
+        from metadarkmatter.core.classification.bayesian import BayesianClassifier
+
+        bayesian_clf = BayesianClassifier(config)
+        classification_df = bayesian_clf.classify_dataframe(classification_df)
+        # Re-write output with Bayesian columns included
+        if num_classified > 0:
+            write_dataframe(classification_df, output, output_format)
+        out.print("[green]Bayesian posteriors added to output[/green]")
+    elif bayesian and classification_df is None:
+        out.print(
+            "[yellow]Warning: --bayesian not supported with --streaming mode[/yellow]"
+        )
+
     out.print(f"[green]Classified {num_classified:,} reads[/green]\n")
 
     # Generate summary if requested
@@ -1131,6 +1092,20 @@ def classify(
                 console.print(f"\n[yellow]Warning: Failed to generate summary: {e}[/yellow]")
                 if verbose:
                     console.print_exception()
+
+    # Write QC metrics if requested
+    if qc_output is not None and qc_metrics is not None:
+        import json
+
+        qc_output.parent.mkdir(parents=True, exist_ok=True)
+        qc_output.write_text(json.dumps(qc_metrics.to_dict(), indent=2))
+        out.print(f"[bold green]QC metrics written to:[/bold green] {qc_output}")
+
+        # Display warnings
+        if qc_metrics.warnings and not quiet:
+            out.print()
+            for warning in qc_metrics.warnings:
+                out.print(f"[yellow]QC Warning:[/yellow] {warning}")
 
     out.print(f"\n[bold green]Results written to:[/bold green] {output}")
     if summary:
@@ -1178,9 +1153,7 @@ def batch(
         "--preset",
         help=(
             "Use predefined threshold preset: 'gtdb-strict', 'gtdb-relaxed', "
-            "'conservative', 'literature-strict', 'balanced-conservative', "
-            "'coverage-linear', 'coverage-strict', 'coverage-gentle', "
-            "'gtdb-coverage', or 'default'"
+            "'conservative', 'literature-strict', or 'coverage-strict'"
         ),
     ),
     alignment_mode: str = typer.Option(
@@ -1198,17 +1171,17 @@ def batch(
         min=0,
     ),
     min_alignment_fraction: float = typer.Option(
-        0.0,
+        0.3,
         "--min-alignment-fraction",
-        help="Minimum fraction of read aligned (GTDB uses 0.5)",
+        help="Minimum fraction of read aligned (GTDB uses 0.5). Default 0.3.",
         min=0.0,
         max=1.0,
     ),
     coverage_weight_mode: str = typer.Option(
-        "none",
+        "linear",
         "--coverage-weight-mode",
         help=(
-            "Coverage weighting mode: 'none' (default), 'linear', 'log', or 'sigmoid'. "
+            "Coverage weighting mode: 'linear' (default), 'none', 'log', or 'sigmoid'. "
             "Prioritizes longer alignments over short conserved domains."
         ),
     ),

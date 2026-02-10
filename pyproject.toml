@@ -53,6 +53,9 @@ viz = [
     "kaleido>=0.2.1",
     "matplotlib>=3.8.0",
 ]
+adaptive = [
+    "scikit-learn>=1.3.0",
+]
 
 [project.scripts]
 metadarkmatter = "metadarkmatter.cli.main:app"

@@ -254,12 +254,19 @@ class TestANIWeightedClassifier:
         assert classification.novelty_index == 1.0
         assert classification.placement_uncertainty == 0.0  # Single hit
 
-    def test_classify_novel_species(self, classifier):
-        """Hit with moderate identity should be novel species."""
+    def test_classify_novel_species(self, ani_matrix):
+        """Hit with moderate identity should be novel species.
+
+        Uses high single_hit_uncertainty_threshold to test novelty classification
+        independently of Rule 0b (single-hit inferred uncertainty).
+        """
+        config = ScoringConfig(single_hit_uncertainty_threshold=100.0)
+        novelty_classifier = ANIWeightedClassifier(ani_matrix, config=config)
+
         hit = BlastHit(
             qseqid="read_001",
             sseqid="GCF_000123456.1",
-            pident=90.0,  # Novelty = 10.0 (5-15)
+            pident=90.0,  # Novelty = 10.0 (4-20)
             length=150,
             mismatch=15,
             gapopen=0,
@@ -272,18 +279,25 @@ class TestANIWeightedClassifier:
         )
         result = BlastResult(read_id="read_001", hits=(hit,))
 
-        classification = classifier.classify_read(result)
+        classification = novelty_classifier.classify_read(result)
 
         assert classification is not None
         assert classification.taxonomic_call == TaxonomicCall.NOVEL_SPECIES
         assert classification.novelty_index == 10.0
 
-    def test_classify_novel_genus(self, classifier):
-        """Hit with low identity should be novel genus."""
+    def test_classify_novel_genus(self, ani_matrix):
+        """Hit with low identity should be novel genus.
+
+        Uses high single_hit_uncertainty_threshold to test novelty classification
+        independently of Rule 0b (single-hit inferred uncertainty).
+        """
+        config = ScoringConfig(single_hit_uncertainty_threshold=100.0)
+        novelty_classifier = ANIWeightedClassifier(ani_matrix, config=config)
+
         hit = BlastHit(
             qseqid="read_001",
             sseqid="GCF_000123456.1",
-            pident=80.0,  # Novelty = 20.0 (15-25)
+            pident=80.0,  # Novelty = 20.0 (20-25)
             length=150,
             mismatch=30,
             gapopen=0,
@@ -296,7 +310,7 @@ class TestANIWeightedClassifier:
         )
         result = BlastResult(read_id="read_001", hits=(hit,))
 
-        classification = classifier.classify_read(result)
+        classification = novelty_classifier.classify_read(result)
 
         assert classification is not None
         assert classification.taxonomic_call == TaxonomicCall.NOVEL_GENUS
@@ -458,8 +472,15 @@ class TestClassificationThresholds:
 
     @pytest.fixture
     def boundary_classifier(self, ani_matrix):
-        """Classifier with default thresholds for boundary testing."""
-        return ANIWeightedClassifier(ani_matrix, config=ScoringConfig())
+        """Classifier with default thresholds for boundary testing.
+
+        Uses high single_hit_uncertainty_threshold to test novelty boundaries
+        independently of Rule 0b (single-hit inferred uncertainty).
+        """
+        return ANIWeightedClassifier(
+            ani_matrix,
+            config=ScoringConfig(single_hit_uncertainty_threshold=100.0),
+        )
 
     def test_known_species_boundary_novelty_2(self, boundary_classifier):
         """Novelty = 2.0 should still be known species."""

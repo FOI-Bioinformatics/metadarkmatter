@@ -224,57 +224,55 @@ class ANIWeightedClassifier:
         placement_confidence: float | None = None
         discovery_score: float | None = None
 
-        # Calculate inferred uncertainty for single-hit reads if enabled
-        if self.config.infer_single_hit_uncertainty or self.config.enhanced_scoring:
-            if num_ambiguous_hits <= 1:
-                inferred_uncertainty = calculate_inferred_uncertainty(novelty_index)
-                uncertainty_type = "inferred"
-            else:
-                uncertainty_type = "measured"
+        # Calculate inferred uncertainty for single-hit reads
+        if num_ambiguous_hits <= 1:
+            inferred_uncertainty = calculate_inferred_uncertainty(novelty_index)
+            uncertainty_type = "inferred"
+        else:
+            uncertainty_type = "measured"
 
-        # Calculate enhanced scoring metrics if enabled
-        if self.config.enhanced_scoring:
-            # Calculate coverage for alignment quality
-            if read_length is not None and read_length > 0:
-                coverage = (best_hit.qend - best_hit.qstart + 1) / read_length
-            else:
-                coverage = min(1.0, (best_hit.qend - best_hit.qstart + 1) / best_hit.qend)
-            coverage = max(0.0, min(1.0, coverage))
+        # Calculate enhanced scoring metrics
+        # Calculate coverage for alignment quality
+        if read_length is not None and read_length > 0:
+            coverage = (best_hit.qend - best_hit.qstart + 1) / read_length
+        else:
+            coverage = min(1.0, (best_hit.qend - best_hit.qstart + 1) / best_hit.qend)
+        coverage = max(0.0, min(1.0, coverage))
 
-            # Alignment quality from BLAST statistics
-            alignment_quality = calculate_alignment_quality(
-                mismatch=best_hit.mismatch,
-                gapopen=best_hit.gapopen,
-                length=best_hit.length,
-                coverage=coverage,
-                evalue=best_hit.evalue,
-            )
+        # Alignment quality from BLAST statistics
+        alignment_quality = calculate_alignment_quality(
+            mismatch=best_hit.mismatch,
+            gapopen=best_hit.gapopen,
+            length=best_hit.length,
+            coverage=coverage,
+            evalue=best_hit.evalue,
+        )
 
-            # Identity confidence
-            identity_confidence = calculate_identity_confidence(
-                novelty_index=novelty_index,
-                alignment_quality=alignment_quality,
-            )
+        # Identity confidence
+        identity_confidence = calculate_identity_confidence(
+            novelty_index=novelty_index,
+            alignment_quality=alignment_quality,
+        )
 
-            # Placement confidence - use inferred uncertainty for single-hit reads
-            effective_uncertainty = inferred_uncertainty if num_ambiguous_hits <= 1 else placement_uncertainty
-            effective_type = uncertainty_type or ("inferred" if num_ambiguous_hits <= 1 else "measured")
+        # Placement confidence - use inferred uncertainty for single-hit reads
+        effective_uncertainty = inferred_uncertainty if num_ambiguous_hits <= 1 else placement_uncertainty
+        effective_type = uncertainty_type or ("inferred" if num_ambiguous_hits <= 1 else "measured")
 
-            placement_confidence = calculate_placement_confidence(
-                uncertainty=effective_uncertainty,
-                uncertainty_type=effective_type,
-                identity_gap=identity_gap,
-                num_ambiguous_hits=num_ambiguous_hits,
-            )
+        placement_confidence = calculate_placement_confidence(
+            uncertainty=effective_uncertainty,
+            uncertainty_type=effective_type,
+            identity_gap=identity_gap,
+            num_ambiguous_hits=num_ambiguous_hits,
+        )
 
-            # Discovery score for novel reads
-            discovery_score = calculate_discovery_score(
-                taxonomic_call=taxonomic_call.value,
-                novelty_index=novelty_index,
-                identity_confidence=identity_confidence,
-                placement_confidence=placement_confidence,
-                alignment_quality=alignment_quality,
-            )
+        # Discovery score for novel reads
+        discovery_score = calculate_discovery_score(
+            taxonomic_call=taxonomic_call.value,
+            novelty_index=novelty_index,
+            identity_confidence=identity_confidence,
+            placement_confidence=placement_confidence,
+            alignment_quality=alignment_quality,
+        )
 
         return ReadClassification(
             read_id=blast_result.read_id,
@@ -534,8 +532,7 @@ class ANIWeightedClassifier:
         # Use inferred uncertainty based on novelty level to flag ambiguous cases.
         # This addresses the ~70% of environmental reads that have only one hit.
         if (
-            cfg.use_inferred_for_single_hits
-            and num_ambiguous_hits <= 1
+            num_ambiguous_hits <= 1
             and novelty_index >= eff["novelty_novel_species_min"]  # Only for novel range
         ):
             inferred = calculate_inferred_uncertainty(novelty_index)
@@ -848,55 +845,54 @@ class ANIWeightedClassifier:
             "is_novel": taxonomic_call in (TaxonomicCall.NOVEL_SPECIES, TaxonomicCall.NOVEL_GENUS),
         }
 
-        # Add enhanced scoring fields if enabled
-        if self.config.infer_single_hit_uncertainty or self.config.enhanced_scoring:
-            if num_ambiguous_hits <= 1:
-                result_dict["inferred_uncertainty"] = calculate_inferred_uncertainty(novelty_index)
-                result_dict["uncertainty_type"] = "inferred"
-            else:
-                result_dict["uncertainty_type"] = "measured"
+        # Add inferred uncertainty for single-hit reads
+        if num_ambiguous_hits <= 1:
+            result_dict["inferred_uncertainty"] = calculate_inferred_uncertainty(novelty_index)
+            result_dict["uncertainty_type"] = "inferred"
+        else:
+            result_dict["uncertainty_type"] = "measured"
 
-        if self.config.enhanced_scoring:
-            # Calculate coverage for alignment quality
-            coverage = (best_hit.qend - best_hit.qstart + 1) / max(1, best_hit.qend)
-            coverage = max(0.0, min(1.0, coverage))
+        # Enhanced scoring fields
+        # Calculate coverage for alignment quality
+        coverage = (best_hit.qend - best_hit.qstart + 1) / max(1, best_hit.qend)
+        coverage = max(0.0, min(1.0, coverage))
 
-            alignment_quality = calculate_alignment_quality(
-                mismatch=best_hit.mismatch,
-                gapopen=best_hit.gapopen,
-                length=best_hit.length,
-                coverage=coverage,
-                evalue=best_hit.evalue,
-            )
-            result_dict["alignment_quality"] = alignment_quality
+        alignment_quality = calculate_alignment_quality(
+            mismatch=best_hit.mismatch,
+            gapopen=best_hit.gapopen,
+            length=best_hit.length,
+            coverage=coverage,
+            evalue=best_hit.evalue,
+        )
+        result_dict["alignment_quality"] = alignment_quality
 
-            identity_confidence = calculate_identity_confidence(
-                novelty_index=novelty_index,
-                alignment_quality=alignment_quality,
-            )
-            result_dict["identity_confidence"] = identity_confidence
+        identity_confidence = calculate_identity_confidence(
+            novelty_index=novelty_index,
+            alignment_quality=alignment_quality,
+        )
+        result_dict["identity_confidence"] = identity_confidence
 
-            # Use inferred uncertainty for single-hit reads
-            effective_uncertainty = result_dict.get("inferred_uncertainty", placement_uncertainty)
-            effective_type = result_dict.get("uncertainty_type", "measured")
+        # Use inferred uncertainty for single-hit reads
+        effective_uncertainty = result_dict.get("inferred_uncertainty", placement_uncertainty)
+        effective_type = result_dict.get("uncertainty_type", "measured")
 
-            placement_confidence = calculate_placement_confidence(
-                uncertainty=effective_uncertainty,
-                uncertainty_type=effective_type,
-                identity_gap=identity_gap,
-                num_ambiguous_hits=num_ambiguous_hits,
-            )
-            result_dict["placement_confidence"] = placement_confidence
+        placement_confidence = calculate_placement_confidence(
+            uncertainty=effective_uncertainty,
+            uncertainty_type=effective_type,
+            identity_gap=identity_gap,
+            num_ambiguous_hits=num_ambiguous_hits,
+        )
+        result_dict["placement_confidence"] = placement_confidence
 
-            discovery_score = calculate_discovery_score(
-                taxonomic_call=taxonomic_call.value,
-                novelty_index=novelty_index,
-                identity_confidence=identity_confidence,
-                placement_confidence=placement_confidence,
-                alignment_quality=alignment_quality,
-            )
-            if discovery_score is not None:
-                result_dict["discovery_score"] = discovery_score
+        discovery_score = calculate_discovery_score(
+            taxonomic_call=taxonomic_call.value,
+            novelty_index=novelty_index,
+            identity_confidence=identity_confidence,
+            placement_confidence=placement_confidence,
+            alignment_quality=alignment_quality,
+        )
+        if discovery_score is not None:
+            result_dict["discovery_score"] = discovery_score
 
         return result_dict
 
@@ -1132,12 +1128,7 @@ def _classify_chunk_worker(
     identity_score_base = config_dict["identity_score_base"]
     identity_score_range = config_dict["identity_score_range"]
 
-    # Enhanced scoring options
-    enhanced_scoring = config_dict.get("enhanced_scoring", False)
-    infer_single_hit_uncertainty = config_dict.get("infer_single_hit_uncertainty", False)
-
     # Single-hit classification options
-    use_inferred_for_single_hits = config_dict.get("use_inferred_for_single_hits", False)
     single_hit_uncertainty_threshold = config_dict.get("single_hit_uncertainty_threshold", 10.0)
 
     for read_id, hits_data in chunk_data:
@@ -1250,8 +1241,7 @@ def _classify_chunk_worker(
         # Rule 0b: Single-hit inferred uncertainty check
         # For single-hit reads, use inferred uncertainty to flag ambiguous cases.
         elif (
-            use_inferred_for_single_hits
-            and num_ambiguous_hits <= 1
+            num_ambiguous_hits <= 1
             and novelty_index >= novelty_novel_species_min  # Only for novel range
         ):
             inferred = _calculate_inferred_uncertainty_inline(
@@ -1367,42 +1357,41 @@ def _classify_chunk_worker(
             "is_novel": is_novel,
         }
 
-        # Add enhanced scoring fields if enabled
-        if infer_single_hit_uncertainty or enhanced_scoring:
-            if num_ambiguous_hits <= 1:
-                result_dict["inferred_uncertainty"] = _calculate_inferred_uncertainty_inline(
-                    novelty_index, novelty_known_max, novelty_novel_species_max, novelty_novel_genus_max
-                )
-                result_dict["uncertainty_type"] = "inferred"
-            else:
-                result_dict["uncertainty_type"] = "measured"
-
-        if enhanced_scoring:
-            # Alignment quality (using basic coverage estimate from hit data)
-            # Note: In parallel worker we don't have full BLAST fields, use defaults
-            alignment_quality = 75.0  # Default quality for parallel processing
-            result_dict["alignment_quality"] = alignment_quality
-
-            identity_confidence = _calculate_identity_confidence_inline(
-                novelty_index, alignment_quality
+        # Add inferred uncertainty for single-hit reads
+        if num_ambiguous_hits <= 1:
+            result_dict["inferred_uncertainty"] = _calculate_inferred_uncertainty_inline(
+                novelty_index, novelty_known_max, novelty_novel_species_max, novelty_novel_genus_max
             )
-            result_dict["identity_confidence"] = identity_confidence
+            result_dict["uncertainty_type"] = "inferred"
+        else:
+            result_dict["uncertainty_type"] = "measured"
 
-            # Use inferred uncertainty for single-hit reads
-            effective_uncertainty = result_dict.get("inferred_uncertainty", placement_uncertainty)
-            effective_type = result_dict.get("uncertainty_type", "measured")
+        # Enhanced scoring fields
+        # Alignment quality (using basic coverage estimate from hit data)
+        # Note: In parallel worker we don't have full BLAST fields, use defaults
+        alignment_quality = 75.0  # Default quality for parallel processing
+        result_dict["alignment_quality"] = alignment_quality
 
-            placement_confidence = _calculate_placement_confidence_inline(
-                effective_uncertainty, effective_type, identity_gap, num_ambiguous_hits
-            )
-            result_dict["placement_confidence"] = placement_confidence
+        identity_confidence = _calculate_identity_confidence_inline(
+            novelty_index, alignment_quality
+        )
+        result_dict["identity_confidence"] = identity_confidence
 
-            discovery_score = _calculate_discovery_score_inline(
-                call, novelty_index, identity_confidence, placement_confidence, alignment_quality,
-                novelty_novel_species_min, novelty_novel_genus_min
-            )
-            if discovery_score is not None:
-                result_dict["discovery_score"] = discovery_score
+        # Use inferred uncertainty for single-hit reads
+        effective_uncertainty = result_dict.get("inferred_uncertainty", placement_uncertainty)
+        effective_type = result_dict.get("uncertainty_type", "measured")
+
+        placement_confidence = _calculate_placement_confidence_inline(
+            effective_uncertainty, effective_type, identity_gap, num_ambiguous_hits
+        )
+        result_dict["placement_confidence"] = placement_confidence
+
+        discovery_score = _calculate_discovery_score_inline(
+            call, novelty_index, identity_confidence, placement_confidence, alignment_quality,
+            novelty_novel_species_min, novelty_novel_genus_min
+        )
+        if discovery_score is not None:
+            result_dict["discovery_score"] = discovery_score
 
         results.append(result_dict)
 
@@ -1437,15 +1426,19 @@ def _calculate_inferred_uncertainty_inline(
     inferred_uncertainty_base = 5.0
     inferred_uncertainty_max = 35.0
 
+    # Compute continuous breakpoints
+    known_break = inferred_uncertainty_base + novelty_known_max * 0.5
+    species_break = known_break + (novelty_novel_species_max - novelty_known_max) * 1.0
+
     if novelty_index < novelty_known_max:
         # High identity: database likely complete for this species
-        return inferred_uncertainty_base + novelty_index * 0.5  # 5-7.5%
+        return inferred_uncertainty_base + novelty_index * 0.5
     elif novelty_index < novelty_novel_species_max:
         # Novel species range: uncertain if truly novel or database gap
-        return 7.5 + (novelty_index - novelty_known_max) * 1.0  # 7.5-22.5%
+        return known_break + (novelty_index - novelty_known_max) * 1.0
     elif novelty_index < novelty_novel_genus_max:
         # Novel genus range: high uncertainty
-        return 22.5 + (novelty_index - novelty_novel_species_max) * 1.5  # 22.5-30%
+        return species_break + (novelty_index - novelty_novel_species_max) * 1.5
     else:
         # Very high divergence: maximum uncertainty
         return inferred_uncertainty_max

@@ -60,25 +60,14 @@ class TestInferredUncertaintyCalculation:
 class TestSingleHitConfigParameters:
     """Tests for single-hit classification config parameters."""
 
-    def test_default_use_inferred_for_single_hits_is_false(self):
-        """Default config should have use_inferred_for_single_hits=False."""
-        config = ScoringConfig()
-        assert config.use_inferred_for_single_hits is False
-
     def test_default_single_hit_uncertainty_threshold(self):
         """Default threshold should be 10%."""
         config = ScoringConfig()
         assert config.single_hit_uncertainty_threshold == 10.0
 
-    def test_can_enable_single_hit_gating(self):
-        """Should be able to enable single-hit gating."""
-        config = ScoringConfig(use_inferred_for_single_hits=True)
-        assert config.use_inferred_for_single_hits is True
-
     def test_can_set_custom_threshold(self):
         """Should be able to set custom threshold."""
         config = ScoringConfig(
-            use_inferred_for_single_hits=True,
             single_hit_uncertainty_threshold=15.0,
         )
         assert config.single_hit_uncertainty_threshold == 15.0
@@ -106,27 +95,9 @@ class TestSingleHitClassification:
         """Create ANI matrix from small_ani_dict fixture."""
         return ANIMatrix(small_ani_dict)
 
-    def test_default_behavior_unchanged(self, ani_matrix):
-        """Default config should produce Novel Species for single-hit reads in novel range."""
-        # Default config: use_inferred_for_single_hits=False
-        config = ScoringConfig()
-        classifier = ANIWeightedClassifier(ani_matrix, config=config)
-
-        # Single-hit read with novelty_index=12% (novel species range)
-        # placement_uncertainty=0% (single hit, no competing genomes)
-        call = classifier._classify_by_thresholds(
-            novelty_index=12.0,
-            placement_uncertainty=0.0,
-            num_ambiguous_hits=1,
-        )
-
-        # Should be Novel Species (default behavior unchanged)
-        assert call == TaxonomicCall.NOVEL_SPECIES
-
-    def test_single_hit_becomes_ambiguous_when_enabled(self, ani_matrix):
+    def test_single_hit_becomes_ambiguous(self, ani_matrix):
         """Single-hit Novel Species with high inferred uncertainty should become Ambiguous."""
         config = ScoringConfig(
-            use_inferred_for_single_hits=True,
             single_hit_uncertainty_threshold=10.0,
         )
         classifier = ANIWeightedClassifier(ani_matrix, config=config)
@@ -145,7 +116,6 @@ class TestSingleHitClassification:
     def test_single_hit_known_species_unaffected(self, ani_matrix):
         """Single-hit Known Species reads should not be affected by Rule 0b."""
         config = ScoringConfig(
-            use_inferred_for_single_hits=True,
             single_hit_uncertainty_threshold=10.0,
         )
         classifier = ANIWeightedClassifier(ani_matrix, config=config)
@@ -164,7 +134,6 @@ class TestSingleHitClassification:
     def test_multi_hit_reads_unaffected(self, ani_matrix):
         """Multi-hit reads should not be affected by Rule 0b."""
         config = ScoringConfig(
-            use_inferred_for_single_hits=True,
             single_hit_uncertainty_threshold=10.0,
         )
         classifier = ANIWeightedClassifier(ani_matrix, config=config)
@@ -183,7 +152,6 @@ class TestSingleHitClassification:
     def test_threshold_boundary_exact(self, ani_matrix):
         """Test behavior at exact threshold boundary."""
         config = ScoringConfig(
-            use_inferred_for_single_hits=True,
             single_hit_uncertainty_threshold=12.5,  # Set threshold exactly
         )
         classifier = ANIWeightedClassifier(ani_matrix, config=config)
@@ -201,7 +169,6 @@ class TestSingleHitClassification:
     def test_below_threshold_remains_novel(self, ani_matrix):
         """Single-hit below threshold should remain Novel Species."""
         config = ScoringConfig(
-            use_inferred_for_single_hits=True,
             single_hit_uncertainty_threshold=20.0,  # Higher threshold
         )
         classifier = ANIWeightedClassifier(ani_matrix, config=config)
@@ -219,7 +186,6 @@ class TestSingleHitClassification:
     def test_novel_genus_also_affected(self, ani_matrix):
         """Single-hit Novel Genus range should also be affected by Rule 0b."""
         config = ScoringConfig(
-            use_inferred_for_single_hits=True,
             single_hit_uncertainty_threshold=10.0,
         )
         classifier = ANIWeightedClassifier(ani_matrix, config=config)
@@ -236,48 +202,17 @@ class TestSingleHitClassification:
         assert call == TaxonomicCall.AMBIGUOUS
 
 
-class TestBalancedConservativePreset:
-    """Tests for the balanced-conservative preset."""
+class TestPresetThresholds:
+    """Tests for preset threshold configurations."""
 
-    def test_preset_exists(self):
-        """balanced-conservative preset should exist."""
+    def test_coverage_strict_preset_exists(self):
+        """coverage-strict preset should exist."""
         from metadarkmatter.cli.score import THRESHOLD_PRESETS
 
-        assert "balanced-conservative" in THRESHOLD_PRESETS
+        assert "coverage-strict" in THRESHOLD_PRESETS
 
-    def test_preset_enables_single_hit_gating(self):
-        """balanced-conservative preset should enable single-hit gating."""
+    def test_literature_strict_preset_exists(self):
+        """literature-strict preset should exist."""
         from metadarkmatter.cli.score import THRESHOLD_PRESETS
 
-        config = THRESHOLD_PRESETS["balanced-conservative"]
-        assert config.use_inferred_for_single_hits is True
-
-    def test_preset_has_stricter_thresholds(self):
-        """balanced-conservative preset should have stricter thresholds than default."""
-        from metadarkmatter.cli.score import THRESHOLD_PRESETS
-
-        default = THRESHOLD_PRESETS["default"]
-        conservative = THRESHOLD_PRESETS["balanced-conservative"]
-
-        # Stricter novelty thresholds (96% species boundary)
-        assert conservative.novelty_known_max <= default.novelty_known_max
-
-        # Stricter uncertainty thresholds
-        assert conservative.uncertainty_known_max <= default.uncertainty_known_max
-
-        # Lower bitscore threshold to capture more competing hits
-        assert conservative.bitscore_threshold_pct < default.bitscore_threshold_pct
-
-    def test_preset_single_hit_threshold(self):
-        """balanced-conservative preset should have specific single-hit threshold."""
-        from metadarkmatter.cli.score import THRESHOLD_PRESETS
-
-        config = THRESHOLD_PRESETS["balanced-conservative"]
-        assert config.single_hit_uncertainty_threshold == 12.0
-
-    def test_preset_alignment_fraction(self):
-        """balanced-conservative preset should have moderate alignment fraction."""
-        from metadarkmatter.cli.score import THRESHOLD_PRESETS
-
-        config = THRESHOLD_PRESETS["balanced-conservative"]
-        assert config.min_alignment_fraction == 0.3
+        assert "literature-strict" in THRESHOLD_PRESETS

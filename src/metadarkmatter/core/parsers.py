@@ -36,7 +36,7 @@ class BlastHitFast(NamedTuple):
 
     No validation overhead - use only with pre-validated data from Polars.
     Fields are a subset of BlastHit, containing only what's needed for
-    classification calculations.
+    classification and enhanced scoring calculations.
     """
 
     qseqid: str
@@ -44,6 +44,12 @@ class BlastHitFast(NamedTuple):
     pident: float
     bitscore: float
     genome_name: str  # Pre-extracted by Polars
+    length: int = 0
+    mismatch: int = 0
+    gapopen: int = 0
+    qstart: int = 0
+    qend: int = 0
+    evalue: float = 0.0
 
 
 class BlastResultFast(NamedTuple):
@@ -443,8 +449,12 @@ class StreamingBlastParser:
 
             # Use partition_by for efficient grouping - reduces dict operations
             # from O(rows) to O(unique_reads) within each chunk
+            _fast_cols = [
+                "qseqid", "sseqid", "pident", "bitscore", "genome_name",
+                "length", "mismatch", "gapopen", "qstart", "qend", "evalue",
+            ]
             grouped = chunk_df.select(
-                ["qseqid", "sseqid", "pident", "bitscore", "genome_name"]
+                [c for c in _fast_cols if c in chunk_df.columns]
             ).partition_by("qseqid", maintain_order=True)
 
             for group_df in grouped:
@@ -453,6 +463,7 @@ class StreamingBlastParser:
                 read_id = group_df["qseqid"][0]
 
                 # Batch convert group to BlastHitFast objects
+                has_extra = "length" in group_df.columns
                 hits = [
                     BlastHitFast(
                         qseqid=row[0],
@@ -460,6 +471,12 @@ class StreamingBlastParser:
                         pident=float(row[2]),
                         bitscore=float(row[3]),
                         genome_name=row[4],
+                        length=int(row[5]) if has_extra else 0,
+                        mismatch=int(row[6]) if has_extra else 0,
+                        gapopen=int(row[7]) if has_extra else 0,
+                        qstart=int(row[8]) if has_extra else 0,
+                        qend=int(row[9]) if has_extra else 0,
+                        evalue=float(row[10]) if has_extra else 0.0,
                     )
                     for row in group_df.iter_rows()
                 ]
@@ -801,8 +818,12 @@ def iter_blast_results(
         )
 
         # Group by read ID
+        _fast_cols = [
+            "qseqid", "sseqid", "pident", "bitscore", "genome_name",
+            "length", "mismatch", "gapopen", "qstart", "qend", "evalue",
+        ]
         grouped = chunk_df.select(
-            ["qseqid", "sseqid", "pident", "bitscore", "genome_name"]
+            [c for c in _fast_cols if c in chunk_df.columns]
         ).partition_by("qseqid", maintain_order=True)
 
         for group_df in grouped:
@@ -810,6 +831,7 @@ def iter_blast_results(
                 continue
             read_id = group_df["qseqid"][0]
 
+            has_extra = "length" in group_df.columns
             hits = [
                 BlastHitFast(
                     qseqid=row[0],
@@ -817,6 +839,12 @@ def iter_blast_results(
                     pident=float(row[2]),
                     bitscore=float(row[3]),
                     genome_name=row[4],
+                    length=int(row[5]) if has_extra else 0,
+                    mismatch=int(row[6]) if has_extra else 0,
+                    gapopen=int(row[7]) if has_extra else 0,
+                    qstart=int(row[8]) if has_extra else 0,
+                    qend=int(row[9]) if has_extra else 0,
+                    evalue=float(row[10]) if has_extra else 0.0,
                 )
                 for row in group_df.iter_rows()
             ]

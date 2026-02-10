@@ -86,12 +86,13 @@ CATEGORY_UNCLASSIFIED = "Unclassified"
 # =============================================================================
 
 # Maximum novelty for "Known Species" classification
-NOVELTY_KNOWN_MAX = 5.0
+# 96% ANI species boundary (Jain et al. 2018) -> N < 4%
+NOVELTY_KNOWN_MAX = 4.0
 
 # Range for "Novel Species" classification
 # Note: Read-level BLAST identity can be 10-20% lower than genome-level ANI.
-# The 20% threshold accounts for this gap (80-95% identity = novel species).
-NOVELTY_NOVEL_SPECIES_MIN = 5.0
+# The 20% threshold accounts for this gap (80-96% identity = novel species).
+NOVELTY_NOVEL_SPECIES_MIN = 4.0
 NOVELTY_NOVEL_SPECIES_MAX = 20.0
 
 # Range for "Novel Genus" classification
@@ -106,13 +107,13 @@ NOVELTY_NOVEL_GENUS_MAX = 25.0
 # =============================================================================
 
 # Maximum uncertainty for confident placement (Known/Novel Species/Genus)
-UNCERTAINTY_CONFIDENT_MAX = 2.0
+UNCERTAINTY_CONFIDENT_MAX = 1.5
 
 # Threshold above which hits are considered "Conserved Region"
 UNCERTAINTY_CONSERVED_MIN = 5.0
 
 # Range for "Ambiguous" classification
-UNCERTAINTY_AMBIGUOUS_MIN = 2.0
+UNCERTAINTY_AMBIGUOUS_MIN = 1.5
 UNCERTAINTY_AMBIGUOUS_MAX = 5.0
 
 
@@ -308,6 +309,8 @@ def calculate_inferred_uncertainty(novelty_index: float) -> float:
     novel diversity OR database incompleteness, both of which increase
     placement uncertainty.
 
+    The function is piecewise-linear and continuous at all breakpoints.
+
     Args:
         novelty_index: Novelty index value (100 - top_hit_identity)
 
@@ -315,20 +318,24 @@ def calculate_inferred_uncertainty(novelty_index: float) -> float:
         Inferred uncertainty value (5-35%)
 
     Interpretation:
-        - Low novelty (< 5%): Database likely complete for this species
-        - Novel species range (5-20%): Uncertain if truly novel or database gap
+        - Low novelty (< 4%): Database likely complete for this species
+        - Novel species range (4-20%): Uncertain if truly novel or database gap
         - Novel genus range (20-25%): High uncertainty about placement
         - Very high divergence (> 25%): Maximum uncertainty
     """
+    # Compute continuous breakpoints from constants
+    known_break = INFERRED_UNCERTAINTY_BASE + NOVELTY_KNOWN_MAX * 0.5
+    species_break = known_break + (NOVELTY_NOVEL_SPECIES_MAX - NOVELTY_KNOWN_MAX) * INFERRED_UNCERTAINTY_NOVEL_SPECIES_SLOPE
+
     if novelty_index < NOVELTY_KNOWN_MAX:
         # High identity: database likely complete for this species
-        return INFERRED_UNCERTAINTY_BASE + novelty_index * 0.5  # 5-7.5%
+        return INFERRED_UNCERTAINTY_BASE + novelty_index * 0.5
     elif novelty_index < NOVELTY_NOVEL_SPECIES_MAX:
         # Novel species range: uncertain if truly novel or database gap
-        return 7.5 + (novelty_index - NOVELTY_KNOWN_MAX) * INFERRED_UNCERTAINTY_NOVEL_SPECIES_SLOPE  # 7.5-22.5%
+        return known_break + (novelty_index - NOVELTY_KNOWN_MAX) * INFERRED_UNCERTAINTY_NOVEL_SPECIES_SLOPE
     elif novelty_index < NOVELTY_NOVEL_GENUS_MAX:
         # Novel genus range: high uncertainty
-        return 22.5 + (novelty_index - NOVELTY_NOVEL_SPECIES_MAX) * INFERRED_UNCERTAINTY_NOVEL_GENUS_SLOPE  # 22.5-30%
+        return species_break + (novelty_index - NOVELTY_NOVEL_SPECIES_MAX) * INFERRED_UNCERTAINTY_NOVEL_GENUS_SLOPE
     else:
         # Very high divergence: maximum uncertainty
         return INFERRED_UNCERTAINTY_MAX

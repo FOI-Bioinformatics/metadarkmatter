@@ -30,6 +30,7 @@ from metadarkmatter.models.config import ScoringConfig
 if TYPE_CHECKING:
     from metadarkmatter.core.aai_matrix_builder import AAIMatrix
     from metadarkmatter.core.classification.ani_matrix import ANIMatrix
+    from metadarkmatter.core.classification.qc import QCMetrics
     from metadarkmatter.core.id_mapping import ContigIdMapping
 
 class VectorizedClassifier:
@@ -82,6 +83,14 @@ class VectorizedClassifier:
 
         # Store effective thresholds based on alignment mode
         self._effective_thresholds = self.config.get_effective_thresholds()
+
+        # Pre-compute inferred uncertainty breakpoints for continuous piecewise formula
+        eff = self._effective_thresholds
+        self._inferred_known_break = 5.0 + eff["novelty_known_max"] * 0.5
+        self._inferred_species_break = (
+            self._inferred_known_break
+            + (eff["novelty_novel_species_max"] - eff["novelty_known_max"]) * 1.0
+        )
 
         # Pre-build ANI lookup DataFrame for efficient joins
         self._build_ani_lookup()
@@ -224,7 +233,8 @@ class VectorizedClassifier:
         self,
         blast_path: Path,
         id_mapping: ContigIdMapping | None = None,
-    ) -> pl.DataFrame:
+        compute_qc: bool = False,
+    ) -> pl.DataFrame | tuple[pl.DataFrame, "QCMetrics"]:
         """
         Classify BLAST file using fully vectorized Polars operations.
 
@@ -235,9 +245,11 @@ class VectorizedClassifier:
             blast_path: Path to BLAST tabular output
             id_mapping: Optional ID mapping for external BLAST results.
                 If provided, transforms sseqid values before genome extraction.
+            compute_qc: If True, return (DataFrame, QCMetrics) tuple.
 
         Returns:
-            DataFrame with classification results
+            DataFrame with classification results, or (DataFrame, QCMetrics)
+            tuple if compute_qc is True.
         """
         from metadarkmatter.core.parsers import (
             StreamingBlastParser,
@@ -252,6 +264,9 @@ class VectorizedClassifier:
         # Apply ID transformation if mapping provided (for external BLAST results)
         if id_mapping is not None:
             df = id_mapping.transform_column(df, "sseqid")
+
+        # Capture raw count before filtering (for QC)
+        raw_df = df if compute_qc else None
 
         # Apply alignment quality filters (GTDB-compatible)
         if self.config.min_alignment_length > 0:
@@ -269,8 +284,19 @@ class VectorizedClassifier:
         # Add genome_name column (extracts accession from standardized sseqid)
         df = df.with_columns([extract_genome_name_expr()])
 
+        # Capture filtered state for QC before empty check
+        filtered_df = df if compute_qc else None
+
         if df.is_empty():
-            return self._empty_dataframe()
+            empty = self._empty_dataframe()
+            if compute_qc:
+                from metadarkmatter.core.classification.qc import (
+                    QCMetrics,
+                    compute_pre_qc,
+                )
+                qc = compute_pre_qc(raw_df, filtered_df, self.ani_matrix, self.config)
+                return empty, qc
+            return empty
 
         # Add read_length column for coverage calculation
         # Use qlen if available, otherwise fall back to qend as proxy
@@ -641,20 +667,19 @@ class VectorizedClassifier:
                 & (pl.col("placement_uncertainty") < eff["uncertainty_known_max"])
             )
             .then(pl.lit("Known Species"))
-            # Rule 0b: Single-hit inferred uncertainty check (when enabled)
+            # Rule 0b: Single-hit inferred uncertainty check
             # For single-hit reads with high inferred uncertainty, flag as Ambiguous
             .when(
-                (pl.lit(cfg.use_inferred_for_single_hits))
-                & (pl.col("num_ambiguous_hits") <= 1)
+                (pl.col("num_ambiguous_hits") <= 1)
                 & (pl.col("novelty_index") >= eff["novelty_novel_species_min"])
                 # Inferred uncertainty formula: higher novelty = higher uncertainty
                 & (
                     pl.when(pl.col("novelty_index") < eff["novelty_known_max"])
                     .then(5.0 + pl.col("novelty_index") * 0.5)
                     .when(pl.col("novelty_index") < eff["novelty_novel_species_max"])
-                    .then(7.5 + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)
+                    .then(self._inferred_known_break + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)
                     .when(pl.col("novelty_index") < eff["novelty_novel_genus_max"])
-                    .then(22.5 + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)
+                    .then(self._inferred_species_break + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)
                     .otherwise(35.0)
                     >= pl.lit(cfg.single_hit_uncertainty_threshold)
                 )
@@ -700,89 +725,87 @@ class VectorizedClassifier:
             (pl.col("confidence_score") < cfg.confidence_threshold).alias("low_confidence"),
         ])
 
-        # Enhanced scoring: inferred uncertainty for single-hit reads
-        if cfg.infer_single_hit_uncertainty or cfg.enhanced_scoring:
-            result = result.with_columns([
-                # Inferred uncertainty: estimate for single-hit reads based on novelty
-                pl.when(pl.col("num_ambiguous_hits") <= 1)
-                .then(
-                    pl.when(pl.col("novelty_index") < eff["novelty_known_max"])
-                    .then(5.0 + pl.col("novelty_index") * 0.5)  # 5-7.5%
-                    .when(pl.col("novelty_index") < eff["novelty_novel_species_max"])
-                    .then(7.5 + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)  # 7.5-22.5%
-                    .when(pl.col("novelty_index") < eff["novelty_novel_genus_max"])
-                    .then(22.5 + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)  # 22.5-30%
-                    .otherwise(35.0)  # Maximum uncertainty
-                )
-                .otherwise(pl.lit(None))
-                .alias("inferred_uncertainty"),
-                # Uncertainty type: measured (from ANI) or inferred (from novelty)
-                pl.when(pl.col("num_ambiguous_hits") <= 1)
-                .then(pl.lit("inferred"))
-                .otherwise(pl.lit("measured"))
-                .alias("uncertainty_type"),
-            ])
+        # Inferred uncertainty for single-hit reads
+        result = result.with_columns([
+            # Inferred uncertainty: estimate for single-hit reads based on novelty
+            pl.when(pl.col("num_ambiguous_hits") <= 1)
+            .then(
+                pl.when(pl.col("novelty_index") < eff["novelty_known_max"])
+                .then(5.0 + pl.col("novelty_index") * 0.5)  # 5-7.5%
+                .when(pl.col("novelty_index") < eff["novelty_novel_species_max"])
+                .then(self._inferred_known_break + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)  # 7.5-22.5%
+                .when(pl.col("novelty_index") < eff["novelty_novel_genus_max"])
+                .then(self._inferred_species_break + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)  # 22.5-30%
+                .otherwise(35.0)  # Maximum uncertainty
+            )
+            .otherwise(pl.lit(None))
+            .alias("inferred_uncertainty"),
+            # Uncertainty type: measured (from ANI) or inferred (from novelty)
+            pl.when(pl.col("num_ambiguous_hits") <= 1)
+            .then(pl.lit("inferred"))
+            .otherwise(pl.lit("measured"))
+            .alias("uncertainty_type"),
+        ])
 
-        # Enhanced scoring: alignment quality and confidence dimensions
-        if cfg.enhanced_scoring:
-            result = result.with_columns([
-                # Alignment quality score (0-100) - simplified for vectorized operations
-                # Uses alignment_fraction as proxy since we don't have mismatch/gap in this context
-                (pl.col("alignment_fraction") * 50.0 + 25.0).clip(0.0, 100.0).round(1)
-                .alias("alignment_quality"),
-            ]).with_columns([
-                # Identity confidence: how reliable is the identity measurement
-                (
-                    pl.when(pl.col("novelty_index") < 5).then(80.0)
-                    .when(pl.col("novelty_index") < 15).then(60.0 - (pl.col("novelty_index") - 5))
-                    .when(pl.col("novelty_index") < 25).then(50.0 - (pl.col("novelty_index") - 15) * 1.5)
-                    .otherwise(30.0)
-                    + pl.col("alignment_quality") * 0.2
-                ).clip(0.0, 100.0).round(1).alias("identity_confidence"),
-            ]).with_columns([
-                # Placement confidence: how confident are we about genome assignment
-                # Uses effective uncertainty (inferred for single-hit, measured for multi-hit)
-                pl.when(pl.col("num_ambiguous_hits") <= 1)
-                .then(
-                    # For single-hit reads, use inferred uncertainty
-                    pl.when(pl.col("inferred_uncertainty") < 2).then(65.0)  # 80 - 15 penalty
-                    .when(pl.col("inferred_uncertainty") < 5).then(45.0)
-                    .when(pl.col("inferred_uncertainty") < 10).then(25.0)
-                    .when(pl.col("inferred_uncertainty") < 20).then(10.0)
-                    .otherwise(0.0)
-                )
-                .otherwise(
-                    # For multi-hit reads, use measured uncertainty with identity gap bonus
-                    pl.when(pl.col("placement_uncertainty") < 2).then(80.0)
-                    .when(pl.col("placement_uncertainty") < 5).then(60.0)
-                    .when(pl.col("placement_uncertainty") < 10).then(40.0)
-                    .when(pl.col("placement_uncertainty") < 20).then(25.0)
-                    .otherwise(10.0)
-                    + pl.when((pl.col("identity_gap").is_not_null()) & (pl.col("identity_gap") >= 5)).then(20.0)
-                    .when((pl.col("identity_gap").is_not_null()) & (pl.col("identity_gap") >= 2)).then(10.0)
-                    .when((pl.col("identity_gap").is_not_null()) & (pl.col("identity_gap") >= 1)).then(5.0)
-                    .otherwise(0.0)
-                )
-                .clip(0.0, 100.0).round(1).alias("placement_confidence"),
-            ]).with_columns([
-                # Discovery score: priority for novel discoveries (null for non-novel)
-                pl.when(pl.col("taxonomic_call") == "Novel Species")
-                .then(
-                    # Novelty component (15-30 pts) + quality (0-30) + confidence (0-30)
-                    (15.0 + (pl.col("novelty_index") - eff["novelty_novel_species_min"]) * 1.5).clip(15.0, 30.0)
-                    + pl.col("alignment_quality") * 0.3
-                    + (pl.col("identity_confidence") + pl.col("placement_confidence")) / 2.0 * 0.3
-                )
-                .when(pl.col("taxonomic_call") == "Novel Genus")
-                .then(
-                    # Novelty component (30-40 pts) + quality (0-30) + confidence (0-30)
-                    (30.0 + (pl.col("novelty_index") - eff["novelty_novel_genus_min"]) * 2.0).clip(30.0, 40.0)
-                    + pl.col("alignment_quality") * 0.3
-                    + (pl.col("identity_confidence") + pl.col("placement_confidence")) / 2.0 * 0.3
-                )
-                .otherwise(pl.lit(None))
-                .round(1).alias("discovery_score"),
-            ])
+        # Alignment quality and confidence dimensions
+        result = result.with_columns([
+            # Alignment quality score (0-100) - simplified for vectorized operations
+            # Uses alignment_fraction as proxy since we don't have mismatch/gap in this context
+            (pl.col("alignment_fraction") * 50.0 + 25.0).clip(0.0, 100.0).round(1)
+            .alias("alignment_quality"),
+        ]).with_columns([
+            # Identity confidence: how reliable is the identity measurement
+            (
+                pl.when(pl.col("novelty_index") < 5).then(80.0)
+                .when(pl.col("novelty_index") < 15).then(60.0 - (pl.col("novelty_index") - 5))
+                .when(pl.col("novelty_index") < 25).then(50.0 - (pl.col("novelty_index") - 15) * 1.5)
+                .otherwise(30.0)
+                + pl.col("alignment_quality") * 0.2
+            ).clip(0.0, 100.0).round(1).alias("identity_confidence"),
+        ]).with_columns([
+            # Placement confidence: how confident are we about genome assignment
+            # Uses effective uncertainty (inferred for single-hit, measured for multi-hit)
+            pl.when(pl.col("num_ambiguous_hits") <= 1)
+            .then(
+                # For single-hit reads, use inferred uncertainty
+                pl.when(pl.col("inferred_uncertainty") < 2).then(65.0)  # 80 - 15 penalty
+                .when(pl.col("inferred_uncertainty") < 5).then(45.0)
+                .when(pl.col("inferred_uncertainty") < 10).then(25.0)
+                .when(pl.col("inferred_uncertainty") < 20).then(10.0)
+                .otherwise(0.0)
+            )
+            .otherwise(
+                # For multi-hit reads, use measured uncertainty with identity gap bonus
+                pl.when(pl.col("placement_uncertainty") < 2).then(80.0)
+                .when(pl.col("placement_uncertainty") < 5).then(60.0)
+                .when(pl.col("placement_uncertainty") < 10).then(40.0)
+                .when(pl.col("placement_uncertainty") < 20).then(25.0)
+                .otherwise(10.0)
+                + pl.when((pl.col("identity_gap").is_not_null()) & (pl.col("identity_gap") >= 5)).then(20.0)
+                .when((pl.col("identity_gap").is_not_null()) & (pl.col("identity_gap") >= 2)).then(10.0)
+                .when((pl.col("identity_gap").is_not_null()) & (pl.col("identity_gap") >= 1)).then(5.0)
+                .otherwise(0.0)
+            )
+            .clip(0.0, 100.0).round(1).alias("placement_confidence"),
+        ]).with_columns([
+            # Discovery score: priority for novel discoveries (null for non-novel)
+            pl.when(pl.col("taxonomic_call") == "Novel Species")
+            .then(
+                # Novelty component (15-30 pts) + quality (0-30) + confidence (0-30)
+                (15.0 + (pl.col("novelty_index") - eff["novelty_novel_species_min"]) * 1.5).clip(15.0, 30.0)
+                + pl.col("alignment_quality") * 0.3
+                + (pl.col("identity_confidence") + pl.col("placement_confidence")) / 2.0 * 0.3
+            )
+            .when(pl.col("taxonomic_call") == "Novel Genus")
+            .then(
+                # Novelty component (30-40 pts) + quality (0-30) + confidence (0-30)
+                (30.0 + (pl.col("novelty_index") - eff["novelty_novel_genus_min"]) * 2.0).clip(30.0, 40.0)
+                + pl.col("alignment_quality") * 0.3
+                + (pl.col("identity_confidence") + pl.col("placement_confidence")) / 2.0 * 0.3
+            )
+            .otherwise(pl.lit(None))
+            .round(1).alias("discovery_score"),
+        ])
 
         # Select and rename final columns
         # Note: num_competing_genera removed (redundant with ambiguity_scope)
@@ -804,19 +827,27 @@ class VectorizedClassifier:
             "low_confidence",
         ]
 
-        # Add enhanced scoring columns if enabled
-        if cfg.infer_single_hit_uncertainty or cfg.enhanced_scoring:
-            base_columns.extend(["inferred_uncertainty", "uncertainty_type"])
+        # Add enhanced scoring columns
+        base_columns.extend(["inferred_uncertainty", "uncertainty_type"])
+        base_columns.extend([
+            "alignment_quality",
+            "identity_confidence",
+            "placement_confidence",
+            "discovery_score",
+        ])
 
-        if cfg.enhanced_scoring:
-            base_columns.extend([
-                "alignment_quality",
-                "identity_confidence",
-                "placement_confidence",
-                "discovery_score",
-            ])
+        classification_result = result.select(base_columns)
 
-        return result.select(base_columns)
+        if compute_qc:
+            from metadarkmatter.core.classification.qc import (
+                compute_post_qc,
+                compute_pre_qc,
+            )
+            qc = compute_pre_qc(raw_df, filtered_df, self.ani_matrix, self.config)
+            qc = compute_post_qc(qc, classification_result)
+            return classification_result, qc
+
+        return classification_result
 
     def _empty_dataframe(self) -> pl.DataFrame:
         """Return empty DataFrame with correct schema."""
@@ -837,6 +868,12 @@ class VectorizedClassifier:
                 "diversity_status": pl.Utf8,
                 "is_novel": pl.Boolean,
                 "low_confidence": pl.Boolean,
+                "inferred_uncertainty": pl.Float64,
+                "uncertainty_type": pl.Utf8,
+                "alignment_quality": pl.Float64,
+                "identity_confidence": pl.Float64,
+                "placement_confidence": pl.Float64,
+                "discovery_score": pl.Float64,
             }
         )
 
@@ -1048,18 +1085,17 @@ class VectorizedClassifier:
                     & (pl.col("placement_uncertainty") < eff["uncertainty_known_max"])
                 )
                 .then(pl.lit("Known Species"))
-                # Rule 0b: Single-hit inferred uncertainty check (when enabled)
+                # Rule 0b: Single-hit inferred uncertainty check
                 .when(
-                    (pl.lit(cfg.use_inferred_for_single_hits))
-                    & (pl.col("num_ambiguous_hits") <= 1)
+                    (pl.col("num_ambiguous_hits") <= 1)
                     & (pl.col("novelty_index") >= eff["novelty_novel_species_min"])
                     & (
                         pl.when(pl.col("novelty_index") < eff["novelty_known_max"])
                         .then(5.0 + pl.col("novelty_index") * 0.5)
                         .when(pl.col("novelty_index") < eff["novelty_novel_species_max"])
-                        .then(7.5 + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)
+                        .then(self._inferred_known_break + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)
                         .when(pl.col("novelty_index") < eff["novelty_novel_genus_max"])
-                        .then(22.5 + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)
+                        .then(self._inferred_species_break + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)
                         .otherwise(35.0)
                         >= pl.lit(cfg.single_hit_uncertainty_threshold)
                     )

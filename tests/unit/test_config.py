@@ -27,8 +27,8 @@ class TestScoringConfig:
         """Default ScoringConfig should have expected values.
 
         Thresholds are based on literature:
-        - 95% ANI = prokaryotic species boundary (Jain et al. 2018)
-        - Novelty N = 100 - pident, so N < 5% = pident > 95% (same species)
+        - 96% ANI = prokaryotic species boundary (Jain et al. 2018)
+        - Novelty N = 100 - pident, so N < 4% = pident > 96% (same species)
         """
         config = ScoringConfig()
 
@@ -36,16 +36,19 @@ class TestScoringConfig:
         # Novelty thresholds: continuous boundaries at species cutoff
         # Note: 20% novelty threshold accounts for read-level identity being
         # 10-20% lower than genome-level ANI
-        assert config.novelty_known_max == 5.0  # pident > 95%
-        assert config.novelty_novel_species_min == 5.0  # pident <= 95%
+        assert config.novelty_known_max == 4.0  # pident > 96%
+        assert config.novelty_novel_species_min == 4.0  # pident <= 96%
         assert config.novelty_novel_species_max == 20.0  # pident >= 80%
         assert config.novelty_novel_genus_min == 20.0  # pident < 80%
         assert config.novelty_novel_genus_max == 25.0
         # Uncertainty thresholds: based on competing genome ANI
-        assert config.uncertainty_known_max == 2.0  # ANI > 98%
-        assert config.uncertainty_novel_species_max == 2.0
-        assert config.uncertainty_novel_genus_max == 2.0
+        assert config.uncertainty_known_max == 1.5  # ANI > 98.5%
+        assert config.uncertainty_novel_species_max == 1.5
+        assert config.uncertainty_novel_genus_max == 1.5
         assert config.uncertainty_conserved_min == 5.0
+        # Coverage weighting is on by default
+        assert config.coverage_weight_mode == "linear"
+        assert config.min_alignment_fraction == 0.3
 
     def test_custom_bitscore_threshold(self):
         """Should accept custom bitscore threshold."""
@@ -361,13 +364,13 @@ class TestScoringConfigBoundaries:
     def test_known_species_and_novel_species_continuous(self):
         """Boundaries should be continuous for gapless classification.
 
-        The defaults use novelty_known_max == novelty_novel_species_min (both 5.0)
+        The defaults use novelty_known_max == novelty_novel_species_min (both 4.0)
         to ensure every read is classified without gaps.
-        Classification logic: known if N < 5.0, novel species if N >= 5.0.
+        Classification logic: known if N < 4.0, novel species if N >= 4.0.
         """
         config = ScoringConfig()
 
-        # Continuous boundary at 5.0 (95% identity = species boundary)
+        # Continuous boundary at 4.0 (96% identity = species boundary)
         gap = config.novelty_novel_species_min - config.novelty_known_max
         assert gap == 0.0  # Continuous, no gap
 
