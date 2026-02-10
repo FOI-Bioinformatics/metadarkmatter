@@ -1909,3 +1909,90 @@ PHYLOGENY_NOT_PROVIDED_MESSAGE: str = (
     "Phylogenetic tree not provided. Use --tree option with a Newick file "
     "to include the phylogeny visualization."
 )
+
+
+# =============================================================================
+# Bayesian Confidence Templates
+# =============================================================================
+
+BAYESIAN_SUMMARY_TEMPLATE: str = '''
+<div class="enhanced-scoring-summary">
+    <div class="summary-intro">
+        <h3>Bayesian Posterior Analysis</h3>
+        <p class="intro-text">
+            Bayesian classification assigns posterior probabilities to each category
+            rather than hard labels. Near threshold boundaries, posteriors are split
+            (e.g., 55% Novel Species, 40% Known Species), making classification
+            uncertainty explicit. Posterior entropy measures overall confidence:
+            low entropy indicates a clear assignment, high entropy indicates ambiguity.
+        </p>
+    </div>
+
+    <div class="metric-grid">
+        <div class="metric-box">
+            <div class="metric-title">Mean Posterior Entropy</div>
+            <div class="metric-value">{mean_entropy:.2f}</div>
+            <div class="metric-detail">Range: 0 (certain) to 2.0 (uniform)</div>
+            <div class="metric-note">Lower values indicate more confident classifications overall</div>
+        </div>
+
+        <div class="metric-box highlight">
+            <div class="metric-title">High-Confidence Reads</div>
+            <div class="metric-value">{high_confidence_pct:.1f}%</div>
+            <div class="metric-detail">{high_confidence_count:,} reads with entropy &lt; 1.0</div>
+            <div class="metric-note">Reads where one category clearly dominates the posterior</div>
+        </div>
+
+        <div class="metric-box">
+            <div class="metric-title">MAP Agreement</div>
+            <div class="metric-value">{map_agreement_pct:.1f}%</div>
+            <div class="metric-detail">{map_agreement_count:,} of {total_reads:,} reads</div>
+            <div class="metric-note">Reads where Bayesian MAP matches the threshold classification</div>
+        </div>
+
+        <div class="metric-box">
+            <div class="metric-title">Boundary Reads</div>
+            <div class="metric-value">{boundary_pct:.1f}%</div>
+            <div class="metric-detail">{boundary_count:,} reads with entropy &gt; 1.5</div>
+            <div class="metric-note">Reads near classification boundaries where multiple categories are plausible</div>
+        </div>
+    </div>
+</div>
+'''
+
+BAYESIAN_INTERPRETATION_TEMPLATE: str = '''
+<div class="discovery-guide">
+    <h3>Interpreting Bayesian Posteriors</h3>
+    <div class="guide-grid">
+        <div class="guide-item">
+            <div class="guide-label">Entropy &lt; 0.5</div>
+            <div class="guide-desc">
+                <strong>Very confident.</strong> One category holds &gt;85% of the posterior mass.
+                The classification is robust to threshold perturbation.
+            </div>
+        </div>
+        <div class="guide-item">
+            <div class="guide-label">Entropy 0.5 - 1.0</div>
+            <div class="guide-desc">
+                <strong>Confident.</strong> The MAP category is the clear winner, though a secondary
+                category holds appreciable probability. Classification is likely stable.
+            </div>
+        </div>
+        <div class="guide-item">
+            <div class="guide-label">Entropy 1.0 - 1.5</div>
+            <div class="guide-desc">
+                <strong>Moderate uncertainty.</strong> Two or more categories share significant posterior
+                mass. The read lies near a classification boundary and results are
+                threshold-dependent.
+            </div>
+        </div>
+        <div class="guide-item">
+            <div class="guide-label">Entropy &gt; 1.5</div>
+            <div class="guide-desc">
+                <strong>High uncertainty.</strong> Posterior mass is spread across multiple categories.
+                Consider these reads as boundary cases requiring additional evidence.
+            </div>
+        </div>
+    </div>
+</div>
+'''

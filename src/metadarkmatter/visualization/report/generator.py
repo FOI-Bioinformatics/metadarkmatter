@@ -76,6 +76,8 @@ from metadarkmatter.visualization.report.templates import (
     TAB_NAVIGATION_JS,
     TAB_SECTION_TEMPLATE,
     TABLE_ROW_TEMPLATE,
+    BAYESIAN_SUMMARY_TEMPLATE,
+    BAYESIAN_INTERPRETATION_TEMPLATE,
     get_cell_class,
 )
 from metadarkmatter.visualization.report.novel_section import (
@@ -133,6 +135,15 @@ class TaxonomicSummary:
     mean_discovery_score: float | None = None
     novel_with_discovery_score: int = 0
     high_priority_discoveries: int = 0  # discovery_score >= 75
+    # Bayesian posterior metrics (optional, only when --bayesian used)
+    has_bayesian: bool = False
+    mean_posterior_entropy: float = 0.0
+    high_confidence_count: int = 0  # entropy < 1.0
+    high_confidence_pct: float = 0.0
+    boundary_count: int = 0  # entropy > 1.5
+    boundary_pct: float = 0.0
+    map_agreement_count: int = 0
+    map_agreement_pct: float = 0.0
 
     @property
     def novel_percentage(self) -> float:
@@ -372,6 +383,35 @@ class ReportGenerator:
                         discovery_df.filter(pl.col("discovery_score") >= 75)
                     )
 
+        # Check for Bayesian posterior columns
+        has_bayesian = "posterior_entropy" in self.df.columns
+        mean_posterior_entropy = 0.0
+        high_confidence_count = 0
+        high_confidence_pct = 0.0
+        boundary_count = 0
+        boundary_pct = 0.0
+        map_agreement_count = 0
+        map_agreement_pct = 0.0
+
+        if has_bayesian:
+            total_n = len(self.df) if len(self.df) > 0 else 1
+            mean_posterior_entropy = self.df["posterior_entropy"].mean() or 0.0
+            high_confidence_count = len(
+                self.df.filter(pl.col("posterior_entropy") < 1.0)
+            )
+            high_confidence_pct = high_confidence_count / total_n * 100
+            boundary_count = len(
+                self.df.filter(pl.col("posterior_entropy") > 1.5)
+            )
+            boundary_pct = boundary_count / total_n * 100
+            if "bayesian_category" in self.df.columns:
+                map_agreement_count = len(
+                    self.df.filter(
+                        pl.col("bayesian_category") == pl.col("taxonomic_call")
+                    )
+                )
+                map_agreement_pct = map_agreement_count / total_n * 100
+
         return TaxonomicSummary(
             total_reads=len(self.df),
             known_species=known_species,
@@ -400,6 +440,15 @@ class ReportGenerator:
             mean_discovery_score=mean_discovery_score,
             novel_with_discovery_score=novel_with_discovery_score,
             high_priority_discoveries=high_priority_discoveries,
+            # Bayesian
+            has_bayesian=has_bayesian,
+            mean_posterior_entropy=mean_posterior_entropy,
+            high_confidence_count=high_confidence_count,
+            high_confidence_pct=high_confidence_pct,
+            boundary_count=boundary_count,
+            boundary_pct=boundary_pct,
+            map_agreement_count=map_agreement_count,
+            map_agreement_pct=map_agreement_pct,
         )
 
     def _get_genome_label(self, accession: str, max_species_len: int = 25) -> str:
@@ -504,6 +553,10 @@ class ReportGenerator:
         if self.summary.has_enhanced_scoring or self.summary.has_inferred_uncertainty:
             content_sections.append(self._build_enhanced_scoring_section())
 
+        # Bayesian Confidence tab (only if posterior columns present)
+        if self.summary.has_bayesian:
+            content_sections.append(self._build_bayesian_section())
+
         # Recruitment tab
         content_sections.append(self._build_recruitment_section())
 
@@ -567,6 +620,10 @@ class ReportGenerator:
         # Add Discovery Scores tab if data available (renamed from Enhanced Scoring)
         if self.summary.has_enhanced_scoring or self.summary.has_inferred_uncertainty:
             tabs.append(("enhanced-scoring", "Discovery Scores", False))
+
+        # Add Bayesian Confidence tab if posterior data available
+        if self.summary.has_bayesian:
+            tabs.append(("bayesian", "Bayesian Confidence", False))
 
         tabs.extend([
             ("recruitment", "Recruitment", False),
@@ -1055,6 +1112,200 @@ class ReportGenerator:
             tab_id="enhanced-scoring",
             active_class="",
             section_title="Discovery Scores",
+            content=content,
+        )
+
+    def _build_bayesian_section(self) -> str:
+        """Build the Bayesian confidence tab with posterior analysis and entropy."""
+        import plotly.graph_objects as go
+
+        s = self.summary
+        content_parts = []
+
+        # Summary cards
+        summary_html = BAYESIAN_SUMMARY_TEMPLATE.format(
+            mean_entropy=s.mean_posterior_entropy,
+            high_confidence_pct=s.high_confidence_pct,
+            high_confidence_count=s.high_confidence_count,
+            map_agreement_pct=s.map_agreement_pct,
+            map_agreement_count=s.map_agreement_count,
+            total_reads=s.total_reads,
+            boundary_pct=s.boundary_pct,
+            boundary_count=s.boundary_count,
+        )
+        content_parts.append(summary_html)
+
+        # Interpretation guide
+        content_parts.append(BAYESIAN_INTERPRETATION_TEMPLATE)
+
+        # --- Posterior Entropy Distribution ---
+        if "posterior_entropy" in self.df.columns:
+            entropy_vals = self.df["posterior_entropy"].to_list()
+
+            entropy_fig = go.Figure()
+            entropy_fig.add_trace(go.Histogram(
+                x=entropy_vals,
+                nbinsx=40,
+                marker_color="#667eea",
+                hovertemplate="Entropy: %{x:.2f}<br>Count: %{y}<extra></extra>",
+            ))
+
+            # Add threshold lines
+            entropy_fig.add_vline(
+                x=0.5, line_dash="dash", line_color="#22c55e",
+                annotation_text="Very confident",
+            )
+            entropy_fig.add_vline(
+                x=1.0, line_dash="dot", line_color="#f59e0b",
+                annotation_text="Confident",
+            )
+            entropy_fig.add_vline(
+                x=1.5, line_dash="dot", line_color="#ef4444",
+                annotation_text="Uncertain",
+            )
+
+            entropy_fig.update_layout(
+                title="Posterior Entropy Distribution",
+                xaxis_title="Shannon Entropy (bits)",
+                yaxis_title="Number of Reads",
+                template="plotly_white",
+                height=400,
+                showlegend=False,
+                xaxis={"range": [0, 2.1]},
+            )
+            entropy_id = "plot-bayesian-entropy"
+            self._register_plot(entropy_id, entropy_fig)
+
+            content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
+                extra_class="full-width",
+                title="Posterior Entropy Distribution",
+                description=(
+                    "Shannon entropy of the posterior distribution per read. "
+                    "Low entropy (left) indicates confident classification; "
+                    "high entropy (right) indicates reads near boundaries "
+                    "where multiple categories are plausible."
+                ),
+                plot_id=entropy_id,
+            ))
+
+        # --- Stacked Posterior Bar by Category ---
+        if "bayesian_category" in self.df.columns:
+            category_colors = {
+                "Known Species": "#22c55e",
+                "Novel Species": "#f59e0b",
+                "Novel Genus": "#ef4444",
+                "Ambiguous": "#94a3b8",
+            }
+            posterior_cols = [
+                ("p_known_species", "Known Species"),
+                ("p_novel_species", "Novel Species"),
+                ("p_novel_genus", "Novel Genus"),
+                ("p_ambiguous", "Ambiguous"),
+            ]
+
+            # Mean posteriors grouped by Bayesian MAP category
+            bar_fig = go.Figure()
+            for col_name, cat_label in posterior_cols:
+                if col_name not in self.df.columns:
+                    continue
+                means = []
+                cats = []
+                for map_cat in ["Known Species", "Novel Species", "Novel Genus", "Ambiguous"]:
+                    cat_df = self.df.filter(pl.col("bayesian_category") == map_cat)
+                    if len(cat_df) > 0:
+                        cats.append(map_cat)
+                        means.append(cat_df[col_name].mean() or 0.0)
+                if means:
+                    bar_fig.add_trace(go.Bar(
+                        x=cats,
+                        y=means,
+                        name=cat_label,
+                        marker_color=category_colors.get(cat_label, "#94a3b8"),
+                    ))
+
+            bar_fig.update_layout(
+                title="Mean Posterior Composition by MAP Category",
+                xaxis_title="Bayesian MAP Category",
+                yaxis_title="Mean Posterior Probability",
+                template="plotly_white",
+                height=450,
+                barmode="stack",
+                legend={"orientation": "h", "y": -0.2},
+                yaxis={"range": [0, 1.05]},
+            )
+            bar_id = "plot-bayesian-posterior-bar"
+            self._register_plot(bar_id, bar_fig)
+
+            content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
+                extra_class="full-width",
+                title="Posterior Composition by Category",
+                description=(
+                    "Mean posterior probabilities grouped by the Bayesian MAP classification. "
+                    "A well-separated classifier shows tall bars for the dominant category "
+                    "in each group. Mixed bars indicate regions of classification uncertainty."
+                ),
+                plot_id=bar_id,
+            ))
+
+        # --- MAP Confidence vs Novelty Scatter ---
+        if "posterior_entropy" in self.df.columns and "novelty_index" in self.df.columns:
+            plot_df = self.df
+            if len(plot_df) > self.config.max_scatter_points:
+                plot_df = plot_df.sample(n=self.config.max_scatter_points, seed=42)
+
+            scatter_fig = go.Figure()
+
+            category_colors_scatter = {
+                "Known Species": "#22c55e",
+                "Novel Species": "#f59e0b",
+                "Novel Genus": "#ef4444",
+                "Ambiguous": "#94a3b8",
+            }
+            for call, color in category_colors_scatter.items():
+                call_df = plot_df.filter(pl.col("bayesian_category") == call)
+                if len(call_df) > 0:
+                    scatter_fig.add_trace(go.Scattergl(
+                        x=call_df["novelty_index"].to_list(),
+                        y=call_df["posterior_entropy"].to_list(),
+                        mode="markers",
+                        name=call,
+                        marker={"color": color, "size": 4, "opacity": 0.5},
+                        hovertemplate=(
+                            f"<b>{call}</b><br>"
+                            "Novelty: %{{x:.1f}}%<br>"
+                            "Entropy: %{{y:.2f}}<extra></extra>"
+                        ),
+                    ))
+
+            scatter_fig.update_layout(
+                title="Classification Confidence Landscape",
+                xaxis_title="Novelty Index (%)",
+                yaxis_title="Posterior Entropy (bits)",
+                template="plotly_white",
+                height=500,
+                legend={"orientation": "h", "y": -0.15},
+                yaxis={"range": [0, 2.1]},
+            )
+            scatter_id = "plot-bayesian-landscape"
+            self._register_plot(scatter_id, scatter_fig)
+
+            content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
+                extra_class="full-width",
+                title="Confidence Landscape",
+                description=(
+                    "Novelty index vs posterior entropy colored by Bayesian MAP category. "
+                    "Reads with high entropy (top) lie near classification boundaries. "
+                    "Vertical bands of high entropy correspond to threshold boundaries."
+                ),
+                plot_id=scatter_id,
+            ))
+
+        content = "\n".join(content_parts)
+
+        return TAB_SECTION_TEMPLATE.format(
+            tab_id="bayesian",
+            active_class="",
+            section_title="Bayesian Confidence",
             content=content,
         )
 
