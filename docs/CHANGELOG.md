@@ -2,6 +2,65 @@
 
 All notable changes to metadarkmatter are documented in this file.
 
+## [0.2.0] - 2026-02-10
+
+### Breaking Changes
+
+**Default Threshold Updates**
+- Species boundary tightened: `novelty_known_max` changed from 5.0% to 4.0% (96% ANI, Jain et al. 2018)
+- Uncertainty threshold tightened: `uncertainty_known_max` changed from 2.0% to 1.5%
+- Coverage weighting enabled by default: `coverage_weight_mode` changed from "none" to "linear"
+- Minimum alignment fraction: `min_alignment_fraction` changed from 0.0 to 0.3
+
+**Removed Feature Flags**
+- Removed `--enhanced-scoring` CLI flag (now always on)
+- Removed `--infer-single-hit-uncertainty` CLI flag (now always on)
+- Removed `--use-inferred-for-single-hits` CLI flag (now always on)
+- Removed presets: `default`, `balanced-conservative`, `coverage-linear`, `coverage-gentle`
+- Removed `enhanced_scoring`, `infer_single_hit_uncertainty`, `use_inferred_for_single_hits` config fields
+
+### Added
+
+**Quality Control Metrics (Phase 1)**
+- New `core/classification/qc.py` module with pre- and post-classification QC metrics
+- Pre-classification checks: filter rate, genome coverage, single-hit fraction, mean identity
+- Post-classification checks: ambiguous fraction, low-confidence fraction
+- Automated warnings for problematic inputs (high filter rate, low genome coverage, etc.)
+- New `--qc-output` CLI flag to save QC metrics as JSON
+
+**Threshold Sensitivity Analysis (Phase 2)**
+- New `core/classification/sensitivity.py` module for robustness assessment
+- Sweeps novelty/uncertainty thresholds across configurable ranges
+- Re-classifies reads at each threshold without re-computing alignment metrics
+- New `core/classification/thresholds.py` with extracted threshold application logic
+- New `metadarkmatter score sensitivity` subcommand
+
+**Adaptive Threshold Detection (Phase 3)**
+- New `core/classification/adaptive.py` module using Gaussian Mixture Models
+- Detects natural species boundary from ANI matrix distribution
+- Falls back to default threshold when GMM does not converge or separation is poor
+- Species boundary clamped to 80-99% ANI range
+- New `--adaptive-thresholds` CLI flag
+- Optional dependency: `scikit-learn>=1.3.0` (install with `pip install metadarkmatter[adaptive]`)
+
+**Bayesian Confidence Framework (Phase 4)**
+- New `core/classification/bayesian.py` with vectorized numpy implementation
+- Posterior probabilities P(category | novelty, uncertainty) using 2D Gaussian likelihoods
+- Shannon entropy as single-scalar confidence metric (0 = confident, 2.0 = uniform)
+- MAP (Maximum A Posteriori) classification column
+- Ambiguous boosting for high-uncertainty and low-gap reads
+- New `--bayesian` CLI flag adds 6 columns to output: p_known_species, p_novel_species, p_novel_genus, p_ambiguous, bayesian_category, posterior_entropy
+- Bayesian Confidence tab in HTML report with 3 interactive visualizations
+
+### Changed
+
+- Enhanced scoring metrics (inferred uncertainty, alignment quality, identity/placement confidence, discovery score) are now always computed
+- Coverage weighting (linear mode) is now the default for all classifications
+- Minimum alignment fraction defaults to 30%, filtering low-coverage BLAST hits
+- Constants updated in `core/constants.py` to reflect new threshold values
+
+---
+
 ## [Unreleased] - 2026-01-21
 
 ### Added

@@ -150,6 +150,17 @@ src/metadarkmatter/
 ├── core/             # Core algorithms (ANI classification, parsers, metadata)
 │   ├── constants.py          # Nucleotide thresholds (default mode)
 │   ├── protein_constants.py  # Protein thresholds (--alignment-mode protein)
+│   ├── classification/       # Classification pipeline
+│   │   ├── thresholds.py     # Extracted threshold application logic
+│   │   ├── qc.py             # Pre/post-classification QC metrics
+│   │   ├── sensitivity.py    # Threshold sensitivity analysis
+│   │   ├── adaptive.py       # GMM-based adaptive threshold detection
+│   │   ├── bayesian.py       # Bayesian posterior probabilities
+│   │   ├── ani_matrix.py     # ANIMatrix class
+│   │   └── classifiers/      # Classifier implementations
+│   │       ├── base.py       # Base classifier with coverage weighting
+│   │       ├── vectorized.py # Polars-based vectorized classifier
+│   │       └── parallel.py   # Multiprocessing classifier
 │   └── phylogeny/            # Phylogenetic tree building and novel cluster placement
 │       ├── tree_builder.py   # ANI-to-Newick conversion, user tree loading
 │       └── placement.py      # Novel cluster extraction and tree placement
@@ -158,15 +169,18 @@ src/metadarkmatter/
 ├── clients/          # API clients (GTDB with retry logic)
 └── visualization/    # Plotly charts and HTML report generation
     └── report/
-        └── generator.py  # Single-sample reports with heatmap clustering, phylogeny tab
+        ├── generator.py      # Single-sample reports (with Bayesian tab)
+        └── components/       # Report building blocks
+            ├── clustering.py # Hierarchical clustering
+            └── heatmap_builder.py # ANI/AAI heatmaps
 ```
 
 ## Classification Thresholds
 
 ### Nucleotide Mode (BLASTN, default)
-- Known Species: N < 5%, U < 2%
-- Novel Species: 5% <= N < 20%, U < 2%
-- Novel Genus: 20% <= N <= 25%, U < 2%
+- Known Species: N < 4%, U < 1.5%
+- Novel Species: 4% <= N < 20%, U < 1.5%
+- Novel Genus: 20% <= N <= 25%, U < 1.5%
 
 ### Protein Mode (BLASTX, `--alignment-mode protein`)
 - Known Species: N < 10%, U < 5%
@@ -181,45 +195,49 @@ See [docs/REFERENCE.md](docs/REFERENCE.md) for complete threshold tables and int
 
 ## Coverage-Weighted Hit Selection
 
-Optional feature to prioritize longer alignments over short conserved domains.
-
-### CLI Usage
-
-```bash
-# Enable coverage weighting
-metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
-  --coverage-weight-mode linear --output classifications.csv
-
-# Or use a preset
-metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
-  --preset coverage-linear --output classifications.csv
-```
-
-### Implementation Notes
-
-**Key Files:**
-- `models/blast.py` - `BlastHit.calculate_coverage()`, `calculate_weighted_score()`, `BlastResult.get_best_hit_weighted()`
-- `models/config.py` - `ScoringConfig.coverage_weight_mode`, `coverage_weight_strength`
-- `core/classification/classifiers/base.py` - Base classifier with coverage weighting
-- `core/classification/classifiers/vectorized.py` - Polars-based vectorized classifier
-- `core/classification/classifiers/parallel.py` - Parallel classifier
+Linear coverage weighting is enabled by default to reduce bias from short conserved domains.
 
 **Weighting Modes:**
-- `none` (default): Raw bitscore, backward compatible
-- `linear`: `weight = min + (max - min) * coverage`
+- `none`: Disables coverage weighting (raw bitscore)
+- `linear` (default): `weight = min + (max - min) * coverage`
 - `log`: `weight = min + (max - min) * log(1 + 9*coverage) / log(10)`
 - `sigmoid`: `weight = min + (max - min) / (1 + exp(-10*(coverage - 0.6)))`
 
 Where `min = 1 - strength`, `max = 1 + strength`, `strength` defaults to 0.5.
 
-**Presets with Coverage Weighting:**
-- `coverage-linear` - Balanced coverage weighting
-- `coverage-strict` - Sigmoid mode, enforces >60% coverage
-- `coverage-gentle` - Log mode, mild preference for higher coverage
-- `gtdb-coverage` - Linear mode with 50% alignment fraction requirement
+**Key Files:**
+- `models/blast.py` - `BlastHit.calculate_coverage()`, `calculate_weighted_score()`
+- `models/config.py` - `ScoringConfig.coverage_weight_mode`, `coverage_weight_strength`
+- `core/classification/classifiers/vectorized.py` - Polars-based vectorized classifier
 
-### Backward Compatibility
+## Advanced Classification Features
 
-- `--alignment` parameter replaces `--blast` (accepts both BLAST and MMseqs2 output)
-- Default `coverage_weight_mode="none"` produces identical results to previous versions
-- Parser supports both 12-column (legacy) and 13-column (with qlen) formats
+### QC Metrics (`--qc-output`)
+- Pre-classification: filter rate, genome coverage, single-hit fraction, mean identity
+- Post-classification: ambiguous fraction, low-confidence fraction
+- Automated warnings for problematic inputs
+- Key file: `core/classification/qc.py`
+
+### Adaptive Thresholds (`--adaptive-thresholds`)
+- Detects species boundary from ANI matrix via 2-component GMM
+- Falls back to default 96% ANI if GMM does not converge
+- Requires: `pip install metadarkmatter[adaptive]` (scikit-learn)
+- Key file: `core/classification/adaptive.py`
+
+### Bayesian Confidence (`--bayesian`)
+- Posterior probabilities P(category | novelty, uncertainty) via 2D Gaussian likelihoods
+- Shannon entropy as confidence metric (0 = confident, 2.0 = uniform)
+- Adds 6 columns: p_known_species, p_novel_species, p_novel_genus, p_ambiguous, bayesian_category, posterior_entropy
+- Vectorized numpy implementation (no Python loops)
+- Key file: `core/classification/bayesian.py`
+
+### Sensitivity Analysis (`score sensitivity` subcommand)
+- Sweeps novelty/uncertainty thresholds across configurable range
+- Re-classifies reads at each threshold point
+- Key file: `core/classification/sensitivity.py`
+
+### Enhanced Scoring (always on)
+- Inferred uncertainty for single-hit reads
+- Alignment quality, identity confidence, placement confidence
+- Discovery score for novel taxa prioritization
+- All computed automatically (no flags needed)

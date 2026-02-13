@@ -2,8 +2,8 @@
 
 This document describes the computational methods used by metadarkmatter for detecting novel bacterial diversity from metagenomic sequencing data. All calculations are presented with their mathematical formulations and biological interpretations.
 
-**Version:** Corresponds to metadarkmatter v1.0
-**Last updated:** 2026-01-21
+**Version:** Corresponds to metadarkmatter v0.2
+**Last updated:** 2026-02-10
 
 ---
 
@@ -25,9 +25,19 @@ This document describes the computational methods used by metadarkmatter for det
    - 4.1 [Clustering Algorithm](#41-clustering-algorithm)
    - 4.2 [Cluster Confidence Ratings](#42-cluster-confidence-ratings)
    - 4.3 [Estimated ANI Calculation](#43-estimated-ani-calculation)
-5. [Coverage Weighting](#5-coverage-weighting-optional)
+5. [Coverage Weighting](#5-coverage-weighting)
 6. [Protein Mode Thresholds](#6-protein-mode-thresholds)
-7. [References](#7-references)
+7. [Quality Control Metrics](#7-quality-control-metrics)
+   - 7.1 [Pre-Classification QC](#71-pre-classification-qc)
+   - 7.2 [Post-Classification QC](#72-post-classification-qc)
+8. [Threshold Sensitivity Analysis](#8-threshold-sensitivity-analysis)
+9. [Adaptive Thresholds](#9-adaptive-thresholds-from-ani-distribution)
+10. [Bayesian Confidence Framework](#10-bayesian-confidence-framework)
+    - 10.1 [Likelihood Model](#101-likelihood-model)
+    - 10.2 [Posterior Computation](#102-posterior-computation)
+    - 10.3 [Shannon Entropy](#103-shannon-entropy)
+    - 10.4 [Interpretation](#104-interpretation)
+11. [References](#11-references)
 
 ---
 
@@ -67,8 +77,8 @@ Where:
 
 | Novelty Index | BLAST Identity | Biological Interpretation |
 |---------------|----------------|---------------------------|
-| N < 5% | pident > 95% | At or above species boundary |
-| 5% ≤ N < 20% | 80% < pident ≤ 95% | Below species boundary (novel species candidate) |
+| N < 4% | pident > 96% | At or above species boundary |
+| 4% ≤ N < 20% | 80% < pident ≤ 96% | Below species boundary (novel species candidate) |
 | 20% ≤ N ≤ 25% | 75% ≤ pident ≤ 80% | Genus-level divergence (novel genus candidate) |
 | N > 25% | pident < 75% | Very high divergence |
 
@@ -105,8 +115,8 @@ Where:
 
 | Uncertainty | ANI Between Competitors | Biological Interpretation |
 |-------------|-------------------------|---------------------------|
-| U < 2% | ANI > 98% | Same species (confident placement) |
-| 2% ≤ U < 5% | 95% < ANI ≤ 98% | Species boundary zone (ambiguous) |
+| U < 1.5% | ANI > 98.5% | Same species (confident placement) |
+| 1.5% ≤ U < 5% | 95% < ANI ≤ 98.5% | Species boundary zone (ambiguous) |
 | U ≥ 5% | ANI ≤ 95% | Different species (conserved gene region) |
 
 **Biological rationale:** When competing genomes share high ANI (>98%), they represent the same species and placement ambiguity reflects strain-level variation. When competing genomes share low ANI (<95%), the read likely originates from a conserved gene present across multiple species.
@@ -126,15 +136,15 @@ START: Read with BLAST hits
          |
         NO
          v
-   Is 2% ≤ U < 5%? --YES--> SPECIES BOUNDARY
+   Is 1.5% ≤ U < 5%? --YES--> SPECIES BOUNDARY
          |
-        NO (U < 2%)
+        NO (U < 1.5%)
          v
-   Is N < 5%? ----YES----> KNOWN SPECIES
+   Is N < 4%? ----YES----> KNOWN SPECIES
          |
         NO
          v
-   Is 5% ≤ N < 20%? --YES--> NOVEL SPECIES
+   Is 4% ≤ N < 20%? --YES--> NOVEL SPECIES
          |
         NO
          v
@@ -149,23 +159,27 @@ START: Read with BLAST hits
 
 | Category | Criteria | Biological Interpretation |
 |----------|----------|---------------------------|
-| Known Species | N < 5% AND U < 2% | Matches characterized species |
-| Novel Species | 5% ≤ N < 20% AND U < 2% | Significant divergence, confident placement |
-| Novel Genus | 20% ≤ N ≤ 25% AND U < 2% | Genus-level divergence, confident placement |
-| Ambiguous | U ≥ 5% OR 2% ≤ U < 5% | Conserved gene or species boundary |
-| Species Boundary | 2% ≤ U < 5% | Matches multiple closely related species |
+| Known Species | N < 4% AND U < 1.5% | Matches characterized species |
+| Novel Species | 4% ≤ N < 20% AND U < 1.5% | Significant divergence, confident placement |
+| Novel Genus | 20% ≤ N ≤ 25% AND U < 1.5% | Genus-level divergence, confident placement |
+| Ambiguous | U ≥ 5% OR 1.5% ≤ U < 5% | Conserved gene or species boundary |
+| Species Boundary | 1.5% ≤ U < 5% | Matches multiple closely related species |
 | Unclassified | N > 25% OR edge cases | Very high divergence, manual review needed |
 
 ### 2.4 Threshold Justification
 
-**Species boundary (95-96% ANI):**
+**Species boundary (96% ANI default):**
 - Jain et al. (2018) analyzed 90,000+ prokaryotic genomes and established 95-96% ANI as the species boundary, corresponding to 70% DNA-DNA hybridization
 - Goris et al. (2007) demonstrated ANI >95% correlates with >70% DDH
 - Konstantinidis & Tiedje (2005) proposed ANI as the gold standard for species delineation
+- metadarkmatter defaults to 96% ANI (N < 4%) for a slightly more conservative boundary
 
-**Confident placement (>98% ANI):**
-- When competing genomes share >98% ANI, they represent the same species
+**Confident placement (>98.5% ANI):**
+- When competing genomes share >98.5% ANI, they represent the same species
 - Placement ambiguity at this level reflects strain variation, not taxonomic uncertainty
+- Tightened from the previous 98% threshold to reduce false-confident assignments
+
+**Adaptive thresholds:** When the `--adaptive-thresholds` option is enabled, the species boundary is detected from the ANI matrix distribution using a Gaussian Mixture Model rather than assuming the default 96% for all taxa. See [Section 9](#9-adaptive-thresholds-from-ani-distribution).
 
 **Genus boundary (~75-80% ANI):**
 - Qin et al. (2014) found genus boundaries vary from 65-83% ANI
@@ -259,17 +273,17 @@ For reads with only one BLAST hit, placement uncertainty cannot be measured from
 **Formula:**
 
 ```python
-if novelty_index < 5%:
+if novelty_index < 4%:
     # High identity: database likely complete for this species
-    inferred_U = 5.0 + novelty_index × 0.5  # Range: 5.0-7.5%
+    inferred_U = 5.0 + novelty_index × 0.5  # Range: 5.0-7.0%
 
 elif novelty_index < 20%:
     # Novel species range: uncertain if truly novel or database gap
-    inferred_U = 7.5 + (novelty_index - 5.0) × 1.0  # Range: 7.5-22.5%
+    inferred_U = 7.0 + (novelty_index - 4.0) × 1.0  # Range: 7.0-23.0%
 
 elif novelty_index < 25%:
     # Novel genus range: high uncertainty
-    inferred_U = 22.5 + (novelty_index - 20.0) × 1.5  # Range: 22.5-30.0%
+    inferred_U = 23.0 + (novelty_index - 20.0) × 1.5  # Range: 23.0-30.5%
 
 else:
     # Very high divergence: maximum uncertainty
@@ -474,9 +488,9 @@ else:
 
 ---
 
-## 5. Coverage Weighting (Optional)
+## 5. Coverage Weighting
 
-Coverage weighting adjusts hit selection to prioritize longer alignments over short conserved domains.
+Coverage weighting adjusts hit selection to prioritize longer alignments over short conserved domains. This is enabled by default (`coverage_weight_mode="linear"`) to reduce conserved-gene bias in classification.
 
 **Weighted score calculation:**
 
@@ -509,8 +523,8 @@ weight = min_weight + weight_range × normalized
 
 | Mode | Behavior | Use Case |
 |------|----------|----------|
-| none | Raw bitscore | Default, backward compatible |
-| linear | Proportional to coverage | Balanced weighting |
+| none | Raw bitscore | Disables coverage weighting |
+| linear | Proportional to coverage | Default; balanced weighting |
 | log | Diminishing returns | Gentle preference for coverage |
 | sigmoid | Step function at 60% | Strict coverage requirement |
 
@@ -524,14 +538,14 @@ When using protein-level alignment (BLASTX + AAI), wider thresholds are applied 
 
 | Parameter | Nucleotide Mode | Protein Mode |
 |-----------|-----------------|--------------|
-| novelty_known_max | 5% | 10% |
-| novelty_novel_species_min | 5% | 10% |
+| novelty_known_max | 4% | 10% |
+| novelty_novel_species_min | 4% | 10% |
 | novelty_novel_species_max | 20% | 25% |
 | novelty_novel_genus_min | 20% | 25% |
 | novelty_novel_genus_max | 25% | 40% |
-| uncertainty_known_max | 2% | 5% |
-| uncertainty_novel_species_max | 2% | 5% |
-| uncertainty_novel_genus_max | 2% | 5% |
+| uncertainty_known_max | 1.5% | 5% |
+| uncertainty_novel_species_max | 1.5% | 5% |
+| uncertainty_novel_genus_max | 1.5% | 5% |
 | uncertainty_conserved_min | 5% | 10% |
 
 **AAI genus boundaries** (Riesco & Trujillo, 2024):
@@ -552,7 +566,194 @@ When using protein-level alignment (BLASTX + AAI), wider thresholds are applied 
 
 ---
 
-## 7. References
+## 7. Quality Control Metrics
+
+metadarkmatter computes QC metrics at two stages: before classification (to identify problematic inputs) and after classification (to flag potentially unreliable results).
+
+### 7.1 Pre-Classification QC
+
+Pre-classification metrics are computed after alignment loading and quality filtering:
+
+| Metric | Calculation | Warning Threshold |
+|--------|-------------|-------------------|
+| Filter rate | `filtered_alignments / total_alignments` | > 50% |
+| Genome coverage | `genomes_in_alignments / genomes_in_ani` | < 50% |
+| Single-hit fraction | `single_hit_reads / total_reads` | > 80% |
+| Mean alignment length | Mean of BLAST alignment lengths | (informational) |
+| Mean identity | Mean of BLAST percent identities | < 80% |
+
+**Filter rate** indicates how many alignments are removed by quality thresholds (e.g., minimum alignment fraction). A high filter rate suggests either stringent filters or low-quality alignments.
+
+**Genome coverage** measures the fraction of ANI matrix genomes that appear in the alignment file. Low coverage suggests that many reference genomes have no matching reads, which may affect classification accuracy.
+
+**Single-hit fraction** indicates how many reads align to only one genome. For these reads, placement uncertainty cannot be directly measured from competing hits and must be inferred from the novelty level (see Section 3.2).
+
+### 7.2 Post-Classification QC
+
+Post-classification metrics assess the overall classification quality:
+
+| Metric | Calculation | Warning Threshold |
+|--------|-------------|-------------------|
+| Ambiguous fraction | `ambiguous_reads / total_reads` | > 50% |
+| Low confidence fraction | `reads with confidence < 0.5 / total` | > 30% |
+| Novel fraction | `(novel_species + novel_genus) / total` | (informational) |
+
+QC metrics are saved as JSON when `--qc-output` is specified.
+
+---
+
+## 8. Threshold Sensitivity Analysis
+
+Sensitivity analysis evaluates how classification counts change across a range of threshold values. This helps assess whether results are robust to the specific threshold choice or whether small threshold changes lead to large shifts in classification counts.
+
+**Method:**
+
+The analysis sweeps the `novelty_known_max` threshold across a user-specified range (default: 2-8%) with proportional co-variation of uncertainty thresholds (default: 0.5-3.0%). At each step, all reads are re-classified using the threshold-extraction approach (no re-computation of alignment metrics).
+
+```
+for novelty_thresh in linspace(2.0, 8.0, steps=9):
+    uncertainty_thresh = proportional(0.5, 3.0, steps=9)
+    counts[category] = reclassify(reads, novelty_thresh, uncertainty_thresh)
+```
+
+**Output:** A JSON or chart showing category counts as a function of threshold position. Stable results (flat lines) indicate robustness; large count changes near the default threshold indicate sensitivity.
+
+**Interpretation:**
+- Flat count profiles across thresholds suggest classification is robust
+- Sharp transitions at or near the default threshold indicate threshold-dependent results
+- Gradual transitions are expected near true biological boundaries
+
+---
+
+## 9. Adaptive Thresholds from ANI Distribution
+
+The default species boundary (96% ANI) is appropriate for many bacterial lineages but may not fit all taxa equally. Rapidly evolving lineages may have narrower within-species ANI distributions, while conserved lineages may show broader distributions.
+
+### 9.1 Gaussian Mixture Model
+
+When `--adaptive-thresholds` is enabled, the species boundary is estimated from the actual ANI matrix using a 2-component Gaussian Mixture Model:
+
+**Step 1:** Extract upper-triangle pairwise ANI values from the ANI matrix (excluding self-comparisons and zero entries).
+
+**Step 2:** Fit a 2-component GMM:
+```
+GMM(n_components=2) -> (mu_low, sigma_low), (mu_high, sigma_high)
+```
+
+The two components typically correspond to:
+- **Within-species comparisons** (high ANI, narrow distribution)
+- **Between-species comparisons** (lower ANI, broader distribution)
+
+**Step 3:** Compute the species boundary as the weighted midpoint:
+```
+w_low = 1 / sigma_low
+w_high = 1 / sigma_high
+boundary = (mu_low * w_low + mu_high * w_high) / (w_low + w_high)
+```
+
+The boundary is clamped to the range 80-99% ANI.
+
+### 9.2 Separation Quality
+
+The GMM separation quality is assessed using the standardized gap between component means:
+
+```
+separation = |mu_high - mu_low| / (sigma_low + sigma_high)
+```
+
+| Separation | Assessment | Action |
+|------------|------------|--------|
+| < 1.0 | Components not distinct | Falls back to default threshold |
+| 1.0 - 2.0 | Moderate separation | Uses GMM boundary with moderate confidence |
+| > 2.0 | Well separated | Uses GMM boundary with high confidence |
+
+### 9.3 Fallback Conditions
+
+The adaptive method falls back to the default threshold (96% ANI) when:
+- Fewer than 5 genomes in the ANI matrix
+- Fewer than 3 non-zero pairwise ANI values
+- GMM separation quality < 1.0
+- GMM fails to converge
+- scikit-learn is not installed
+
+**Dependency:** Requires `scikit-learn>=1.3.0` (install with `pip install metadarkmatter[adaptive]`).
+
+---
+
+## 10. Bayesian Confidence Framework
+
+The Bayesian framework replaces hard threshold boundaries with posterior probabilities P(category | novelty, uncertainty). Near classification boundaries, posteriors will be split across categories (e.g., 55% Novel Species, 40% Known Species), making the classification uncertainty explicit.
+
+### 10.1 Likelihood Model
+
+Each classification category is modeled as a 2D Gaussian distribution centered on its expected (novelty, uncertainty) values:
+
+```
+L(category | N, U) = exp(-0.5 * (z_N^2 + z_U^2))
+
+where:
+    z_N = (N - mu_N) / sigma_N
+    z_U = (U - mu_U) / sigma_U
+```
+
+**Category parameters (nucleotide mode defaults):**
+
+| Category | mu_N | sigma_N | mu_U | sigma_U |
+|----------|------|---------|------|---------|
+| Known Species | 2.0 | 2.5 | 0.75 | 1.25 |
+| Novel Species | 12.0 | 5.83 | 0.75 | 1.25 |
+| Novel Genus | 22.5 | 2.17 | 0.75 | 1.25 |
+| Ambiguous | 15.0 | 10.0 | 5.0 | 5.0 |
+
+Parameters are derived from the scoring configuration thresholds: means are placed at category centers, and sigmas are scaled from the category width.
+
+### 10.2 Posterior Computation
+
+Posteriors are computed using Bayes' rule with uniform priors:
+
+```
+P(category | N, U) = L(category | N, U) / sum(L(all categories | N, U))
+```
+
+**Ambiguous category boosting:** Two additional factors increase the Ambiguous likelihood:
+- If `identity_gap < 2%` and `num_hits > 1`: likelihood multiplied by 3x
+- If `placement_uncertainty > uncertainty_conserved_min`: likelihood multiplied by 2x
+
+These factors ensure that reads with ambiguous alignment characteristics are appropriately assigned higher Ambiguous posteriors.
+
+**Output columns:**
+- `p_known_species`, `p_novel_species`, `p_novel_genus`, `p_ambiguous` (sum to 1.0)
+- `bayesian_category`: Maximum A Posteriori (MAP) classification
+- `posterior_entropy`: Shannon entropy of the posterior distribution
+
+### 10.3 Shannon Entropy
+
+The posterior entropy quantifies classification confidence as a single scalar:
+
+```
+H = -sum(p_i * log2(p_i)) for all categories where p_i > 0
+```
+
+For 4 categories, entropy ranges from 0 (all probability mass on one category) to 2.0 (uniform distribution across all categories).
+
+| Entropy | Interpretation |
+|---------|---------------|
+| H < 0.5 | Confident assignment to one category |
+| 0.5 ≤ H < 1.0 | Moderate confidence; one category dominant |
+| 1.0 ≤ H < 1.5 | Low confidence; multiple categories plausible |
+| H ≥ 1.5 | Near-uniform; read lies at a classification boundary |
+
+### 10.4 Interpretation
+
+The Bayesian framework is complementary to threshold-based classification. The MAP category often agrees with the threshold-based `taxonomic_call`, but near boundaries the posteriors reveal uncertainty that the threshold-based system hides.
+
+**Example:** A read at (N=3.8%, U=1.4%) falls just within the Known Species boundary by threshold classification, but the Bayesian posteriors might be: p_known=0.52, p_novel=0.38, p_ambiguous=0.08, p_genus=0.02. The moderate entropy (H=1.3) flags this as a boundary case.
+
+**Vectorized implementation:** The classify_dataframe method uses numpy broadcasting for efficient computation over large DataFrames without Python loops.
+
+---
+
+## 11. References
 
 1. **Jain C, Rodriguez-R LM, Phillippy AM, Konstantinidis KT, Aluru S.** (2018). High throughput ANI analysis of 90K prokaryotic genomes reveals clear species boundaries. *Nature Communications* 9:5114. https://doi.org/10.1038/s41467-018-07641-9
 
@@ -578,16 +779,16 @@ All classification thresholds are defined in `src/metadarkmatter/core/constants.
 
 ```python
 # Novelty Index Thresholds
-NOVELTY_KNOWN_MAX = 5.0
-NOVELTY_NOVEL_SPECIES_MIN = 5.0
+NOVELTY_KNOWN_MAX = 4.0          # 96% ANI species boundary (Jain et al. 2018)
+NOVELTY_NOVEL_SPECIES_MIN = 4.0
 NOVELTY_NOVEL_SPECIES_MAX = 20.0
 NOVELTY_NOVEL_GENUS_MIN = 20.0
 NOVELTY_NOVEL_GENUS_MAX = 25.0
 
 # Placement Uncertainty Thresholds
-UNCERTAINTY_CONFIDENT_MAX = 2.0
+UNCERTAINTY_CONFIDENT_MAX = 1.5   # Tightened for fewer false-confident calls
 UNCERTAINTY_CONSERVED_MIN = 5.0
-UNCERTAINTY_AMBIGUOUS_MIN = 2.0
+UNCERTAINTY_AMBIGUOUS_MIN = 1.5
 UNCERTAINTY_AMBIGUOUS_MAX = 5.0
 
 # ANI Boundaries
@@ -599,3 +800,14 @@ ANI_GENUS_BOUNDARY = 75.0
 AAI_GENUS_BOUNDARY_HIGH = 65.0
 AAI_GENUS_BOUNDARY_LOW = 58.0
 ```
+
+**Default configuration changes (v0.2):**
+
+| Parameter | Previous Default | Current Default | Rationale |
+|-----------|-----------------|-----------------|-----------|
+| `novelty_known_max` | 5.0 | 4.0 | 96% ANI species boundary |
+| `uncertainty_known_max` | 2.0 | 1.5 | Stricter confident placement |
+| `coverage_weight_mode` | "none" | "linear" | Reduce conserved-gene bias |
+| `min_alignment_fraction` | 0.0 | 0.3 | Filter low-coverage alignments |
+| Enhanced scoring | opt-in flag | always on | Inferred uncertainty, quality metrics |
+| Single-hit inference | opt-in flag | always on | No more 0% uncertainty for single hits |

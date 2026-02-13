@@ -179,14 +179,14 @@ Default mode for BLASTN alignment:
 
 | Category | Novelty (N) | Uncertainty (U) | Interpretation |
 |----------|-------------|-----------------|----------------|
-| Known Species | N < 5% | U < 2% | >95% identity, confident placement |
-| **Novel Species** | 5% <= N < 20% | U < 2% | 80-95% identity, potential new species |
-| **Novel Genus** | 20% <= N <= 25% | U < 2% | 75-80% identity, potential new genus |
-| Ambiguous | any | 2% <= U < 5% | Species boundary zone (95-98% ANI) |
+| Known Species | N < 4% | U < 1.5% | >96% identity, confident placement |
+| **Novel Species** | 4% <= N < 20% | U < 1.5% | 80-96% identity, potential new species |
+| **Novel Genus** | 20% <= N <= 25% | U < 1.5% | 75-80% identity, potential new genus |
+| Ambiguous | any | 1.5% <= U < 5% | Species boundary zone (95-98.5% ANI) |
 | Conserved Region | any | U >= 5% | Conserved gene across genera (<95% ANI) |
-| Unclassified | N > 25% or edge | U < 2% | Requires manual review |
+| Unclassified | N > 25% or edge | U < 1.5% | Requires manual review |
 
-**Threshold basis:** 95-96% ANI = prokaryotic species boundary (Jain et al. 2018, Nature Communications).
+**Threshold basis:** 96% ANI = prokaryotic species boundary (Jain et al. 2018, Nature Communications). See [METHODS.md](METHODS.md) Section 2.4 for detailed justification.
 
 ### Protein Mode Thresholds
 
@@ -223,7 +223,7 @@ metadarkmatter score classify --alignment results.tsv --ani ani.csv \
 metadarkmatter score classify --alignment results.tsv --ani ani.csv \
     --preset literature-strict --output classifications.csv
 
-# Available presets: gtdb-strict, gtdb-relaxed, conservative, literature-strict, default
+# Available presets: gtdb-strict, gtdb-relaxed, conservative, literature-strict, coverage-strict, gtdb-coverage
 ```
 
 ### Alignment Quality Filters
@@ -360,7 +360,7 @@ metadarkmatter/
 
 ### Coverage-Weighted Hit Selection
 
-By default, hit selection uses raw bitscore to identify the best alignment. For datasets where short conserved domains (e.g., 16S rRNA fragments) may dominate over longer alignments spanning more of the read, coverage-weighted scoring provides a way to prioritize hits that cover more of the query sequence.
+By default, coverage-weighted scoring prioritizes hits that cover more of the query sequence, reducing bias from short conserved domains (e.g., 16S rRNA fragments) that may align with high identity but low coverage. Linear coverage weighting is enabled by default (`--coverage-weight-mode linear`).
 
 **When to Use:**
 - Reads contain conserved domains that align with high identity but low coverage
@@ -382,8 +382,8 @@ metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
 
 | Mode | Formula | Behavior |
 |------|---------|----------|
-| `none` | `weighted_score = bitscore` | Default, no coverage adjustment |
-| `linear` | `weight = min + (max - min) × coverage` | Gradual penalty for low coverage |
+| `none` | `weighted_score = bitscore` | Disables coverage weighting |
+| `linear` | `weight = min + (max - min) × coverage` | Default; gradual penalty for low coverage |
 | `log` | `weight = min + (max - min) × log(1 + 9×coverage) / log(10)` | Rewards any coverage, diminishing returns |
 | `sigmoid` | `weight = min + (max - min) / (1 + exp(-10×(coverage - 0.6)))` | Sharp threshold around 60% coverage |
 
@@ -426,6 +426,84 @@ metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
 ```
 
 **Note:** The `--alignment` parameter accepts both BLAST and MMseqs2 tabular output (identical 13-column format with qlen).
+
+### Quality Control
+
+Pre- and post-classification QC metrics help identify problematic inputs and flag unreliable results:
+
+```bash
+# Save QC metrics as JSON
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
+    --qc-output qc_metrics.json --output classifications.csv --parallel
+```
+
+QC warnings are generated when:
+- Filter rate exceeds 50%
+- Genome coverage below 50%
+- Single-hit fraction above 80%
+- Mean identity below 80%
+- Ambiguous fraction above 50%
+
+### Adaptive Thresholds
+
+Detect the species boundary from the ANI matrix distribution instead of using the fixed 96% default:
+
+```bash
+# Enable adaptive threshold detection
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
+    --adaptive-thresholds --output classifications.csv --parallel
+```
+
+This fits a 2-component Gaussian Mixture Model to pairwise ANI values, detecting natural within-species vs. between-species clusters. Falls back to the default threshold if the GMM does not converge or components are not well separated.
+
+Requires: `pip install metadarkmatter[adaptive]` (installs scikit-learn).
+
+See [METHODS.md](METHODS.md) Section 9 for the mathematical details.
+
+### Bayesian Confidence
+
+Add posterior probabilities to classification output, providing continuous confidence scores near threshold boundaries:
+
+```bash
+# Add Bayesian posterior columns
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
+    --bayesian --output classifications.csv --parallel
+```
+
+This adds 6 columns to the output:
+- `p_known_species`, `p_novel_species`, `p_novel_genus`, `p_ambiguous` (sum to 1.0)
+- `bayesian_category` (MAP classification)
+- `posterior_entropy` (0 = confident, 2.0 = uniform across all categories)
+
+The HTML report will include a Bayesian Confidence tab with entropy distribution, posterior bar charts, and a confidence landscape plot.
+
+See [METHODS.md](METHODS.md) Section 10 for the likelihood model and interpretation.
+
+### Threshold Sensitivity Analysis
+
+Assess whether classification results are robust to threshold choice:
+
+```bash
+# Run sensitivity analysis
+metadarkmatter score sensitivity --alignment sample.blast.tsv.gz --ani ani.csv \
+    --output sensitivity.json --parallel
+```
+
+Sweeps the novelty/uncertainty thresholds across a range and reports how classification counts change at each point.
+
+### Combined Advanced Options
+
+All new features can be combined:
+
+```bash
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
+    --adaptive-thresholds \
+    --bayesian \
+    --qc-output qc_metrics.json \
+    --output classifications.csv \
+    --summary summary.json \
+    --parallel --verbose
+```
 
 ### Performance Modes
 

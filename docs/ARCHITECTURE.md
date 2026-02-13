@@ -83,6 +83,25 @@ flowchart LR
             parsers["parsers.py<br/>BLAST/ANI parsing"]
             ani_placement["ani_placement.py<br/>Classification algorithms"]
             exceptions["exceptions.py<br/>Custom errors"]
+
+            subgraph classification["classification/"]
+                thresholds_mod["thresholds.py<br/>Threshold application"]
+                qc_mod["qc.py<br/>QC metrics"]
+                sensitivity_mod["sensitivity.py<br/>Threshold sweep"]
+                adaptive_mod["adaptive.py<br/>GMM boundary detection"]
+                bayesian_mod["bayesian.py<br/>Posterior probabilities"]
+
+                subgraph classifiers["classifiers/"]
+                    base_cls["base.py<br/>Base classifier"]
+                    vec_cls["vectorized.py<br/>Polars classifier"]
+                    par_cls["parallel.py<br/>Multiprocessing"]
+                end
+            end
+
+            subgraph phylogeny["phylogeny/"]
+                tree_builder["tree_builder.py<br/>ANI-to-Newick"]
+                placement["placement.py<br/>Novel cluster placement"]
+            end
         end
 
         subgraph models["models/"]
@@ -142,16 +161,18 @@ flowchart TD
     U --> THRESHOLD
 
     THRESHOLD --> |"U >= 5.0"| CONSERVED["Conserved Region"]
-    THRESHOLD --> |"N < 2, U < 0.5"| KNOWN["Known Species"]
-    THRESHOLD --> |"5 <= N <= 15, U < 0.5"| NOVEL_SP["Novel Species"]
-    THRESHOLD --> |"15 <= N <= 25, U < 2.0"| NOVEL_GEN["Novel Genus"]
-    THRESHOLD --> |"Otherwise"| CONSERVED2["Conserved Region"]
+    THRESHOLD --> |"N < 4, U < 1.5"| KNOWN["Known Species"]
+    THRESHOLD --> |"4 <= N < 20, U < 1.5"| NOVEL_SP["Novel Species"]
+    THRESHOLD --> |"20 <= N <= 25, U < 1.5"| NOVEL_GEN["Novel Genus"]
+    THRESHOLD --> |"1.5 <= U < 5"| BOUNDARY["Species Boundary"]
+    THRESHOLD --> |"Otherwise"| AMB["Ambiguous"]
 
     CONSERVED --> OUTPUT["Output Classification"]
     KNOWN --> OUTPUT
     NOVEL_SP --> OUTPUT
     NOVEL_GEN --> OUTPUT
-    CONSERVED2 --> OUTPUT
+    BOUNDARY --> OUTPUT
+    AMB --> OUTPUT
 ```
 
 ## Data Flow: Streaming Processing
@@ -635,6 +656,76 @@ flowchart TB
     viz --> HTML
 ```
 
+## Extended Classification Pipeline
+
+```mermaid
+flowchart TD
+    INPUT["Alignments + ANI Matrix"]
+
+    INPUT --> ADAPTIVE{"--adaptive-thresholds?"}
+    ADAPTIVE --> |Yes| GMM["Gaussian Mixture Model<br/>detect_species_boundary()"]
+    ADAPTIVE --> |No| DEFAULT["Default thresholds<br/>(N < 4%, U < 1.5%)"]
+    GMM --> CONFIG["ScoringConfig<br/>(adaptive boundary)"]
+    DEFAULT --> CONFIG
+
+    CONFIG --> PRE_QC["Pre-Classification QC<br/>compute_pre_qc()"]
+    PRE_QC --> CLASSIFY["Classification<br/>VectorizedClassifier"]
+    CLASSIFY --> POST_QC["Post-Classification QC<br/>compute_post_qc()"]
+
+    POST_QC --> BAYESIAN{"--bayesian?"}
+    BAYESIAN --> |Yes| BAYES["BayesianClassifier<br/>classify_dataframe()"]
+    BAYESIAN --> |No| OUT["Output CSV"]
+    BAYES --> OUT
+
+    CONFIG --> SENSITIVITY{"sensitivity subcommand?"}
+    SENSITIVITY --> |Yes| SWEEP["Threshold Sweep<br/>run_sensitivity_analysis()"]
+    SWEEP --> SENS_OUT["Sensitivity JSON"]
+
+    PRE_QC --> QC_OUT["QC Metrics JSON"]
+
+    style GMM fill:#f9f
+    style BAYES fill:#bbf
+    style SWEEP fill:#bfb
+    style PRE_QC fill:#ffb
+    style POST_QC fill:#ffb
+```
+
+## Classification Module Dependencies
+
+```mermaid
+flowchart LR
+    subgraph "core/classification/"
+        THRESH["thresholds.py"]
+        QC["qc.py"]
+        SENS["sensitivity.py"]
+        ADAPT["adaptive.py"]
+        BAYES["bayesian.py"]
+        ANI_MAT["ani_matrix.py"]
+
+        subgraph classifiers["classifiers/"]
+            BASE["base.py"]
+            VEC["vectorized.py"]
+            PAR["parallel.py"]
+        end
+    end
+
+    subgraph external["External"]
+        SKLEARN["scikit-learn<br/>(optional)"]
+        NUMPY["numpy"]
+        POLARS["polars"]
+    end
+
+    VEC --> THRESH
+    VEC --> QC
+    SENS --> THRESH
+    ADAPT --> ANI_MAT
+    ADAPT --> SKLEARN
+    BAYES --> NUMPY
+    VEC --> POLARS
+    BASE --> ANI_MAT
+    PAR --> BASE
+```
+
 ## CLI Command Structure (Updated)
 
 ```mermaid
@@ -646,6 +737,13 @@ flowchart TB
         subgraph score["score"]
             CLASSIFY["classify"]
             BATCH["batch"]
+            SENSITIVITY["sensitivity"]
+
+            subgraph classify_new_opts["classify new options"]
+                ADAPTIVE_OPT["--adaptive-thresholds"]
+                BAYESIAN_OPT["--bayesian"]
+                QC_OPT["--qc-output"]
+            end
         end
 
         subgraph report["report"]
