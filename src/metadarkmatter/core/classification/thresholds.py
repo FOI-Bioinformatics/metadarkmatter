@@ -53,6 +53,14 @@ def apply_classification_thresholds(
         + (eff["novelty_novel_species_max"] - eff["novelty_known_max"]) * 1.0
     )
 
+    # Preserve Off-target reads (already classified by family validation)
+    has_off_target = "taxonomic_call" in df.columns
+    off_target_rows = None
+    if has_off_target:
+        off_target_mask = pl.col("taxonomic_call") == "Off-target"
+        off_target_rows = df.filter(off_target_mask)
+        df = df.filter(~off_target_mask)
+
     # Check which optional columns exist
     has_genus = "genus_uncertainty" in df.columns
     has_scope = "ambiguity_scope" in df.columns
@@ -139,6 +147,15 @@ def apply_classification_thresholds(
         pl.col("taxonomic_call").replace(TAXONOMIC_TO_DIVERSITY).alias("diversity_status"),
         pl.col("taxonomic_call").is_in(["Novel Species", "Novel Genus"]).alias("is_novel"),
     ])
+
+    # Re-add preserved Off-target rows
+    if off_target_rows is not None and not off_target_rows.is_empty():
+        off_target_rows = off_target_rows.with_columns([
+            pl.lit("Off-target").alias("taxonomic_call"),
+            pl.lit("Uncertain").alias("diversity_status"),
+            pl.lit(False).alias("is_novel"),
+        ])
+        result = pl.concat([result, off_target_rows], how="diagonal_relaxed")
 
     return result
 

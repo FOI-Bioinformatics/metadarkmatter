@@ -7,6 +7,7 @@ import pytest
 
 from metadarkmatter.core.classification.ani_matrix import ANIMatrix
 from metadarkmatter.core.classification.classifiers.vectorized import VectorizedClassifier
+from metadarkmatter.core.classification.thresholds import apply_classification_thresholds
 from metadarkmatter.models.config import ScoringConfig
 
 
@@ -161,3 +162,41 @@ class TestFamilyValidationEnabled:
         ]
         for col in expected_cols:
             assert col in result.columns, f"Missing column: {col}"
+
+
+class TestThresholdsWithOffTarget:
+    """Off-target reads should be preserved through threshold reclassification."""
+
+    def test_off_target_preserved(self):
+        """Off-target reads should not be reclassified."""
+        df = pl.DataFrame({
+            "read_id": ["read_ot", "read_normal"],
+            "novelty_index": [15.0, 2.0],
+            "placement_uncertainty": [0.5, 0.5],
+            "num_ambiguous_hits": [1, 2],
+            "identity_gap": [None, 3.0],
+            "taxonomic_call": ["Off-target", "Known Species"],
+        })
+        config = ScoringConfig(target_family="f__Test")
+        result = apply_classification_thresholds(df, config)
+
+        ot_row = result.filter(pl.col("read_id") == "read_ot")
+        assert ot_row["taxonomic_call"][0] == "Off-target"
+
+        normal_row = result.filter(pl.col("read_id") == "read_normal")
+        assert normal_row["taxonomic_call"][0] in [
+            "Known Species", "Ambiguous", "Novel Species", "Unclassified",
+        ]
+
+    def test_no_off_target_unchanged(self):
+        """Without Off-target reads, function should work identically."""
+        df = pl.DataFrame({
+            "novelty_index": [2.0, 10.0],
+            "placement_uncertainty": [0.5, 0.5],
+            "num_ambiguous_hits": [2, 3],
+            "identity_gap": [3.0, 5.0],
+            "taxonomic_call": ["Known Species", "Novel Species"],
+        })
+        config = ScoringConfig()
+        result = apply_classification_thresholds(df, config)
+        assert "Off-target" not in result["taxonomic_call"].to_list()
