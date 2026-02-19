@@ -1960,6 +1960,32 @@ BAYESIAN_SUMMARY_TEMPLATE: str = '''
 </div>
 '''
 
+FAMILY_VALIDATION_SECTION_TEMPLATE: str = '''
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{validated_pct:.1f}%</div>
+        <div class="stat-label">Family Validated</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{off_target_count:,}</div>
+        <div class="stat-label">Off-target Reads</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{off_target_pct:.1f}%</div>
+        <div class="stat-label">Off-target Rate</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{target_family}</div>
+        <div class="stat-label">Target Family</div>
+    </div>
+</div>
+<h3>Family Bitscore Ratio Distribution</h3>
+<div class="plot-container" id="family-ratio-histogram"></div>
+<h3>In-Family vs Off-Target</h3>
+<div class="plot-container" id="family-pie-chart"></div>
+{external_families_table}
+'''
+
 BAYESIAN_INTERPRETATION_TEMPLATE: str = '''
 <div class="discovery-guide">
     <h3>Interpreting Bayesian Posteriors</h3>

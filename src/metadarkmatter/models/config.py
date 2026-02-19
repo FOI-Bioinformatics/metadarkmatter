@@ -283,6 +283,27 @@ class ScoringConfig(BaseModel):
         ),
     )
 
+    # Family validation for broad-database alignments
+    # When target_family is set, reads with better external hits are flagged Off-target
+    target_family: str | None = Field(
+        default=None,
+        description=(
+            "Target taxonomic family for family validation (e.g., 'f__Francisellaceae'). "
+            "When set, reads with substantially better hits outside the ANI matrix "
+            "are classified as Off-target. None disables family validation."
+        ),
+    )
+    family_ratio_threshold: float = Field(
+        default=0.8,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Family bitscore ratio threshold for off-target detection. "
+            "Reads with best_in_family_bitscore / best_overall_bitscore below "
+            "this value are classified as Off-target. Default 0.8."
+        ),
+    )
+
     @model_validator(mode="after")
     def validate_threshold_boundaries(self) -> Self:
         """

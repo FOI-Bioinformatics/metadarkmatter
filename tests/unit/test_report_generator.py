@@ -432,3 +432,85 @@ class TestPhylogenySection:
         assert "Phylogeny" in content
         # Should have phylogeny section content
         assert "phylogeny" in content.lower()
+
+
+class TestFamilyValidationSection:
+    """Test Family Validation tab in reports."""
+
+    def test_family_validation_template_exists(self):
+        """Family validation template should exist."""
+        from metadarkmatter.visualization.report.templates import (
+            FAMILY_VALIDATION_SECTION_TEMPLATE,
+        )
+
+        assert "family" in FAMILY_VALIDATION_SECTION_TEMPLATE.lower()
+
+    @pytest.fixture
+    def classifications_with_family_validation(self):
+        """Create classification data that includes family validation columns."""
+        return pl.DataFrame({
+            "read_id": [f"read_{i}" for i in range(100)],
+            "best_match_genome": (
+                ["GCF_000001.1"] * 40 +
+                ["GCF_000002.1"] * 30 +
+                ["GCF_000003.1"] * 20 +
+                ["GCF_000004.1"] * 10
+            ),
+            "top_hit_identity": [99.0] * 40 + [92.0] * 30 + [80.0] * 20 + [70.0] * 10,
+            "novelty_index": [1.0] * 40 + [8.0] * 30 + [20.0] * 20 + [30.0] * 10,
+            "placement_uncertainty": [0.5] * 40 + [0.8] * 30 + [1.2] * 20 + [0.3] * 10,
+            "num_ambiguous_hits": [1] * 40 + [2] * 30 + [2] * 20 + [1] * 10,
+            "taxonomic_call": (
+                ["Known Species"] * 40 +
+                ["Novel Species"] * 30 +
+                ["Novel Genus"] * 20 +
+                ["Off-target"] * 10
+            ),
+            "is_novel": [False] * 40 + [True] * 50 + [False] * 10,
+            "family_bitscore_ratio": (
+                [0.95] * 40 + [0.88] * 30 + [0.85] * 20 + [0.5] * 10
+            ),
+        })
+
+    def test_summary_counts_off_target(self, classifications_with_family_validation):
+        """TaxonomicSummary should count Off-target reads."""
+        from metadarkmatter.visualization.report.generator import ReportGenerator
+
+        generator = ReportGenerator(classifications_with_family_validation)
+
+        assert generator.summary.off_target == 10
+        assert generator.summary.has_family_validation is True
+
+    def test_family_validation_tab_in_report(
+        self, classifications_with_family_validation, tmp_path
+    ):
+        """Report includes Family Validation tab when family data present."""
+        from metadarkmatter.visualization.report.generator import ReportGenerator
+
+        output_path = tmp_path / "report_family.html"
+        generator = ReportGenerator(classifications_with_family_validation)
+        generator.generate(output_path)
+
+        assert output_path.exists()
+        content = output_path.read_text()
+
+        # Should have family validation tab in navigation
+        assert "Family Validation" in content
+        # Should have family validation section content
+        assert "family-validation" in content
+        # Should show off-target stats
+        assert "Off-target" in content
+
+    def test_no_family_tab_without_family_data(self, sample_classifications, tmp_path):
+        """Report excludes Family Validation tab when no family data."""
+        from metadarkmatter.visualization.report.generator import ReportGenerator
+
+        output_path = tmp_path / "report_no_family.html"
+        generator = ReportGenerator(sample_classifications)
+        generator.generate(output_path)
+
+        assert output_path.exists()
+        content = output_path.read_text()
+
+        # Should NOT have family validation tab
+        assert "Family Validation" not in content

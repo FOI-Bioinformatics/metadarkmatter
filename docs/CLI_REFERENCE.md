@@ -383,12 +383,26 @@ Classify metagenomic reads from an alignment file (BLAST or MMseqs2).
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
 | `--summary` | `-s` | PATH | None | Output path for summary statistics (JSON) |
+| `--metadata` | `-m` | PATH | None | Genome metadata TSV for species-level aggregation |
+| `--genomes` | `-g` | PATH | None | Genome FASTA directory for auto-generating ID mapping (external results) |
+| `--id-mapping` | | PATH | None | Pre-computed ID mapping TSV (alternative to --genomes) |
 | `--alignment-mode` | | TEXT | nucleotide | Alignment type: 'nucleotide' for BLASTN, 'protein' for BLASTX |
 | `--bitscore-threshold` | | FLOAT | 95.0 | Percentage of top bitscore for ambiguous hits (0-100) |
 | `--format` | `-f` | TEXT | csv | Output format: 'csv' or 'parquet' |
 | `--verbose` | `-v` | FLAG | False | Enable verbose output |
 | `--quiet` | `-q` | FLAG | False | Suppress progress output (for scripting) |
+| `--target-family` | | TEXT | None | Target family for off-target detection (e.g., `f__Francisellaceae`) |
+| `--family-ratio-threshold` | | FLOAT | 0.8 | Bitscore ratio threshold for off-target detection (0.0-1.0) |
 | `--dry-run` | | FLAG | False | Validate inputs without processing |
+
+#### Family Validation Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--target-family` | TEXT | None | Target family for off-target read detection |
+| `--family-ratio-threshold` | FLOAT | 0.8 | Bitscore ratio below which a read is classified as Off-target |
+
+When `--target-family` is provided, the classifier partitions BLAST hits into in-family (present in the ANI matrix) and external hits, then flags reads whose best in-family bitscore is substantially lower than their best overall bitscore. If `--target-family` is omitted but `--metadata` is provided, the most common family is inferred automatically.
 
 #### Coverage Weighting Options
 
@@ -471,6 +485,27 @@ metadarkmatter score classify \
     --quiet
 ```
 
+**External BLAST Results with ID Mapping**
+```bash
+# Using pre-generated mapping file
+metadarkmatter score classify \
+    --alignment external_results.tsv.gz \
+    --ani ani_matrix.csv \
+    --id-mapping id_mapping.tsv \
+    --output classifications.csv \
+    --parallel
+
+# Auto-generate mapping from genome directory
+metadarkmatter score classify \
+    --alignment external_results.tsv.gz \
+    --ani ani_matrix.csv \
+    --genomes reference_genomes/ \
+    --output classifications.csv \
+    --parallel
+```
+
+**Note:** `--genomes` and `--id-mapping` require `--parallel` mode. See the [Workflow Guide](WORKFLOW.md#importing-external-alignment-results) for the complete external import workflow.
+
 **Protein Mode (for BLASTX output)**
 ```bash
 metadarkmatter score classify \
@@ -478,6 +513,17 @@ metadarkmatter score classify \
     --ani genomes.ani.csv \
     --output sample_classifications.csv \
     --alignment-mode protein \
+    --parallel
+```
+
+**Family Validation (broad-database alignment)**
+```bash
+metadarkmatter score classify \
+    --alignment broad_results.tsv.gz \
+    --ani family_ani_matrix.csv \
+    --target-family "f__Francisellaceae" \
+    --family-ratio-threshold 0.8 \
+    --output classifications.csv \
     --parallel
 ```
 
@@ -544,6 +590,91 @@ metadarkmatter score batch \
     --coverage-weight-mode linear \
     --parallel
 ```
+
+---
+
+## Util Subcommand
+
+The `util` subcommand provides helper commands for data preparation, particularly for importing external alignment results.
+
+### `metadarkmatter util generate-mapping`
+
+Generate an ID mapping file from a genome FASTA directory. This maps original contig IDs to their parent genome accessions, enabling classification of externally-run BLAST or MMseqs2 results.
+
+#### Required Options
+
+| Option | Short | Type | Description |
+|--------|-------|------|-------------|
+| `--genomes` | `-g` | PATH | Directory containing genome FASTA files |
+| `--output` | `-o` | PATH | Output TSV file for ID mapping |
+
+#### Optional Options
+
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--pattern` | `-p` | TEXT | *.fna | Glob pattern for genome files |
+| `--quiet` | `-q` | FLAG | False | Suppress progress output |
+
+#### Examples
+
+**Basic usage**
+```bash
+metadarkmatter util generate-mapping \
+    --genomes reference_genomes/ \
+    --output id_mapping.tsv
+```
+
+**Non-standard file extensions**
+```bash
+metadarkmatter util generate-mapping \
+    --genomes reference_genomes/ \
+    --output id_mapping.tsv \
+    --pattern "*.fasta.gz"
+```
+
+**Output format**
+
+Tab-separated file with two columns:
+
+```
+original_contig_id	genome_accession
+NZ_CP007557.1	GCF_000195955.2
+NC_006570.2	GCF_000008985.1
+```
+
+---
+
+### `metadarkmatter util validate-mapping`
+
+Validate an ID mapping file and optionally check coverage against a BLAST results file.
+
+#### Required Arguments
+
+| Argument | Type | Description |
+|----------|------|-------------|
+| `MAPPING_FILE` | PATH | Path to ID mapping TSV file |
+
+#### Optional Options
+
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--blast` | `-b` | PATH | None | BLAST TSV file to check mapping coverage |
+| `--quiet` | `-q` | FLAG | False | Suppress progress output |
+
+#### Examples
+
+**Validate mapping file format**
+```bash
+metadarkmatter util validate-mapping id_mapping.tsv
+```
+
+**Check coverage against BLAST results**
+```bash
+metadarkmatter util validate-mapping id_mapping.tsv \
+    --blast external_results.blast.tsv.gz
+```
+
+Reports the number of unique subject IDs in the BLAST file and what fraction can be mapped. Warns if coverage falls below 95%.
 
 ---
 

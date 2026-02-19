@@ -11,6 +11,7 @@ Quick reference for Claude Code when working with this repository.
 **Supported Workflows:**
 - Nucleotide-level classification (BLASTN + ANI)
 - Protein-level classification (BLASTX + AAI) for highly divergent taxa
+- External alignment import (BLAST/MMseqs2 results run outside metadarkmatter)
 
 ## Quick Start
 
@@ -47,6 +48,32 @@ metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani_matrix.c
 metadarkmatter report generate --classifications classifications.csv \
   --metadata genome_metadata.tsv --output report.html
 ```
+
+## Importing External Alignment Results
+
+External BLAST/MMseqs2 results can be classified using ID mapping to translate contig IDs to genome accessions:
+
+```bash
+# Generate mapping from genome directory
+metadarkmatter util generate-mapping --genomes genomes/ --output id_mapping.tsv
+
+# Validate mapping against BLAST file
+metadarkmatter util validate-mapping id_mapping.tsv --blast external_results.tsv.gz
+
+# Classify with mapping (requires --parallel)
+metadarkmatter score classify --alignment external_results.tsv.gz --ani ani_matrix.csv \
+  --id-mapping id_mapping.tsv --output classifications.csv --parallel
+```
+
+**Key Files:**
+- `cli/util.py` - `generate-mapping`, `validate-mapping` commands
+- `core/id_mapping.py` - `ContigIdMapping` class (from_genome_dir, from_tsv, to_tsv, transform_column)
+- `core/genome_utils.py` - `extract_accession_from_filename()`
+
+**Requirements:**
+- Alignment must be BLAST tabular format (outfmt 6), 12 or 13 columns, tab-separated
+- ID mapping requires `--parallel` mode (not supported with `--fast` or `--streaming`)
+- Genome accessions in mapping must match ANI matrix row/column labels
 
 ## Workflow Notes
 
@@ -230,6 +257,13 @@ Where `min = 1 - strength`, `max = 1 + strength`, `strength` defaults to 0.5.
 - Adds 6 columns: p_known_species, p_novel_species, p_novel_genus, p_ambiguous, bayesian_category, posterior_entropy
 - Vectorized numpy implementation (no Python loops)
 - Key file: `core/classification/bayesian.py`
+
+### Family Validation (`--target-family`)
+- Detects off-target reads from broad-database alignments
+- Partitions hits by ANI matrix membership (in-family vs external)
+- Reads with best_in_family / best_overall bitscore < 0.8 are Off-target
+- New output columns: family_bitscore_ratio, family_identity_gap, in_family_hit_fraction
+- Key file: `core/classification/classifiers/vectorized.py`
 
 ### Sensitivity Analysis (`score sensitivity` subcommand)
 - Sweeps novelty/uncertainty thresholds across configurable range

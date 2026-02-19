@@ -148,6 +148,17 @@ class TestScoreClassifyValidation:
         assert result.exit_code != 0
 
 
+class TestScoreClassifyFamilyFlags:
+    """Tests for family validation CLI flags."""
+
+    def test_classify_help_shows_family_flags(self, cli_runner):
+        """CLI should show --target-family and --family-ratio-threshold flags."""
+        result = cli_runner.invoke(app, ["score", "classify", "--help"])
+        assert "--target-family" in result.output
+        # Typer truncates long option names in help output, so match prefix
+        assert "--family-ratio-thre" in result.output
+
+
 class TestScoreClassifyOptions:
     """Tests for score classify command with various options."""
 

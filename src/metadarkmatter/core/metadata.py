@@ -149,6 +149,28 @@ class GenomeMetadata:
         """
         return self._accession_to_family.get(accession)
 
+    def infer_target_family(self) -> str | None:
+        """Infer the target family from genome metadata.
+
+        Returns the most common family among genomes in this metadata set.
+        Used as fallback when --target-family is not explicitly provided.
+
+        Returns:
+            Most common family name, or None if family column is absent or empty.
+        """
+        if "family" not in self._df.columns:
+            return None
+        if self._df.is_empty():
+            return None
+        family_counts = (
+            self._df.group_by("family")
+            .len()
+            .sort("len", descending=True)
+        )
+        if family_counts.is_empty():
+            return None
+        return family_counts["family"][0]
+
     @staticmethod
     def generate_novel_id(read_id: str, accession: str) -> str:
         """Generate a deterministic short ID for a novel taxon.

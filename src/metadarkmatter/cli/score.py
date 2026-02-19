@@ -487,6 +487,27 @@ def classify(
             "p_novel_genus, p_ambiguous) rather than hard category labels."
         ),
     ),
+    target_family: str | None = typer.Option(
+        None,
+        "--target-family",
+        help=(
+            "Target taxonomic family for family validation (e.g., 'f__Francisellaceae'). "
+            "Enables off-target detection: reads with better hits outside the ANI matrix "
+            "are classified as Off-target. If not set but --metadata is provided, the "
+            "most common family is inferred."
+        ),
+    ),
+    family_ratio_threshold: float = typer.Option(
+        0.8,
+        "--family-ratio-threshold",
+        help=(
+            "Bitscore ratio threshold for off-target detection. "
+            "Reads with best_in_family / best_overall bitscore below this value "
+            "are classified as Off-target. Default 0.8."
+        ),
+        min=0.0,
+        max=1.0,
+    ),
     quiet: bool = typer.Option(
         False,
         "--quiet",
@@ -712,6 +733,8 @@ def classify(
                 coverage_weight_strength=coverage_weight_strength,
                 uncertainty_mode=uncertainty_mode_lower,
                 single_hit_uncertainty_threshold=single_hit_uncertainty_threshold,
+                target_family=target_family,
+                family_ratio_threshold=family_ratio_threshold,
             )
     else:
         config = ScoringConfig(
@@ -723,6 +746,8 @@ def classify(
             coverage_weight_strength=coverage_weight_strength,
             uncertainty_mode=uncertainty_mode_lower,
             single_hit_uncertainty_threshold=single_hit_uncertainty_threshold,
+            target_family=target_family,
+            family_ratio_threshold=family_ratio_threshold,
         )
 
     # Log alignment filter settings if non-default
@@ -816,6 +841,21 @@ def classify(
         out.print(
             f"[green]Loaded metadata for {genome_metadata.genome_count} genomes "
             f"({genome_metadata.species_count} species)[/green]\n"
+        )
+
+    # Infer target family from metadata if not explicitly provided
+    if target_family is None and genome_metadata is not None:
+        inferred = genome_metadata.infer_target_family()
+        if inferred:
+            target_family = inferred
+            out.print(f"[dim]Inferred target family from metadata: {target_family}[/dim]")
+            # Update config with inferred family
+            config = config.model_copy(update={"target_family": target_family})
+
+    if config.target_family:
+        out.print(
+            f"[cyan]Family validation: target={config.target_family}, "
+            f"threshold={config.family_ratio_threshold}[/cyan]\n"
         )
 
     # Load or generate ID mapping for external BLAST results
@@ -1524,9 +1564,12 @@ def _generate_summary(df: pl.DataFrame) -> TaxonomicSummary:
         known_species=count_dict.get("Known Species", 0),
         novel_species=count_dict.get("Novel Species", 0),
         novel_genus=count_dict.get("Novel Genus", 0),
+        species_boundary=count_dict.get("Species Boundary", 0),
         ambiguous=count_dict.get("Ambiguous", 0),
+        ambiguous_within_genus=count_dict.get("Ambiguous Within Genus", 0),
         conserved_regions=count_dict.get("Conserved Region", 0),
         unclassified=count_dict.get("Unclassified", 0),
+        off_target=count_dict.get("Off-target", 0),
         mean_novelty_index=df["novelty_index"].mean(),
         mean_placement_uncertainty=df["placement_uncertainty"].mean(),
         genome_hit_counts=genome_hit_counts,
@@ -1578,6 +1621,13 @@ def _display_summary_table(summary: TaxonomicSummary) -> None:
         f"{100.0 * summary.unclassified / total:.2f}%",
         style="dim",
     )
+    if summary.off_target > 0:
+        table.add_row(
+            "Off-target",
+            f"{summary.off_target:,}",
+            f"{100.0 * summary.off_target / total:.2f}%",
+            style="dim red",
+        )
     table.add_section()
     table.add_row(
         "[bold]Total Novel Diversity[/bold]",

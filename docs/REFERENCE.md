@@ -152,6 +152,8 @@ metadarkmatter score classify \
 | `score classify` | ANI-weighted classification (supports `--alignment-mode protein`) |
 | `score batch` | Batch process multiple samples |
 | `score extract-novel` | Extract candidate novel species/genera |
+| `util generate-mapping` | Generate contig-to-genome ID mapping from FASTA directory |
+| `util validate-mapping` | Validate ID mapping file (optionally against BLAST results) |
 | `visualize recruitment` | Recruitment plots |
 | `visualize summary` | Summary charts |
 | `report generate` | Single-sample HTML report |
@@ -300,6 +302,7 @@ metadarkmatter/
 │   │   ├── download.py   # Genome acquisition (saves metadata)
 │   │   ├── visualize.py  # Recruitment/summary plots
 │   │   ├── report.py     # HTML reports (with species tab)
+│   │   ├── util.py       # Utility commands (generate-mapping, validate-mapping)
 │   │   └── utils.py      # Shared utilities (progress, sample names)
 │   ├── core/             # Core algorithms
 │   │   ├── ani_placement.py    # Main classifier (ANIMatrix, classifiers)
@@ -307,6 +310,7 @@ metadarkmatter/
 │   │   ├── parsers.py          # Streaming BLAST/ANI parsers
 │   │   ├── recruitment.py      # BAM recruitment data extraction
 │   │   ├── genome_utils.py     # Genome concatenation, header rewriting
+│   │   ├── id_mapping.py       # Contig-to-genome ID mapping for external results
 │   │   ├── metadata.py         # Species/genus metadata handling
 │   │   ├── constants.py        # Centralized nucleotide constants and thresholds
 │   │   ├── protein_constants.py  # Protein-specific thresholds for BLASTX
@@ -479,6 +483,34 @@ The HTML report will include a Bayesian Confidence tab with entropy distribution
 
 See [METHODS.md](METHODS.md) Section 10 for the likelihood model and interpretation.
 
+### Family Validation (`--target-family`)
+
+When running BLAST or MMseqs2 against a broad database (e.g., all bacteria rather than a single family), reads may produce hits outside the target family. Family validation detects these off-target reads.
+
+**How it works:**
+1. Each BLAST hit is classified as in-family (genome exists in ANI matrix) or external
+2. Per-read family metrics are computed (bitscore ratio, identity gap, hit fraction)
+3. Reads with `best_in_family_bitscore / best_overall_bitscore < 0.8` are classified as "Off-target"
+4. Remaining reads are classified using only in-family hits
+
+**Usage:**
+```bash
+metadarkmatter score classify \
+    --alignment broad_results.tsv.gz \
+    --ani family_ani_matrix.csv \
+    --target-family "f__Francisellaceae" \
+    --output classifications.csv --parallel
+```
+
+**Output columns** (when family validation is active):
+- `family_bitscore_ratio`: Best in-family / best overall bitscore (0.0-1.0)
+- `family_identity_gap`: Best in-family identity - best external identity
+- `in_family_hit_fraction`: Fraction of hits from in-family genomes
+- `external_best_genome`: Best-matching genome outside the family
+- `external_best_identity`: Percent identity of best external hit
+
+If `--target-family` is not provided but `--metadata` is, the most common family is inferred automatically.
+
 ### Threshold Sensitivity Analysis
 
 Assess whether classification results are robust to threshold choice:
@@ -589,6 +621,30 @@ candidates = df.filter(
 
 print(candidates)
 ```
+
+### Importing External Alignment Results
+
+If alignment was performed outside metadarkmatter (e.g., on a cluster or via a separate pipeline), the results can be imported using ID mapping to translate contig IDs to genome accessions:
+
+```bash
+# Generate mapping from genome directory
+metadarkmatter util generate-mapping --genomes genomes/ --output id_mapping.tsv
+
+# Validate mapping covers the alignment subject IDs
+metadarkmatter util validate-mapping id_mapping.tsv --blast external_results.tsv.gz
+
+# Classify with mapping (requires --parallel)
+metadarkmatter score classify \
+    --alignment external_results.tsv.gz \
+    --ani ani_matrix.csv \
+    --id-mapping id_mapping.tsv \
+    --output classifications.csv \
+    --parallel
+```
+
+The `--genomes` flag on `score classify` can also auto-generate the mapping at runtime, but pre-generating with `util generate-mapping` is more efficient when processing multiple samples.
+
+See [WORKFLOW.md](WORKFLOW.md#importing-external-alignment-results) for the complete external import guide.
 
 ### Species-Level Tracking
 

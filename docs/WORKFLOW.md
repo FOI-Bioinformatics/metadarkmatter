@@ -550,6 +550,157 @@ metadarkmatter report multi \
 
 ---
 
+## Importing External Alignment Results
+
+If you ran BLAST or MMseqs2 outside of metadarkmatter (e.g., on a cluster, through a Nextflow pipeline, or via command-line), you can still use `metadarkmatter score classify` to classify the results. The key requirement is that metadarkmatter needs to know which genome each subject sequence belongs to.
+
+### Why ID Mapping Is Needed
+
+When metadarkmatter builds BLAST/MMseqs2 databases internally, it rewrites FASTA headers to a standardized format:
+
+```
+>{accession}|{original_contig_id}
+```
+
+For example: `>GCF_000195955.2|NZ_CP007557.1`
+
+External tools typically use the original contig IDs (e.g., `NZ_CP007557.1`), which metadarkmatter cannot map back to a genome accession without help. The ID mapping bridges this gap.
+
+### Step 1: Generate an ID Mapping File
+
+Use the built-in `util generate-mapping` command to scan your genome FASTA files and build the mapping:
+
+```bash
+metadarkmatter util generate-mapping \
+    --genomes reference_genomes/ \
+    --output id_mapping.tsv
+```
+
+This produces a TSV file:
+
+```
+original_contig_id	genome_accession
+NZ_CP007557.1	GCF_000195955.2
+NC_006570.2	GCF_000008985.1
+```
+
+The command supports multiple FASTA formats (`*.fna`, `*.fa`, `*.fasta`, and gzipped variants). Use `--pattern` to match non-standard filenames.
+
+### Step 2: Validate the Mapping (Optional)
+
+Check that the mapping covers the subject IDs in your alignment file:
+
+```bash
+metadarkmatter util validate-mapping id_mapping.tsv --blast external_results.tsv.gz
+```
+
+This reports the fraction of subject IDs that can be mapped. Coverage below 95% typically indicates missing genomes or mismatched input files.
+
+### Step 3: Classify with ID Mapping
+
+Pass the mapping file (or the genome directory directly) to `score classify`:
+
+```bash
+# Option A: Use pre-generated mapping file
+metadarkmatter score classify \
+    --alignment external_results.tsv.gz \
+    --ani ani_matrix.csv \
+    --id-mapping id_mapping.tsv \
+    --output classifications.csv \
+    --parallel
+
+# Option B: Auto-generate mapping from genome directory
+metadarkmatter score classify \
+    --alignment external_results.tsv.gz \
+    --ani ani_matrix.csv \
+    --genomes reference_genomes/ \
+    --output classifications.csv \
+    --parallel
+```
+
+Option A is preferable when processing multiple samples against the same reference set, since the mapping is generated once and reused.
+
+### Input Format Requirements
+
+External alignment results must be in BLAST tabular format (outfmt 6), tab-separated, with either 12 or 13 columns:
+
+```
+qseqid  sseqid  pident  length  mismatch  gapopen  qstart  qend  sstart  send  evalue  bitscore  [qlen]
+```
+
+- **No header row** - data starts on the first line
+- Comment lines starting with `#` are skipped
+- Gzipped files (`.gz`) are handled automatically
+- The 13th column (`qlen`) is optional but enables more accurate coverage weighting
+
+This format is the default output of `blastn -outfmt 6` and `mmseqs convertalis`. Most alignment tools can produce it.
+
+### Important Notes
+
+- **ID mapping requires `--parallel` mode.** The `--fast`, `--streaming`, and standard modes print a warning that ID transformation will not be applied. Always use `--parallel` when importing external results.
+- **Genome accessions must match the ANI matrix.** The accessions extracted from filenames (e.g., `GCF_000195955.2` from `GCF_000195955.2_ASM584v2_genomic.fna`) must match the row/column labels in your ANI matrix.
+- **Use `--dry-run` to check coverage** before running classification to verify that alignment genomes match the ANI matrix.
+
+### Complete External Import Workflow
+
+```bash
+# 1. Generate ID mapping from your reference genomes
+metadarkmatter util generate-mapping \
+    --genomes reference_genomes/ \
+    --output id_mapping.tsv
+
+# 2. Validate mapping against alignment file
+metadarkmatter util validate-mapping id_mapping.tsv \
+    --blast external_results.tsv.gz
+
+# 3. Classify with mapping
+metadarkmatter score classify \
+    --alignment external_results.tsv.gz \
+    --ani ani_matrix.csv \
+    --id-mapping id_mapping.tsv \
+    --metadata genome_metadata.tsv \
+    --output classifications.csv \
+    --summary summary.json \
+    --parallel
+
+# 4. Generate report
+metadarkmatter report generate \
+    --classifications classifications.csv \
+    --metadata genome_metadata.tsv \
+    --ani ani_matrix.csv \
+    --output report.html
+```
+
+---
+
+## Broad-Database Classification
+
+When you run alignment against a database broader than a single family (e.g., all bacteria), family validation helps distinguish genuine novel diversity from taxonomic misassignment.
+
+```bash
+# 1. Run BLAST/MMseqs2 against broad database externally
+blastn -query family_reads.fa -db all_bacteria_db -outfmt 6 -out broad_results.tsv
+
+# 2. Classify with family validation
+metadarkmatter score classify \
+    --alignment broad_results.tsv \
+    --ani family_ani_matrix.csv \
+    --target-family "f__Francisellaceae" \
+    --family-ratio-threshold 0.8 \
+    --genomes genomes/ \
+    --output classifications.csv --parallel
+
+# 3. Generate report (includes Family Validation tab)
+metadarkmatter report generate \
+    --classifications classifications.csv \
+    --metadata genome_metadata.tsv \
+    --output report.html
+```
+
+Reads classified as "Off-target" have a better match outside the target family, indicating they may have been misassigned by Kraken2 or another upstream classifier.
+
+---
+
 ## Troubleshooting
 
 ### Common Issues

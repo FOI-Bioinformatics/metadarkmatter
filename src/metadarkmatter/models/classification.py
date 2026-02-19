@@ -42,6 +42,7 @@ TAXONOMIC_TO_DIVERSITY: dict[str, str] = {
     "Ambiguous Within Genus": "Uncertain",
     "Conserved Region": "Uncertain",
     "Unclassified": "Uncertain",
+    "Off-target": "Uncertain",
 }
 
 
@@ -79,6 +80,7 @@ class TaxonomicCall(str, Enum):
     AMBIGUOUS_WITHIN_GENUS = "Ambiguous Within Genus"
     CONSERVED_REGION = "Conserved Region"
     UNCLASSIFIED = "Unclassified"
+    OFF_TARGET = "Off-target"
 
     @property
     def diversity_status(self) -> DiversityStatus:
@@ -296,6 +298,10 @@ class TaxonomicSummary(BaseModel):
     )
     conserved_regions: int = Field(description="Reads matching conserved genes across genera")
     unclassified: int = Field(default=0, description="Reads not fitting clear categories")
+    off_target: int = Field(
+        default=0,
+        description="Reads classified as off-target (better match outside target family)",
+    )
     # High-level diversity grouping
     diversity_known: int = Field(
         default=0,

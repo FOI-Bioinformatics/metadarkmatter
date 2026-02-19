@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import polars as pl
 import pytest
 
+from metadarkmatter.core.metadata import GenomeMetadata
 from metadarkmatter.models.classification import (
     ReadClassification,
     TaxonomicCall,
@@ -41,6 +43,15 @@ class TestTaxonomicCall:
         """TaxonomicCall should be a string enum."""
         assert isinstance(TaxonomicCall.KNOWN_SPECIES, str)
         assert TaxonomicCall.KNOWN_SPECIES == "Known Species"
+
+    def test_off_target_value(self):
+        """Off-target should have correct string value."""
+        assert TaxonomicCall.OFF_TARGET.value == "Off-target"
+
+    def test_off_target_diversity_status(self):
+        """Off-target should map to Uncertain diversity status."""
+        from metadarkmatter.models.classification import TAXONOMIC_TO_DIVERSITY
+        assert TAXONOMIC_TO_DIVERSITY["Off-target"] == "Uncertain"
 
     def test_all_values_unique(self):
         """All enum values should be unique."""
@@ -89,6 +100,23 @@ class TestReadClassification:
             num_ambiguous_hits=5,
             taxonomic_call=TaxonomicCall.NOVEL_GENUS,
         )
+
+    @pytest.fixture
+    def off_target_classification(self):
+        """Classification result for off-target read."""
+        return ReadClassification(
+            read_id="read_off",
+            best_match_genome="GCF_999999999.1",
+            top_hit_identity=85.0,
+            novelty_index=15.0,
+            placement_uncertainty=0.0,
+            num_ambiguous_hits=1,
+            taxonomic_call=TaxonomicCall.OFF_TARGET,
+        )
+
+    def test_off_target_is_not_novel(self, off_target_classification):
+        """Off-target reads should not be flagged as novel."""
+        assert not off_target_classification.is_novel
 
     def test_create_valid_classification(self, known_species_classification):
         """Should create ReadClassification from valid data."""
@@ -389,3 +417,61 @@ class TestClassificationScenarios:
 
         assert classification.is_novel is False
         assert classification.taxonomic_call == TaxonomicCall.CONSERVED_REGION
+
+
+class TestInferTargetFamily:
+    """Tests for GenomeMetadata.infer_target_family()."""
+
+    def test_infer_most_common_family(self):
+        """Should return the most common family."""
+        df = pl.DataFrame({
+            "accession": ["GCF_001", "GCF_002", "GCF_003", "GCF_004"],
+            "species": ["sp1", "sp2", "sp3", "sp4"],
+            "genus": ["g1", "g1", "g2", "g2"],
+            "family": [
+                "f__Francisellaceae",
+                "f__Francisellaceae",
+                "f__Francisellaceae",
+                "f__Enterobacteriaceae",
+            ],
+        })
+        metadata = GenomeMetadata(df)
+        assert metadata.infer_target_family() == "f__Francisellaceae"
+
+    def test_infer_family_no_family_column(self):
+        """Should return None if family column is missing."""
+        df = pl.DataFrame({
+            "accession": ["GCF_001"],
+            "species": ["sp1"],
+            "genus": ["g1"],
+        })
+        metadata = GenomeMetadata(df)
+        assert metadata.infer_target_family() is None
+
+    def test_infer_family_empty_metadata(self):
+        """Should return None for empty metadata."""
+        df = pl.DataFrame({
+            "accession": [],
+            "species": [],
+            "genus": [],
+            "family": [],
+        }).cast({
+            "accession": pl.Utf8,
+            "species": pl.Utf8,
+            "genus": pl.Utf8,
+            "family": pl.Utf8,
+        })
+        metadata = GenomeMetadata(df)
+        assert metadata.infer_target_family() is None
+
+    def test_infer_family_tie_returns_one(self):
+        """With a tie, should return one of the tied families."""
+        df = pl.DataFrame({
+            "accession": ["GCF_001", "GCF_002"],
+            "species": ["sp1", "sp2"],
+            "genus": ["g1", "g2"],
+            "family": ["f__A", "f__B"],
+        })
+        metadata = GenomeMetadata(df)
+        result = metadata.infer_target_family()
+        assert result in ("f__A", "f__B")
