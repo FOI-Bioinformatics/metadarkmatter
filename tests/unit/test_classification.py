@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import polars as pl
 import pytest
 
+from metadarkmatter.core.metadata import GenomeMetadata
 from metadarkmatter.models.classification import (
     ReadClassification,
     TaxonomicCall,
@@ -415,3 +417,61 @@ class TestClassificationScenarios:
 
         assert classification.is_novel is False
         assert classification.taxonomic_call == TaxonomicCall.CONSERVED_REGION
+
+
+class TestInferTargetFamily:
+    """Tests for GenomeMetadata.infer_target_family()."""
+
+    def test_infer_most_common_family(self):
+        """Should return the most common family."""
+        df = pl.DataFrame({
+            "accession": ["GCF_001", "GCF_002", "GCF_003", "GCF_004"],
+            "species": ["sp1", "sp2", "sp3", "sp4"],
+            "genus": ["g1", "g1", "g2", "g2"],
+            "family": [
+                "f__Francisellaceae",
+                "f__Francisellaceae",
+                "f__Francisellaceae",
+                "f__Enterobacteriaceae",
+            ],
+        })
+        metadata = GenomeMetadata(df)
+        assert metadata.infer_target_family() == "f__Francisellaceae"
+
+    def test_infer_family_no_family_column(self):
+        """Should return None if family column is missing."""
+        df = pl.DataFrame({
+            "accession": ["GCF_001"],
+            "species": ["sp1"],
+            "genus": ["g1"],
+        })
+        metadata = GenomeMetadata(df)
+        assert metadata.infer_target_family() is None
+
+    def test_infer_family_empty_metadata(self):
+        """Should return None for empty metadata."""
+        df = pl.DataFrame({
+            "accession": [],
+            "species": [],
+            "genus": [],
+            "family": [],
+        }).cast({
+            "accession": pl.Utf8,
+            "species": pl.Utf8,
+            "genus": pl.Utf8,
+            "family": pl.Utf8,
+        })
+        metadata = GenomeMetadata(df)
+        assert metadata.infer_target_family() is None
+
+    def test_infer_family_tie_returns_one(self):
+        """With a tie, should return one of the tied families."""
+        df = pl.DataFrame({
+            "accession": ["GCF_001", "GCF_002"],
+            "species": ["sp1", "sp2"],
+            "genus": ["g1", "g2"],
+            "family": ["f__A", "f__B"],
+        })
+        metadata = GenomeMetadata(df)
+        result = metadata.infer_target_family()
+        assert result in ("f__A", "f__B")
