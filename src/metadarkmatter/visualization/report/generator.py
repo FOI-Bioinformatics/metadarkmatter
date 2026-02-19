@@ -78,6 +78,7 @@ from metadarkmatter.visualization.report.templates import (
     TABLE_ROW_TEMPLATE,
     BAYESIAN_SUMMARY_TEMPLATE,
     BAYESIAN_INTERPRETATION_TEMPLATE,
+    FAMILY_VALIDATION_SECTION_TEMPLATE,
     get_cell_class,
 )
 from metadarkmatter.visualization.report.novel_section import (
@@ -135,6 +136,10 @@ class TaxonomicSummary:
     mean_discovery_score: float | None = None
     novel_with_discovery_score: int = 0
     high_priority_discoveries: int = 0  # discovery_score >= 75
+    # Family validation metrics (optional, only when family validation active)
+    off_target: int = 0
+    has_family_validation: bool = False
+    target_family: str = ""
     # Bayesian posterior metrics (optional, only when --bayesian used)
     has_bayesian: bool = False
     mean_posterior_entropy: float = 0.0
@@ -195,6 +200,10 @@ class TaxonomicSummary:
             "diversity_known_pct": self.diversity_known_pct,
             "diversity_novel_pct": self.diversity_novel_pct,
             "diversity_uncertain_pct": self.diversity_uncertain_pct,
+            # Family validation
+            "off_target": self.off_target,
+            "has_family_validation": self.has_family_validation,
+            "target_family": self.target_family,
             # Enhanced scoring
             "has_enhanced_scoring": self.has_enhanced_scoring,
             "has_inferred_uncertainty": self.has_inferred_uncertainty,
@@ -332,13 +341,18 @@ class ReportGenerator:
         ambiguous_within_genus = count_map.get("Ambiguous Within Genus", 0)
         conserved_regions = count_map.get("Conserved Region", 0)
         unclassified = count_map.get("Unclassified", 0)
+        off_target = count_map.get("Off-target", 0)
+
+        # Family validation detection
+        has_family_validation = "family_bitscore_ratio" in self.df.columns
+        target_family = ""
 
         # High-level diversity grouping
         diversity_known = known_species
         diversity_novel = novel_species + novel_genus
         diversity_uncertain = (
             species_boundary + ambiguous + ambiguous_within_genus +
-            conserved_regions + unclassified
+            conserved_regions + unclassified + off_target
         )
 
         # Check for enhanced scoring columns
@@ -428,6 +442,10 @@ class ReportGenerator:
             mean_novelty_index=mean_novelty,
             mean_placement_uncertainty=mean_uncertainty,
             mean_top_hit_identity=mean_identity,
+            # Family validation
+            off_target=off_target,
+            has_family_validation=has_family_validation,
+            target_family=target_family,
             # Enhanced scoring
             has_enhanced_scoring=has_enhanced_scoring,
             has_inferred_uncertainty=has_inferred_uncertainty,
@@ -523,6 +541,10 @@ class ReportGenerator:
         if self.summary.diversity_novel > 0:
             content_sections.append(self._build_novel_diversity_section())
 
+        # Family Validation tab (only if family validation was active)
+        if self.summary.has_family_validation:
+            content_sections.append(self._build_family_validation_section())
+
         # Reference ANI tab
         content_sections.append(self._build_ani_section())
 
@@ -606,6 +628,10 @@ class ReportGenerator:
         # Add Novel Diversity tab if there are novel reads
         if self.summary.diversity_novel > 0:
             tabs.append(("novel-diversity", "Novel Diversity", False))
+
+        # Add Family Validation tab if family validation was active
+        if self.summary.has_family_validation:
+            tabs.append(("family-validation", "Family Validation", False))
 
         # Reference matrices (renamed for clarity)
         tabs.extend([
@@ -1900,6 +1926,71 @@ class ReportGenerator:
             tab_id="genomes",
             active_class="",
             section_title="Genome Breakdown",
+            content=content,
+        )
+
+    def _build_family_validation_section(self) -> str:
+        """Build the Family Validation tab content."""
+        import plotly.graph_objects as go
+
+        total = self.summary.total_reads
+        off_target = self.summary.off_target
+        in_family = total - off_target
+        off_target_pct = (off_target / total * 100) if total > 0 else 0.0
+        validated_pct = 100.0 - off_target_pct
+
+        # Format summary stats
+        content = FAMILY_VALIDATION_SECTION_TEMPLATE.format(
+            validated_pct=validated_pct,
+            off_target_count=off_target,
+            off_target_pct=off_target_pct,
+            target_family=(
+                self.summary.target_family or "Inferred from ANI matrix"
+            ),
+            external_families_table="",
+        )
+
+        # Histogram of family_bitscore_ratio
+        if "family_bitscore_ratio" in self.df.columns:
+            ratios = self.df["family_bitscore_ratio"].drop_nulls().to_list()
+            if ratios:
+                fig = go.Figure(data=[go.Histogram(
+                    x=ratios,
+                    nbinsx=50,
+                    marker_color="#4a90d9",
+                    name="Reads",
+                )])
+                fig.update_layout(
+                    xaxis_title="Family Bitscore Ratio",
+                    yaxis_title="Read Count",
+                    template="plotly_white",
+                    height=400,
+                )
+                fig.add_vline(
+                    x=0.8,
+                    line_dash="dash",
+                    line_color="red",
+                    annotation_text="Threshold (0.8)",
+                )
+                self._register_plot("family-ratio-histogram", fig)
+
+        # Pie chart of in-family vs off-target
+        fig_pie = go.Figure(data=[go.Pie(
+            labels=["In-Family", "Off-target"],
+            values=[in_family, off_target],
+            marker_colors=["#4a90d9", "#e74c3c"],
+            hole=0.4,
+        )])
+        fig_pie.update_layout(
+            template="plotly_white",
+            height=400,
+        )
+        self._register_plot("family-pie-chart", fig_pie)
+
+        return TAB_SECTION_TEMPLATE.format(
+            tab_id="family-validation",
+            active_class="",
+            section_title="Family Validation",
             content=content,
         )
 
