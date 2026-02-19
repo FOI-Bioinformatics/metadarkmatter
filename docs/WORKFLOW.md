@@ -673,6 +673,34 @@ metadarkmatter report generate \
 
 ---
 
+## Broad-Database Classification
+
+When you run alignment against a database broader than a single family (e.g., all bacteria), family validation helps distinguish genuine novel diversity from taxonomic misassignment.
+
+```bash
+# 1. Run BLAST/MMseqs2 against broad database externally
+blastn -query family_reads.fa -db all_bacteria_db -outfmt 6 -out broad_results.tsv
+
+# 2. Classify with family validation
+metadarkmatter score classify \
+    --alignment broad_results.tsv \
+    --ani family_ani_matrix.csv \
+    --target-family "f__Francisellaceae" \
+    --family-ratio-threshold 0.8 \
+    --genomes genomes/ \
+    --output classifications.csv --parallel
+
+# 3. Generate report (includes Family Validation tab)
+metadarkmatter report generate \
+    --classifications classifications.csv \
+    --metadata genome_metadata.tsv \
+    --output report.html
+```
+
+Reads classified as "Off-target" have a better match outside the target family, indicating they may have been misassigned by Kraken2 or another upstream classifier.
+
+---
+
 ## Troubleshooting
 
 ### Common Issues

@@ -483,6 +483,34 @@ The HTML report will include a Bayesian Confidence tab with entropy distribution
 
 See [METHODS.md](METHODS.md) Section 10 for the likelihood model and interpretation.
 
+### Family Validation (`--target-family`)
+
+When running BLAST or MMseqs2 against a broad database (e.g., all bacteria rather than a single family), reads may produce hits outside the target family. Family validation detects these off-target reads.
+
+**How it works:**
+1. Each BLAST hit is classified as in-family (genome exists in ANI matrix) or external
+2. Per-read family metrics are computed (bitscore ratio, identity gap, hit fraction)
+3. Reads with `best_in_family_bitscore / best_overall_bitscore < 0.8` are classified as "Off-target"
+4. Remaining reads are classified using only in-family hits
+
+**Usage:**
+```bash
+metadarkmatter score classify \
+    --alignment broad_results.tsv.gz \
+    --ani family_ani_matrix.csv \
+    --target-family "f__Francisellaceae" \
+    --output classifications.csv --parallel
+```
+
+**Output columns** (when family validation is active):
+- `family_bitscore_ratio`: Best in-family / best overall bitscore (0.0-1.0)
+- `family_identity_gap`: Best in-family identity - best external identity
+- `in_family_hit_fraction`: Fraction of hits from in-family genomes
+- `external_best_genome`: Best-matching genome outside the family
+- `external_best_identity`: Percent identity of best external hit
+
+If `--target-family` is not provided but `--metadata` is, the most common family is inferred automatically.
+
 ### Threshold Sensitivity Analysis
 
 Assess whether classification results are robust to threshold choice:

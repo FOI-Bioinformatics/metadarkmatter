@@ -391,7 +391,18 @@ Classify metagenomic reads from an alignment file (BLAST or MMseqs2).
 | `--format` | `-f` | TEXT | csv | Output format: 'csv' or 'parquet' |
 | `--verbose` | `-v` | FLAG | False | Enable verbose output |
 | `--quiet` | `-q` | FLAG | False | Suppress progress output (for scripting) |
+| `--target-family` | | TEXT | None | Target family for off-target detection (e.g., `f__Francisellaceae`) |
+| `--family-ratio-threshold` | | FLOAT | 0.8 | Bitscore ratio threshold for off-target detection (0.0-1.0) |
 | `--dry-run` | | FLAG | False | Validate inputs without processing |
+
+#### Family Validation Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--target-family` | TEXT | None | Target family for off-target read detection |
+| `--family-ratio-threshold` | FLOAT | 0.8 | Bitscore ratio below which a read is classified as Off-target |
+
+When `--target-family` is provided, the classifier partitions BLAST hits into in-family (present in the ANI matrix) and external hits, then flags reads whose best in-family bitscore is substantially lower than their best overall bitscore. If `--target-family` is omitted but `--metadata` is provided, the most common family is inferred automatically.
 
 #### Coverage Weighting Options
 
@@ -502,6 +513,17 @@ metadarkmatter score classify \
     --ani genomes.ani.csv \
     --output sample_classifications.csv \
     --alignment-mode protein \
+    --parallel
+```
+
+**Family Validation (broad-database alignment)**
+```bash
+metadarkmatter score classify \
+    --alignment broad_results.tsv.gz \
+    --ani family_ani_matrix.csv \
+    --target-family "f__Francisellaceae" \
+    --family-ratio-threshold 0.8 \
+    --output classifications.csv \
     --parallel
 ```
 

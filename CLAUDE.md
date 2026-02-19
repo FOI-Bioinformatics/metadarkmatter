@@ -258,6 +258,13 @@ Where `min = 1 - strength`, `max = 1 + strength`, `strength` defaults to 0.5.
 - Vectorized numpy implementation (no Python loops)
 - Key file: `core/classification/bayesian.py`
 
+### Family Validation (`--target-family`)
+- Detects off-target reads from broad-database alignments
+- Partitions hits by ANI matrix membership (in-family vs external)
+- Reads with best_in_family / best_overall bitscore < 0.8 are Off-target
+- New output columns: family_bitscore_ratio, family_identity_gap, in_family_hit_fraction
+- Key file: `core/classification/classifiers/vectorized.py`
+
 ### Sensitivity Analysis (`score sensitivity` subcommand)
 - Sweeps novelty/uncertainty thresholds across configurable range
 - Re-classifies reads at each threshold point
