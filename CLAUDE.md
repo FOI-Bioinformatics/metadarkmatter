@@ -11,6 +11,7 @@ Quick reference for Claude Code when working with this repository.
 **Supported Workflows:**
 - Nucleotide-level classification (BLASTN + ANI)
 - Protein-level classification (BLASTX + AAI) for highly divergent taxa
+- External alignment import (BLAST/MMseqs2 results run outside metadarkmatter)
 
 ## Quick Start
 
@@ -47,6 +48,32 @@ metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani_matrix.c
 metadarkmatter report generate --classifications classifications.csv \
   --metadata genome_metadata.tsv --output report.html
 ```
+
+## Importing External Alignment Results
+
+External BLAST/MMseqs2 results can be classified using ID mapping to translate contig IDs to genome accessions:
+
+```bash
+# Generate mapping from genome directory
+metadarkmatter util generate-mapping --genomes genomes/ --output id_mapping.tsv
+
+# Validate mapping against BLAST file
+metadarkmatter util validate-mapping id_mapping.tsv --blast external_results.tsv.gz
+
+# Classify with mapping (requires --parallel)
+metadarkmatter score classify --alignment external_results.tsv.gz --ani ani_matrix.csv \
+  --id-mapping id_mapping.tsv --output classifications.csv --parallel
+```
+
+**Key Files:**
+- `cli/util.py` - `generate-mapping`, `validate-mapping` commands
+- `core/id_mapping.py` - `ContigIdMapping` class (from_genome_dir, from_tsv, to_tsv, transform_column)
+- `core/genome_utils.py` - `extract_accession_from_filename()`
+
+**Requirements:**
+- Alignment must be BLAST tabular format (outfmt 6), 12 or 13 columns, tab-separated
+- ID mapping requires `--parallel` mode (not supported with `--fast` or `--streaming`)
+- Genome accessions in mapping must match ANI matrix row/column labels
 
 ## Workflow Notes
 

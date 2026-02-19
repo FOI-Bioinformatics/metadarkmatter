@@ -152,6 +152,8 @@ metadarkmatter score classify \
 | `score classify` | ANI-weighted classification (supports `--alignment-mode protein`) |
 | `score batch` | Batch process multiple samples |
 | `score extract-novel` | Extract candidate novel species/genera |
+| `util generate-mapping` | Generate contig-to-genome ID mapping from FASTA directory |
+| `util validate-mapping` | Validate ID mapping file (optionally against BLAST results) |
 | `visualize recruitment` | Recruitment plots |
 | `visualize summary` | Summary charts |
 | `report generate` | Single-sample HTML report |
@@ -300,6 +302,7 @@ metadarkmatter/
 │   │   ├── download.py   # Genome acquisition (saves metadata)
 │   │   ├── visualize.py  # Recruitment/summary plots
 │   │   ├── report.py     # HTML reports (with species tab)
+│   │   ├── util.py       # Utility commands (generate-mapping, validate-mapping)
 │   │   └── utils.py      # Shared utilities (progress, sample names)
 │   ├── core/             # Core algorithms
 │   │   ├── ani_placement.py    # Main classifier (ANIMatrix, classifiers)
@@ -307,6 +310,7 @@ metadarkmatter/
 │   │   ├── parsers.py          # Streaming BLAST/ANI parsers
 │   │   ├── recruitment.py      # BAM recruitment data extraction
 │   │   ├── genome_utils.py     # Genome concatenation, header rewriting
+│   │   ├── id_mapping.py       # Contig-to-genome ID mapping for external results
 │   │   ├── metadata.py         # Species/genus metadata handling
 │   │   ├── constants.py        # Centralized nucleotide constants and thresholds
 │   │   ├── protein_constants.py  # Protein-specific thresholds for BLASTX
@@ -589,6 +593,30 @@ candidates = df.filter(
 
 print(candidates)
 ```
+
+### Importing External Alignment Results
+
+If alignment was performed outside metadarkmatter (e.g., on a cluster or via a separate pipeline), the results can be imported using ID mapping to translate contig IDs to genome accessions:
+
+```bash
+# Generate mapping from genome directory
+metadarkmatter util generate-mapping --genomes genomes/ --output id_mapping.tsv
+
+# Validate mapping covers the alignment subject IDs
+metadarkmatter util validate-mapping id_mapping.tsv --blast external_results.tsv.gz
+
+# Classify with mapping (requires --parallel)
+metadarkmatter score classify \
+    --alignment external_results.tsv.gz \
+    --ani ani_matrix.csv \
+    --id-mapping id_mapping.tsv \
+    --output classifications.csv \
+    --parallel
+```
+
+The `--genomes` flag on `score classify` can also auto-generate the mapping at runtime, but pre-generating with `util generate-mapping` is more efficient when processing multiple samples.
+
+See [WORKFLOW.md](WORKFLOW.md#importing-external-alignment-results) for the complete external import guide.
 
 ### Species-Level Tracking
 
