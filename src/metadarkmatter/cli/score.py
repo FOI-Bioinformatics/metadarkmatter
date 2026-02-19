@@ -1564,9 +1564,12 @@ def _generate_summary(df: pl.DataFrame) -> TaxonomicSummary:
         known_species=count_dict.get("Known Species", 0),
         novel_species=count_dict.get("Novel Species", 0),
         novel_genus=count_dict.get("Novel Genus", 0),
+        species_boundary=count_dict.get("Species Boundary", 0),
         ambiguous=count_dict.get("Ambiguous", 0),
+        ambiguous_within_genus=count_dict.get("Ambiguous Within Genus", 0),
         conserved_regions=count_dict.get("Conserved Region", 0),
         unclassified=count_dict.get("Unclassified", 0),
+        off_target=count_dict.get("Off-target", 0),
         mean_novelty_index=df["novelty_index"].mean(),
         mean_placement_uncertainty=df["placement_uncertainty"].mean(),
         genome_hit_counts=genome_hit_counts,
@@ -1618,6 +1621,13 @@ def _display_summary_table(summary: TaxonomicSummary) -> None:
         f"{100.0 * summary.unclassified / total:.2f}%",
         style="dim",
     )
+    if summary.off_target > 0:
+        table.add_row(
+            "Off-target",
+            f"{summary.off_target:,}",
+            f"{100.0 * summary.off_target / total:.2f}%",
+            style="dim red",
+        )
     table.add_section()
     table.add_row(
         "[bold]Total Novel Diversity[/bold]",

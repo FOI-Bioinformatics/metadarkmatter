@@ -8,6 +8,7 @@ import pytest
 from metadarkmatter.core.classification.ani_matrix import ANIMatrix
 from metadarkmatter.core.classification.classifiers.vectorized import VectorizedClassifier
 from metadarkmatter.core.classification.thresholds import apply_classification_thresholds
+from metadarkmatter.models.classification import TaxonomicSummary
 from metadarkmatter.models.config import ScoringConfig
 
 
@@ -200,3 +201,64 @@ class TestThresholdsWithOffTarget:
         config = ScoringConfig()
         result = apply_classification_thresholds(df, config)
         assert "Off-target" not in result["taxonomic_call"].to_list()
+
+
+class TestBackwardCompatibility:
+    """Verify identical output when family validation is disabled."""
+
+    def test_output_identical_without_target_family(self, tmp_path):
+        """Classification should produce identical core results."""
+        genomes = ["GCF_001", "GCF_002", "GCF_003"]
+        ani = _make_ani_matrix(genomes)
+
+        blast_file = tmp_path / "test.tsv"
+        lines = [
+            "read1\tGCF_001|c1\t98.0\t150\t3\t0\t1\t150\t1\t150\t1e-50\t500",
+            "read1\tGCF_002|c1\t95.0\t150\t8\t0\t1\t150\t1\t150\t1e-40\t450",
+            "read2\tGCF_003|c1\t88.0\t150\t18\t0\t1\t150\t1\t150\t1e-30\t300",
+        ]
+        blast_file.write_text("\n".join(lines) + "\n")
+
+        # Run without family validation
+        config_without = ScoringConfig()
+        classifier_without = VectorizedClassifier(ani, config=config_without)
+        result_without = classifier_without.classify_file(blast_file)
+
+        # Run with family validation but all hits in-family
+        config_with = ScoringConfig(target_family="f__TestFamily")
+        classifier_with = VectorizedClassifier(ani, config=config_with)
+        result_with = classifier_with.classify_file(blast_file)
+
+        # Core classification columns should match
+        core_cols = [
+            "read_id", "best_match_genome", "top_hit_identity",
+            "novelty_index", "placement_uncertainty", "taxonomic_call",
+        ]
+        for col in core_cols:
+            assert result_without[col].to_list() == result_with[col].to_list(), (
+                f"Column {col} differs"
+            )
+
+        # Family columns should only exist in result_with
+        assert "family_bitscore_ratio" not in result_without.columns
+        assert "family_bitscore_ratio" in result_with.columns
+
+
+class TestFamilyValidationSummary:
+    """Tests for family validation in summary JSON."""
+
+    def test_summary_includes_off_target_count(self):
+        """TaxonomicSummary should include off_target count."""
+        summary = TaxonomicSummary(
+            total_reads=100,
+            known_species=50,
+            novel_species=20,
+            novel_genus=5,
+            conserved_regions=3,
+            off_target=10,
+            mean_novelty_index=8.0,
+            mean_placement_uncertainty=1.2,
+        )
+        assert summary.off_target == 10
+        data = summary.model_dump()
+        assert data["off_target"] == 10
