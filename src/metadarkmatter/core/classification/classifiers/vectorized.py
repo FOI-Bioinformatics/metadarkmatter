@@ -284,10 +284,117 @@ class VectorizedClassifier:
         # Add genome_name column (extracts accession from standardized sseqid)
         df = df.with_columns([extract_genome_name_expr()])
 
+        # Family validation: partition hits by ANI matrix membership
+        family_validation_active = self.config.target_family is not None
+        family_metrics_df = None
+        off_target_df = None
+
+        if family_validation_active:
+            in_family_genomes = set(self.ani_matrix._genomes)
+
+            df = df.with_columns([
+                pl.col("genome_name").is_in(in_family_genomes).alias("_is_in_family"),
+            ])
+
+            # Compute external best genome per read separately (avoids sort_by
+            # length mismatch when filtering within group_by aggregation)
+            external_hits = df.filter(~pl.col("_is_in_family"))
+            if not external_hits.is_empty():
+                external_best_per_read = (
+                    external_hits
+                    .sort(["qseqid", "bitscore"], descending=[False, True])
+                    .group_by("qseqid")
+                    .agg(pl.col("genome_name").first().alias("external_best_genome"))
+                )
+            else:
+                external_best_per_read = pl.DataFrame(
+                    schema={"qseqid": pl.Utf8, "external_best_genome": pl.Utf8}
+                )
+
+            # Per-read family metrics
+            read_metrics = (
+                df.group_by("qseqid")
+                .agg([
+                    pl.col("bitscore").filter(pl.col("_is_in_family")).max().fill_null(0.0).alias("_best_if_bs"),
+                    pl.col("bitscore").max().alias("_best_all_bs"),
+                    pl.col("pident").filter(~pl.col("_is_in_family")).max().fill_null(0.0).alias("external_best_identity"),
+                    pl.col("pident").filter(pl.col("_is_in_family")).max().fill_null(0.0).alias("_best_if_ident"),
+                    pl.col("_is_in_family").sum().alias("_if_count"),
+                    pl.len().alias("_total_count"),
+                ])
+                .join(external_best_per_read, on="qseqid", how="left")
+                .with_columns([
+                    (pl.col("_best_if_bs") / pl.col("_best_all_bs")).fill_nan(0.0).fill_null(0.0).alias("family_bitscore_ratio"),
+                    (pl.col("_best_if_ident") - pl.col("external_best_identity")).alias("family_identity_gap"),
+                    (pl.col("_if_count").cast(pl.Float64) / pl.col("_total_count").cast(pl.Float64)).alias("in_family_hit_fraction"),
+                ])
+            )
+
+            family_metrics_df = read_metrics
+
+            threshold = self.config.family_ratio_threshold
+            off_target_reads = read_metrics.filter(
+                (pl.col("family_bitscore_ratio") < threshold)
+                | (pl.col("_best_if_bs") == 0.0)
+            )
+
+            if not off_target_reads.is_empty():
+                off_target_read_ids = set(off_target_reads["qseqid"].to_list())
+
+                off_target_df = off_target_reads.select([
+                    pl.col("qseqid").alias("read_id"),
+                    pl.col("external_best_genome").fill_null("unknown").alias("best_match_genome"),
+                    pl.col("external_best_identity").alias("top_hit_identity"),
+                    (100.0 - pl.col("external_best_identity")).alias("novelty_index"),
+                    pl.lit(0.0).alias("placement_uncertainty"),
+                    pl.lit(0.0).alias("genus_uncertainty"),
+                    pl.lit("unambiguous").alias("ambiguity_scope"),
+                    pl.lit(0).cast(pl.Int64).alias("num_ambiguous_hits"),
+                    pl.lit(None).cast(pl.Float64).alias("second_hit_identity"),
+                    pl.lit(None).cast(pl.Float64).alias("identity_gap"),
+                    pl.lit(0.0).alias("confidence_score"),
+                    pl.lit("Off-target").alias("taxonomic_call"),
+                    pl.lit("Uncertain").alias("diversity_status"),
+                    pl.lit(False).alias("is_novel"),
+                    pl.lit(False).alias("low_confidence"),
+                    pl.lit(None).cast(pl.Float64).alias("inferred_uncertainty"),
+                    pl.lit("none").alias("uncertainty_type"),
+                    pl.lit(0.0).alias("alignment_quality"),
+                    pl.lit(0.0).alias("identity_confidence"),
+                    pl.lit(0.0).alias("placement_confidence"),
+                    pl.lit(None).cast(pl.Float64).alias("discovery_score"),
+                    pl.col("family_bitscore_ratio"),
+                    pl.col("family_identity_gap"),
+                    pl.col("in_family_hit_fraction"),
+                    pl.col("external_best_genome"),
+                    pl.col("external_best_identity"),
+                ])
+
+                # Keep only in-family hits for non-off-target reads
+                df = df.filter(
+                    ~pl.col("qseqid").is_in(off_target_read_ids)
+                    & pl.col("_is_in_family")
+                )
+            else:
+                # No off-target reads - still filter to in-family hits only
+                df = df.filter(pl.col("_is_in_family"))
+
+            df = df.drop("_is_in_family")
+
         # Capture filtered state for QC before empty check
         filtered_df = df if compute_qc else None
 
         if df.is_empty():
+            # If family validation produced off-target reads, return those
+            if family_validation_active and off_target_df is not None and not off_target_df.is_empty():
+                if compute_qc:
+                    from metadarkmatter.core.classification.qc import (
+                        QCMetrics,
+                        compute_pre_qc,
+                    )
+                    qc = compute_pre_qc(raw_df, filtered_df, self.ani_matrix, self.config)
+                    return off_target_df, qc
+                return off_target_df
             empty = self._empty_dataframe()
             if compute_qc:
                 from metadarkmatter.core.classification.qc import (
@@ -837,6 +944,29 @@ class VectorizedClassifier:
         ])
 
         classification_result = result.select(base_columns)
+
+        # Add family validation columns if active
+        if family_validation_active and family_metrics_df is not None:
+            family_cols = family_metrics_df.select([
+                pl.col("qseqid"),
+                "family_bitscore_ratio",
+                "family_identity_gap",
+                "in_family_hit_fraction",
+                "external_best_genome",
+                "external_best_identity",
+            ])
+            classification_result = classification_result.join(
+                family_cols,
+                left_on="read_id",
+                right_on="qseqid",
+                how="left",
+            )
+
+            if off_target_df is not None and not off_target_df.is_empty():
+                classification_result = pl.concat(
+                    [classification_result, off_target_df],
+                    how="diagonal_relaxed",
+                )
 
         if compute_qc:
             from metadarkmatter.core.classification.qc import (
