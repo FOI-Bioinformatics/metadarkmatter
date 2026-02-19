@@ -487,6 +487,27 @@ def classify(
             "p_novel_genus, p_ambiguous) rather than hard category labels."
         ),
     ),
+    target_family: str | None = typer.Option(
+        None,
+        "--target-family",
+        help=(
+            "Target taxonomic family for family validation (e.g., 'f__Francisellaceae'). "
+            "Enables off-target detection: reads with better hits outside the ANI matrix "
+            "are classified as Off-target. If not set but --metadata is provided, the "
+            "most common family is inferred."
+        ),
+    ),
+    family_ratio_threshold: float = typer.Option(
+        0.8,
+        "--family-ratio-threshold",
+        help=(
+            "Bitscore ratio threshold for off-target detection. "
+            "Reads with best_in_family / best_overall bitscore below this value "
+            "are classified as Off-target. Default 0.8."
+        ),
+        min=0.0,
+        max=1.0,
+    ),
     quiet: bool = typer.Option(
         False,
         "--quiet",
@@ -712,6 +733,8 @@ def classify(
                 coverage_weight_strength=coverage_weight_strength,
                 uncertainty_mode=uncertainty_mode_lower,
                 single_hit_uncertainty_threshold=single_hit_uncertainty_threshold,
+                target_family=target_family,
+                family_ratio_threshold=family_ratio_threshold,
             )
     else:
         config = ScoringConfig(
@@ -723,6 +746,8 @@ def classify(
             coverage_weight_strength=coverage_weight_strength,
             uncertainty_mode=uncertainty_mode_lower,
             single_hit_uncertainty_threshold=single_hit_uncertainty_threshold,
+            target_family=target_family,
+            family_ratio_threshold=family_ratio_threshold,
         )
 
     # Log alignment filter settings if non-default
@@ -816,6 +841,21 @@ def classify(
         out.print(
             f"[green]Loaded metadata for {genome_metadata.genome_count} genomes "
             f"({genome_metadata.species_count} species)[/green]\n"
+        )
+
+    # Infer target family from metadata if not explicitly provided
+    if target_family is None and genome_metadata is not None:
+        inferred = genome_metadata.infer_target_family()
+        if inferred:
+            target_family = inferred
+            out.print(f"[dim]Inferred target family from metadata: {target_family}[/dim]")
+            # Update config with inferred family
+            config = config.model_copy(update={"target_family": target_family})
+
+    if config.target_family:
+        out.print(
+            f"[cyan]Family validation: target={config.target_family}, "
+            f"threshold={config.family_ratio_threshold}[/cyan]\n"
         )
 
     # Load or generate ID mapping for external BLAST results
