@@ -78,6 +78,7 @@ CATEGORY_NOVEL_GENUS = "Novel Genus"
 CATEGORY_CONSERVED_REGION = "Conserved Region"
 CATEGORY_AMBIGUOUS = "Ambiguous"
 CATEGORY_UNCLASSIFIED = "Unclassified"
+CATEGORY_OFF_TARGET = "Off-target"
 
 # =============================================================================
 # Novelty Index Thresholds (percentage divergence from reference)

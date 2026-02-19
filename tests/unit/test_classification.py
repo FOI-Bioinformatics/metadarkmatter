@@ -42,6 +42,15 @@ class TestTaxonomicCall:
         assert isinstance(TaxonomicCall.KNOWN_SPECIES, str)
         assert TaxonomicCall.KNOWN_SPECIES == "Known Species"
 
+    def test_off_target_value(self):
+        """Off-target should have correct string value."""
+        assert TaxonomicCall.OFF_TARGET.value == "Off-target"
+
+    def test_off_target_diversity_status(self):
+        """Off-target should map to Uncertain diversity status."""
+        from metadarkmatter.models.classification import TAXONOMIC_TO_DIVERSITY
+        assert TAXONOMIC_TO_DIVERSITY["Off-target"] == "Uncertain"
+
     def test_all_values_unique(self):
         """All enum values should be unique."""
         values = [tc.value for tc in TaxonomicCall]
@@ -89,6 +98,23 @@ class TestReadClassification:
             num_ambiguous_hits=5,
             taxonomic_call=TaxonomicCall.NOVEL_GENUS,
         )
+
+    @pytest.fixture
+    def off_target_classification(self):
+        """Classification result for off-target read."""
+        return ReadClassification(
+            read_id="read_off",
+            best_match_genome="GCF_999999999.1",
+            top_hit_identity=85.0,
+            novelty_index=15.0,
+            placement_uncertainty=0.0,
+            num_ambiguous_hits=1,
+            taxonomic_call=TaxonomicCall.OFF_TARGET,
+        )
+
+    def test_off_target_is_not_novel(self, off_target_classification):
+        """Off-target reads should not be flagged as novel."""
+        assert not off_target_classification.is_novel
 
     def test_create_valid_classification(self, known_species_classification):
         """Should create ReadClassification from valid data."""
