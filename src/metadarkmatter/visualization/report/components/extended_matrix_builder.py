@@ -150,27 +150,6 @@ def build_extended_similarity_matrix(
     return extended, labels, is_novel_mask
 
 
-# Backwards compatibility alias
-def build_extended_ani_matrix(
-    ani_matrix: pl.DataFrame,
-    novel_clusters: list[NovelCluster],
-    genome_labels_map: dict[str, str],
-    default_ani: float = 70.0,
-    max_references: int = 50,
-    max_clusters: int = 20,
-) -> tuple[np.ndarray, list[str], list[bool]]:
-    """Build extended ANI matrix. Alias for build_extended_similarity_matrix with ANI settings."""
-    return build_extended_similarity_matrix(
-        similarity_matrix=ani_matrix,
-        novel_clusters=novel_clusters,
-        genome_labels_map=genome_labels_map,
-        similarity_type="ANI",
-        default_value=default_ani,
-        max_references=max_references,
-        max_clusters=max_clusters,
-    )
-
-
 def _build_similarity_dict(
     genomes: list[str],
     matrix: np.ndarray,
@@ -197,16 +176,6 @@ def _build_similarity_dict(
                 sim_dict[(g1, g2)] = float(val)
 
     return sim_dict
-
-
-# Backwards compatibility alias
-def _build_ani_dict(
-    genomes: list[str],
-    matrix: np.ndarray,
-    default_ani: float,
-) -> dict[tuple[str, str], float]:
-    """Build ANI lookup dictionary. Alias for _build_similarity_dict."""
-    return _build_similarity_dict(genomes, matrix, default_ani)
 
 
 def estimate_novel_to_reference_similarity(
@@ -266,19 +235,6 @@ def estimate_novel_to_reference_similarity(
     return max(default_value, min(100.0, estimated))
 
 
-# Backwards compatibility alias
-def estimate_novel_to_reference_ani(
-    cluster: NovelCluster,
-    ref_genome: str,
-    ani_dict: dict[tuple[str, str], float],
-    default_ani: float = 70.0,
-) -> float:
-    """Estimate ANI between novel cluster and reference. Alias for estimate_novel_to_reference_similarity."""
-    return estimate_novel_to_reference_similarity(
-        cluster, ref_genome, ani_dict, default_ani, is_aai=False
-    )
-
-
 def estimate_novel_to_novel_similarity(
     cluster1: NovelCluster,
     cluster2: NovelCluster,
@@ -328,19 +284,6 @@ def estimate_novel_to_novel_similarity(
     estimated = 100.0 - combined
 
     return max(default_value, min(100.0, estimated))
-
-
-# Backwards compatibility alias
-def estimate_novel_to_novel_ani(
-    cluster1: NovelCluster,
-    cluster2: NovelCluster,
-    ani_dict: dict[tuple[str, str], float],
-    default_ani: float = 70.0,
-) -> float:
-    """Estimate ANI between two novel clusters. Alias for estimate_novel_to_novel_similarity."""
-    return estimate_novel_to_novel_similarity(
-        cluster1, cluster2, ani_dict, default_ani, is_aai=False
-    )
 
 
 def select_relevant_references(
@@ -411,16 +354,3 @@ def select_relevant_references(
 
     # Return in original order for consistency
     return [g for g in all_genomes if g in selected]
-
-
-def get_cluster_label(cluster: NovelCluster) -> str:
-    """
-    Generate a display label for a novel cluster.
-
-    Args:
-        cluster: NovelCluster object
-
-    Returns:
-        Formatted label string
-    """
-    return f"[*] {cluster.cluster_id}: {cluster.suggested_name} ({cluster.read_count} reads)"
