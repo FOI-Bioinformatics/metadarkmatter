@@ -511,15 +511,15 @@ If `--target-family` is not provided but `--metadata` is, the most common family
 
 ### Threshold Sensitivity Analysis
 
-Assess whether classification results are robust to threshold choice:
+Assess whether classification results are robust to threshold choice using the library API:
 
-```bash
-# Run sensitivity analysis
-metadarkmatter score sensitivity --alignment sample.blast.tsv.gz --ani ani.csv \
-    --output sensitivity.json
+```python
+from metadarkmatter.core.classification.sensitivity import run_sensitivity_analysis
+
+results = run_sensitivity_analysis(classifications_df, config)
 ```
 
-Sweeps the novelty/uncertainty thresholds across a range and reports how classification counts change at each point.
+Sweeps the novelty/uncertainty thresholds across a configurable range and reports how classification counts change at each point. This is available as a programmatic API, not a CLI command.
 
 ### Combined Advanced Options
 

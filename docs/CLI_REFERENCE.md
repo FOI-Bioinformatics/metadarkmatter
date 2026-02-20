@@ -404,15 +404,32 @@ Classify metagenomic reads from an alignment file (BLAST or MMseqs2).
 
 When `--target-family` is provided, the classifier partitions BLAST hits into in-family (present in the ANI matrix) and external hits, then flags reads whose best in-family bitscore is substantially lower than their best overall bitscore. If `--target-family` is omitted but `--metadata` is provided, the most common family is inferred automatically.
 
+#### Advanced Classification Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--bayesian` | FLAG | False | Add Bayesian posterior probability columns to output |
+| `--adaptive-thresholds` | FLAG | False | Detect species boundary from ANI matrix via GMM (requires scikit-learn) |
+| `--qc-output` | PATH | None | Output path for QC metrics JSON |
+| `--uncertainty-mode` | TEXT | second | Uncertainty calculation: 'second' (second-best genome) or 'max' (maximum ANI to any competing genome) |
+
+**Bayesian Confidence (`--bayesian`):** Adds 6 columns to the output: `p_known_species`, `p_novel_species`, `p_novel_genus`, `p_ambiguous`, `bayesian_category`, and `posterior_entropy`. Posterior probabilities are computed via 2D Gaussian likelihoods over novelty and uncertainty dimensions. Shannon entropy provides a single-scalar confidence metric (0 = confident, 2.0 = uniform across categories). See [METHODS.md](METHODS.md) for detailed formulas.
+
+**Adaptive Thresholds (`--adaptive-thresholds`):** Fits a 2-component Gaussian Mixture Model to the ANI matrix distribution to detect the natural species boundary. Overrides the default `novelty_known_max` threshold with the detected value (clamped to 80-99% ANI). Falls back to the default 96% threshold if the GMM does not converge. Requires scikit-learn: `pip install metadarkmatter[adaptive]`.
+
+**QC Metrics (`--qc-output`):** Writes a JSON file with pre-classification metrics (filter rate, genome coverage, single-hit fraction, mean identity) and post-classification metrics (ambiguous fraction, low-confidence fraction). Includes automated warnings for problematic inputs (high filter rate, low genome coverage).
+
+**Uncertainty Mode (`--uncertainty-mode`):** Controls how placement uncertainty is calculated. `second` (default) uses ANI to the second-best genome only. `max` uses the maximum ANI across all competing genomes. The `second` mode is generally preferred as it better reflects the specificity of placement.
+
 #### Coverage Weighting Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `--coverage-weight-mode` | TEXT | none | Coverage weighting mode: 'none', 'linear', 'log', 'sigmoid' |
+| `--coverage-weight-mode` | TEXT | linear | Coverage weighting mode: 'none', 'linear', 'log', 'sigmoid' |
 | `--coverage-weight-strength` | FLOAT | 0.5 | Coverage weight strength (0.0-1.0) |
 
 **Coverage Weighting Modes:**
-- `none` (default): Use raw bitscore for hit selection
+- `none`: Use raw bitscore for hit selection
 - `linear`: Gradual penalty for low coverage
 - `log`: Rewards any coverage, diminishing returns
 - `sigmoid`: Sharp threshold around 60% coverage
@@ -423,7 +440,7 @@ The `--alignment-mode` option selects threshold calibration:
 
 | Mode | Source | Thresholds |
 |------|--------|------------|
-| `nucleotide` | BLASTN output | Known: N<5%, Novel Species: 5-20%, Novel Genus: 20-25% |
+| `nucleotide` | BLASTN output | Known: N<4%, Novel Species: 4-20%, Novel Genus: 20-25% |
 | `protein` | BLASTX output | Known: N<10%, Novel Species: 10-25%, Novel Genus: 25-40% |
 
 Protein thresholds are wider because amino acid sequences diverge more slowly than nucleotide sequences.
@@ -520,6 +537,38 @@ metadarkmatter score classify \
     --target-family "f__Francisellaceae" \
     --family-ratio-threshold 0.8 \
     --output classifications.csv
+```
+
+**Bayesian Confidence**
+```bash
+metadarkmatter score classify \
+    --alignment sample.blast.tsv.gz \
+    --ani genomes.ani.csv \
+    --output sample_classifications.csv \
+    --bayesian
+```
+
+**Adaptive Thresholds with QC Output**
+```bash
+metadarkmatter score classify \
+    --alignment sample.blast.tsv.gz \
+    --ani genomes.ani.csv \
+    --output sample_classifications.csv \
+    --adaptive-thresholds \
+    --qc-output sample_qc.json
+```
+
+**Full Advanced Classification**
+```bash
+metadarkmatter score classify \
+    --alignment sample.blast.tsv.gz \
+    --ani genomes.ani.csv \
+    --metadata genome_metadata.tsv \
+    --output sample_classifications.csv \
+    --bayesian \
+    --adaptive-thresholds \
+    --qc-output sample_qc.json \
+    --target-family "f__Francisellaceae"
 ```
 
 ---

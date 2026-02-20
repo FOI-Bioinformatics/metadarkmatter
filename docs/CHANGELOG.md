@@ -2,6 +2,22 @@
 
 All notable changes to metadarkmatter are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Family validation (`--target-family`) for off-target read detection in broad-database alignments
+- New output columns for family validation: family_bitscore_ratio, family_identity_gap, in_family_hit_fraction
+
+### Changed
+
+- Codebase simplification: removed redundant code paths and consolidated classifier implementations (PR #12)
+- Unit test coverage improved from 54% to 80%
+- MMseqs2 integration tests now properly skip when MMseqs2 is not installed
+- Documentation cleanup: fixed stale references, archived completed plan documents
+
+---
+
 ## [0.2.0] - 2026-02-10
 
 ### Breaking Changes
@@ -33,7 +49,7 @@ All notable changes to metadarkmatter are documented in this file.
 - Sweeps novelty/uncertainty thresholds across configurable ranges
 - Re-classifies reads at each threshold without re-computing alignment metrics
 - New `core/classification/thresholds.py` with extracted threshold application logic
-- New `metadarkmatter score sensitivity` subcommand
+- New `core/classification/sensitivity.py` module for programmatic threshold sweep analysis
 
 **Adaptive Threshold Detection (Phase 3)**
 - New `core/classification/adaptive.py` module using Gaussian Mixture Models
@@ -61,7 +77,7 @@ All notable changes to metadarkmatter are documented in this file.
 
 ---
 
-## [Unreleased] - 2026-01-21
+## [0.1.0] - 2026-01-21
 
 ### Added
 
@@ -184,6 +200,4 @@ All notable changes to metadarkmatter are documented in this file.
 
 ## Implementation Details
 
-For detailed implementation notes, see:
-- `docs/MMSEQS2_IMPLEMENTATION_SUMMARY.md` - Complete MMseqs2 integration details
-- `docs/DOCUMENTATION_UPDATE_SUMMARY.md` - Documentation update details
+For detailed implementation notes, see the [ARCHIVED](ARCHIVED/) directory for historical design documents.

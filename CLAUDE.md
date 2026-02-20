@@ -251,9 +251,10 @@ Where `min = 1 - strength`, `max = 1 + strength`, `strength` defaults to 0.5.
 - New output columns: family_bitscore_ratio, family_identity_gap, in_family_hit_fraction
 - Key file: `core/classification/classifiers/vectorized.py`
 
-### Sensitivity Analysis (`score sensitivity` subcommand)
+### Sensitivity Analysis (library API)
 - Sweeps novelty/uncertainty thresholds across configurable range
 - Re-classifies reads at each threshold point
+- Available programmatically via `run_sensitivity_analysis()`, not as a CLI command
 - Key file: `core/classification/sensitivity.py`
 
 ### Enhanced Scoring (always on)
