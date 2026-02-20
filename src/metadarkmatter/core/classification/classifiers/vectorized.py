@@ -14,12 +14,9 @@ from typing import TYPE_CHECKING
 import numpy as np
 import polars as pl
 
+from collections.abc import Callable
+
 from metadarkmatter.core.constants import (
-    NOVELTY_KNOWN_MAX,
-    NOVELTY_NOVEL_GENUS_MIN,
-    NOVELTY_NOVEL_GENUS_MAX,
-    NOVELTY_NOVEL_SPECIES_MAX,
-    NOVELTY_NOVEL_SPECIES_MIN,
     calculate_confidence_score,
 )
 from metadarkmatter.core.io_utils import write_dataframe, write_dataframe_append
