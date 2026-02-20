@@ -163,17 +163,3 @@ class InvalidThresholdError(ConfigurationError):
             message=f"{param_name} = {value} is out of valid range [{min_val}, {max_val}]",
             suggestion=f"Set {param_name} to a value between {min_val} and {max_val}.",
         )
-
-
-class ProcessingModeError(ConfigurationError):
-    """Raised when processing mode configuration is invalid."""
-
-    def __init__(self, modes: list[str]):
-        super().__init__(
-            message=f"Multiple processing modes specified: {', '.join(modes)}",
-            suggestion=(
-                "Choose only one processing mode:\n"
-                "  --streaming : Memory-efficient for 100M+ alignments\n"
-                "  (default)   : Polars vectorized classification"
-            ),
-        )

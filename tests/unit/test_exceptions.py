@@ -14,7 +14,6 @@ from metadarkmatter.core.exceptions import (
     InvalidThresholdError,
     MalformedBlastFileError,
     MetadarkmatterError,
-    ProcessingModeError,
 )
 
 
@@ -133,12 +132,6 @@ class TestConfigurationErrors:
         assert "150" in str(error)
         assert "[0.0, 100.0]" in str(error)
 
-    def test_processing_mode_error(self):
-        """Should format mode error with available options."""
-        error = ProcessingModeError(["--streaming", "--other"])
-        assert "streaming" in str(error)
-        assert "other" in str(error)
-        assert "Choose only one" in error.suggestion
 
 
 class TestExceptionHierarchy:
