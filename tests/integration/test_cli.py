@@ -327,42 +327,6 @@ class TestScoreClassifyCommand:
         df = pl.read_parquet(output_path)
         assert len(df) > 0
 
-    def test_classify_fast_mode(self, cli_blast_file, cli_ani_file, temp_dir):
-        """--fast should use optimized classification."""
-        output_path = temp_dir / "classifications.csv"
-
-        result = runner.invoke(app, [
-            "score", "classify",
-            "--alignment", str(cli_blast_file),
-            "--ani", str(cli_ani_file),
-            "--output", str(output_path),
-            "--fast",
-        ])
-
-        assert result.exit_code == 0
-        assert output_path.exists()
-
-        df = pl.read_csv(output_path)
-        assert len(df) > 0
-
-    def test_classify_parallel_mode(self, cli_blast_file, cli_ani_file, temp_dir):
-        """--parallel should use vectorized classification."""
-        output_path = temp_dir / "classifications.csv"
-
-        result = runner.invoke(app, [
-            "score", "classify",
-            "--alignment", str(cli_blast_file),
-            "--ani", str(cli_ani_file),
-            "--output", str(output_path),
-            "--parallel",
-        ])
-
-        assert result.exit_code == 0
-        assert output_path.exists()
-
-        df = pl.read_csv(output_path)
-        assert len(df) > 0
-
     def test_classify_streaming_mode(self, cli_blast_file, cli_ani_file, temp_dir):
         """--streaming should use streaming mode for large files."""
         output_path = temp_dir / "classifications.csv"
@@ -563,59 +527,6 @@ class TestScoreClassifyErrors:
 
         assert result.exit_code != 0
 
-    def test_mutually_exclusive_fast_parallel(
-        self, cli_blast_file, cli_ani_file, temp_dir
-    ):
-        """Should error when --fast and --parallel are both specified."""
-        result = runner.invoke(app, [
-            "score", "classify",
-            "--alignment", str(cli_blast_file),
-            "--ani", str(cli_ani_file),
-            "--output", str(temp_dir / "out.csv"),
-            "--fast",
-            "--parallel",
-        ])
-
-        assert result.exit_code == 1
-        assert "mutually exclusive" in result.stdout.lower()
-
-    def test_mutually_exclusive_fast_streaming(
-        self, cli_blast_file, cli_ani_file, temp_dir
-    ):
-        """Should error when --fast and --streaming are both specified."""
-        result = runner.invoke(app, [
-            "score", "classify",
-            "--alignment", str(cli_blast_file),
-            "--ani", str(cli_ani_file),
-            "--output", str(temp_dir / "out.csv"),
-            "--fast",
-            "--streaming",
-        ])
-
-        assert result.exit_code == 1
-        assert "mutually exclusive" in result.stdout.lower()
-
-    def test_mutually_exclusive_all_three(
-        self, cli_blast_file, cli_ani_file, temp_dir
-    ):
-        """Should error when all three modes are specified."""
-        result = runner.invoke(app, [
-            "score", "classify",
-            "--alignment", str(cli_blast_file),
-            "--ani", str(cli_ani_file),
-            "--output", str(temp_dir / "out.csv"),
-            "--fast",
-            "--parallel",
-            "--streaming",
-        ])
-
-        assert result.exit_code == 1
-        assert "mutually exclusive" in result.stdout.lower()
-        # Error message should list all specified modes
-        assert "--fast" in result.stdout
-        assert "--parallel" in result.stdout
-        assert "--streaming" in result.stdout
-
     def test_low_genome_coverage_warning(self, temp_dir):
         """Should warn when BLAST genomes are mostly missing from ANI matrix."""
         # Create BLAST file with genomes NOT in ANI matrix
@@ -720,38 +631,6 @@ class TestScoreBatchCommand:
             summary = json.loads(summary_file.read_text())
             assert "total_reads" in summary
             assert summary["total_reads"] == 5
-
-    def test_batch_fast_mode(self, cli_blast_dir, cli_ani_file, temp_dir):
-        """Batch with --fast should use optimized processing."""
-        output_dir = temp_dir / "batch_output"
-
-        result = runner.invoke(app, [
-            "score", "batch",
-            "--alignment-dir", str(cli_blast_dir),
-            "--ani", str(cli_ani_file),
-            "--output-dir", str(output_dir),
-            "--pattern", "*.blast.tsv",
-            "--fast",
-        ])
-
-        assert result.exit_code == 0
-        assert len(list(output_dir.glob("*_classifications.csv"))) == 3
-
-    def test_batch_parallel_mode(self, cli_blast_dir, cli_ani_file, temp_dir):
-        """Batch with --parallel should use vectorized processing."""
-        output_dir = temp_dir / "batch_output"
-
-        result = runner.invoke(app, [
-            "score", "batch",
-            "--alignment-dir", str(cli_blast_dir),
-            "--ani", str(cli_ani_file),
-            "--output-dir", str(output_dir),
-            "--pattern", "*.blast.tsv",
-            "--parallel",
-        ])
-
-        assert result.exit_code == 0
-        assert len(list(output_dir.glob("*_classifications.csv"))) == 3
 
     def test_batch_no_matching_files(self, cli_blast_dir, cli_ani_file, temp_dir):
         """Batch should fail with error when no files match pattern."""

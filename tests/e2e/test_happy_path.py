@@ -98,48 +98,6 @@ class TestClassifyHappyPath:
 
         assert summary["total_reads"] == len(df)
 
-    def test_classification_fast_mode(
-        self,
-        standard_dataset: tuple[Path, Path],
-        run_classify: Callable,
-        e2e_temp_dir: Path,
-    ):
-        """Fast mode should produce valid output."""
-        blast_path, ani_path = standard_dataset
-
-        result = run_classify(
-            blast=blast_path,
-            ani=ani_path,
-            output_name="fast.csv",
-            fast=True,
-        )
-
-        CLIAssertions.assert_success(result)
-
-        output_path = e2e_temp_dir / "fast.csv"
-        ClassificationAssertions.assert_all_validations(output_path, min_rows=1)
-
-    def test_classification_parallel_mode(
-        self,
-        standard_dataset: tuple[Path, Path],
-        run_classify: Callable,
-        e2e_temp_dir: Path,
-    ):
-        """Parallel mode should produce valid output."""
-        blast_path, ani_path = standard_dataset
-
-        result = run_classify(
-            blast=blast_path,
-            ani=ani_path,
-            output_name="parallel.csv",
-            parallel=True,
-        )
-
-        CLIAssertions.assert_success(result)
-
-        output_path = e2e_temp_dir / "parallel.csv"
-        ClassificationAssertions.assert_all_validations(output_path, min_rows=1)
-
     def test_classification_streaming_mode(
         self,
         standard_dataset: tuple[Path, Path],
@@ -275,48 +233,6 @@ class TestBatchHappyPath:
         output_dir = e2e_temp_dir / "batch_parquet"
         parquet_files = list(output_dir.glob("*_classifications.parquet"))
         assert len(parquet_files) == 3
-
-    def test_batch_fast_mode(
-        self,
-        batch_dataset: tuple[Path, Path],
-        run_batch: Callable,
-        e2e_temp_dir: Path,
-    ):
-        """Batch with fast mode should work correctly."""
-        blast_dir, ani_path = batch_dataset
-
-        result = run_batch(
-            blast_dir=blast_dir,
-            ani=ani_path,
-            output_dir_name="batch_fast",
-            fast=True,
-        )
-
-        CLIAssertions.assert_success(result)
-
-        output_dir = e2e_temp_dir / "batch_fast"
-        output_files = list(output_dir.glob("*_classifications.csv"))
-        assert len(output_files) == 3
-
-    def test_batch_parallel_mode(
-        self,
-        batch_dataset: tuple[Path, Path],
-        run_batch: Callable,
-        e2e_temp_dir: Path,
-    ):
-        """Batch with parallel mode should work correctly."""
-        blast_dir, ani_path = batch_dataset
-
-        result = run_batch(
-            blast_dir=blast_dir,
-            ani=ani_path,
-            output_dir_name="batch_parallel",
-            parallel=True,
-        )
-
-        CLIAssertions.assert_success(result)
-        CLIAssertions.assert_output_contains(result, "vectorized")
-
 
 class TestOutputValidation:
     """Tests validating the content of classification outputs."""

@@ -135,9 +135,9 @@ class TestConfigurationErrors:
 
     def test_processing_mode_error(self):
         """Should format mode error with available options."""
-        error = ProcessingModeError(["--fast", "--parallel"])
-        assert "fast" in str(error)
-        assert "parallel" in str(error)
+        error = ProcessingModeError(["--streaming", "--other"])
+        assert "streaming" in str(error)
+        assert "other" in str(error)
         assert "Choose only one" in error.suggestion
 
 

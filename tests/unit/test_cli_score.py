@@ -190,31 +190,6 @@ class TestScoreClassifyOptions:
         # Should succeed or at least not crash on argument parsing
         assert result.exit_code == 0 or "error" not in result.output.lower()
 
-    def test_classify_parallel_mode(
-        self,
-        cli_runner,
-        temp_blast_file,
-        temp_ani_file,
-        temp_dir,
-    ):
-        """Test classify with --parallel flag."""
-        output = temp_dir / "output.csv"
-        result = cli_runner.invoke(
-            app,
-            [
-                "score",
-                "classify",
-                "--alignment",
-                str(temp_blast_file),
-                "--ani",
-                str(temp_ani_file),
-                "--parallel",
-                "--output",
-                str(output),
-            ],
-        )
-        assert result.exit_code == 0 or "error" not in result.output.lower()
-
     def test_classify_custom_preset(
         self,
         cli_runner,

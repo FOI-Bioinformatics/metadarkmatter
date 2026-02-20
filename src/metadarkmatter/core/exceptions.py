@@ -173,8 +173,7 @@ class ProcessingModeError(ConfigurationError):
             message=f"Multiple processing modes specified: {', '.join(modes)}",
             suggestion=(
                 "Choose only one processing mode:\n"
-                "  --fast      : Single-threaded optimized (~3x faster)\n"
-                "  --parallel  : Polars vectorized (~16x faster, recommended)\n"
-                "  --streaming : Memory-efficient for 100M+ alignments"
+                "  --streaming : Memory-efficient for 100M+ alignments\n"
+                "  (default)   : Polars vectorized classification"
             ),
         )
