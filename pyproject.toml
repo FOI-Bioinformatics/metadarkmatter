@@ -100,6 +100,8 @@ markers = [
     "slow: marks tests as slow",
     "integration: marks tests requiring external tools",
     "e2e: marks end-to-end tests with mock data",
+    "requires_mmseqs2: marks tests as requiring MMseqs2 installation",
+    "requires_blast: marks tests as requiring BLAST installation",
 ]
 
 [tool.coverage.run]

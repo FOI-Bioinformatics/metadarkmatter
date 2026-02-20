@@ -421,21 +421,3 @@ class TestMMseqs2vsBlastComparison:
         # Should have similar number of hits (within 20%)
         ratio = min(blast_count, mmseqs_count) / max(blast_count, mmseqs_count)
         assert ratio >= 0.8, f"Result counts should be similar: BLAST={blast_count}, MMseqs2={mmseqs_count}"
-
-
-# Pytest configuration for conditional test execution
-def pytest_configure(config):
-    """Register custom markers."""
-    config.addinivalue_line(
-        "markers",
-        "requires_mmseqs2: marks tests as requiring MMseqs2 installation",
-    )
-
-
-def pytest_collection_modifyitems(config, items):
-    """Skip tests marked requires_mmseqs2 if MMseqs2 not available."""
-    if not MMseqs2.check_available():
-        skip_mmseqs2 = pytest.mark.skip(reason="MMseqs2 not installed")
-        for item in items:
-            if "requires_mmseqs2" in item.keywords:
-                item.add_marker(skip_mmseqs2)
