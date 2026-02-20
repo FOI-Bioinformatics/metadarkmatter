@@ -421,16 +421,4 @@ class BlastResult(BaseModel):
             if weighted_score >= cutoff:
                 yield hit
 
-    def sorted_by_bitscore(self) -> BlastResult:
-        """
-        Return a new BlastResult with hits sorted by bitscore descending.
-
-        Since hits are automatically sorted on creation, this method
-        is primarily for compatibility and returns self.
-
-        Returns:
-            BlastResult with hits sorted by bitscore descending
-        """
-        return self
-
     model_config = {"frozen": True}

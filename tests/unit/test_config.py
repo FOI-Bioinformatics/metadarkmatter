@@ -1,21 +1,16 @@
 """
 Unit tests for configuration models.
 
-Tests ScoringConfig, BlastConfig, Bowtie2Config, KrakenConfig, and GlobalConfig
-including threshold validation and YAML serialization.
+Tests ScoringConfig and BlastConfig including threshold validation.
 """
 
 from __future__ import annotations
-
-from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
 from metadarkmatter.models.config import (
     BlastConfig,
-    Bowtie2Config,
-    GlobalConfig,
     ScoringConfig,
 )
 
@@ -208,147 +203,6 @@ class TestBlastConfig:
 
         with pytest.raises(ValidationError):
             config.num_threads = 8
-
-
-class TestBowtie2Config:
-    """Tests for Bowtie2Config model."""
-
-    def test_default_values(self):
-        """Default Bowtie2Config should have expected values."""
-        config = Bowtie2Config()
-
-        assert config.num_threads == 4
-        assert config.mode == "local"
-        assert config.very_sensitive is True
-        assert config.max_alignments == 500
-
-    def test_mode_local(self):
-        """Should accept 'local' mode."""
-        config = Bowtie2Config(mode="local")
-        assert config.mode == "local"
-
-    def test_mode_end_to_end(self):
-        """Should accept 'end-to-end' mode."""
-        config = Bowtie2Config(mode="end-to-end")
-        assert config.mode == "end-to-end"
-
-    def test_invalid_mode_rejected(self):
-        """Invalid mode should be rejected."""
-        with pytest.raises(ValidationError):
-            Bowtie2Config(mode="invalid")
-
-    def test_max_alignments_min_1(self):
-        """max_alignments should be at least 1."""
-        with pytest.raises(ValidationError):
-            Bowtie2Config(max_alignments=0)
-
-    def test_config_is_frozen(self):
-        """Bowtie2Config should be immutable."""
-        config = Bowtie2Config()
-
-        with pytest.raises(ValidationError):
-            config.mode = "end-to-end"
-
-
-class TestGlobalConfig:
-    """Tests for GlobalConfig settings model."""
-
-    def test_default_values(self):
-        """Default GlobalConfig should have expected values."""
-        config = GlobalConfig()
-
-        assert config.project_name == "metadarkmatter_analysis"
-        assert config.num_threads == 4
-        assert config.verbose is False
-
-    def test_nested_scoring_config(self):
-        """Should include nested ScoringConfig."""
-        config = GlobalConfig()
-
-        assert isinstance(config.scoring, ScoringConfig)
-        assert config.scoring.bitscore_threshold_pct == 95.0
-
-    def test_nested_blast_config(self):
-        """Should include nested BlastConfig."""
-        config = GlobalConfig()
-
-        assert isinstance(config.blast, BlastConfig)
-        assert config.blast.num_threads == 4
-
-    def test_nested_bowtie2_config(self):
-        """Should include nested Bowtie2Config."""
-        config = GlobalConfig()
-
-        assert isinstance(config.bowtie2, Bowtie2Config)
-        assert config.bowtie2.mode == "local"
-
-    def test_kraken_config_optional(self):
-        """KrakenConfig should be optional (None by default)."""
-        config = GlobalConfig()
-
-        assert config.kraken is None
-
-    def test_custom_project_name(self):
-        """Should accept custom project name."""
-        config = GlobalConfig(project_name="my_analysis")
-
-        assert config.project_name == "my_analysis"
-
-    def test_output_dir_created(self, temp_dir):
-        """output_dir should be created if it doesn't exist."""
-        new_dir = temp_dir / "new_output"
-        config = GlobalConfig(output_dir=new_dir)
-
-        assert new_dir.exists()
-        assert config.output_dir == new_dir
-
-    def test_to_yaml(self, temp_dir):
-        """to_yaml should write valid YAML file."""
-        config = GlobalConfig(
-            project_name="test_project",
-            output_dir=temp_dir / "output",
-            num_threads=8,
-        )
-        yaml_path = temp_dir / "config.yaml"
-        config.to_yaml(yaml_path)
-
-        assert yaml_path.exists()
-        content = yaml_path.read_text()
-        assert "test_project" in content
-        assert "num_threads: 8" in content
-
-    def test_from_yaml(self, temp_dir):
-        """from_yaml should load config from YAML file."""
-        # Create a config and save it
-        original = GlobalConfig(
-            project_name="yaml_test",
-            output_dir=temp_dir / "yaml_output",
-            num_threads=12,
-            verbose=True,
-        )
-        yaml_path = temp_dir / "config.yaml"
-        original.to_yaml(yaml_path)
-
-        # Load it back
-        loaded = GlobalConfig.from_yaml(yaml_path)
-
-        assert loaded.project_name == "yaml_test"
-        assert loaded.num_threads == 12
-        assert loaded.verbose is True
-
-    def test_yaml_roundtrip_preserves_nested_config(self, temp_dir):
-        """YAML roundtrip should preserve nested config values."""
-        original = GlobalConfig(
-            project_name="nested_test",
-            output_dir=temp_dir / "nested_output",
-        )
-        yaml_path = temp_dir / "config.yaml"
-        original.to_yaml(yaml_path)
-        loaded = GlobalConfig.from_yaml(yaml_path)
-
-        assert loaded.scoring.bitscore_threshold_pct == original.scoring.bitscore_threshold_pct
-        assert loaded.blast.max_target_seqs == original.blast.max_target_seqs
-        assert loaded.bowtie2.mode == original.bowtie2.mode
 
 
 class TestScoringConfigBoundaries:

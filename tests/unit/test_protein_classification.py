@@ -32,9 +32,41 @@ from metadarkmatter.core.protein_constants import (
     PROTEIN_NOVELTY_NOVEL_SPECIES_MIN,
     PROTEIN_UNCERTAINTY_CONFIDENT_MAX,
     PROTEIN_UNCERTAINTY_CONSERVED_MIN,
-    calculate_protein_confidence_score,
 )
 from metadarkmatter.models.config import ScoringConfig
+
+
+def _calculate_protein_confidence_score(
+    novelty_index: float,
+    placement_uncertainty: float,
+    num_ambiguous_hits: int,
+    identity_gap: float | None,
+    top_hit_identity: float,
+    taxonomic_call: str,
+    novelty_known_max: float = PROTEIN_NOVELTY_KNOWN_MAX,
+    novelty_novel_species_max: float = PROTEIN_NOVELTY_NOVEL_SPECIES_MAX,
+    novelty_novel_genus_max: float = PROTEIN_NOVELTY_NOVEL_GENUS_MAX,
+    uncertainty_confident_max: float = PROTEIN_UNCERTAINTY_CONFIDENT_MAX,
+) -> float:
+    """Test helper: calculate confidence score with protein-specific parameters."""
+    return calculate_confidence_score(
+        novelty_index=novelty_index,
+        placement_uncertainty=placement_uncertainty,
+        num_ambiguous_hits=num_ambiguous_hits,
+        identity_gap=identity_gap,
+        top_hit_identity=top_hit_identity,
+        taxonomic_call=taxonomic_call,
+        novelty_known_max=novelty_known_max,
+        novelty_novel_species_max=novelty_novel_species_max,
+        novelty_novel_genus_max=novelty_novel_genus_max,
+        uncertainty_confident_max=uncertainty_confident_max,
+        margin_divisor_known=PROTEIN_CONFIDENCE_MARGIN_DIVISOR_KNOWN,
+        margin_divisor_novel_species=PROTEIN_CONFIDENCE_MARGIN_DIVISOR_NOVEL_SPECIES,
+        margin_divisor_novel_genus=PROTEIN_CONFIDENCE_MARGIN_DIVISOR_NOVEL_GENUS,
+        identity_gap_thresholds=PROTEIN_CONFIDENCE_IDENTITY_GAP_THRESHOLDS,
+        identity_score_base=PROTEIN_CONFIDENCE_IDENTITY_SCORE_BASE,
+        identity_score_range=PROTEIN_CONFIDENCE_IDENTITY_SCORE_RANGE,
+    )
 
 
 class TestProteinConstants:
@@ -131,7 +163,7 @@ class TestProteinConfidenceScore:
 
     def test_known_species_high_confidence(self) -> None:
         """Known species with clear margin should have high confidence."""
-        score = calculate_protein_confidence_score(
+        score = _calculate_protein_confidence_score(
             novelty_index=3.0,  # Well below 10% threshold
             placement_uncertainty=1.0,  # Low uncertainty
             num_ambiguous_hits=1,
@@ -143,7 +175,7 @@ class TestProteinConfidenceScore:
 
     def test_novel_species_moderate_confidence(self) -> None:
         """Novel species in middle of range should have moderate confidence."""
-        score = calculate_protein_confidence_score(
+        score = _calculate_protein_confidence_score(
             novelty_index=17.5,  # Middle of 10-25% range
             placement_uncertainty=2.0,
             num_ambiguous_hits=2,
@@ -155,7 +187,7 @@ class TestProteinConfidenceScore:
 
     def test_novel_genus_moderate_confidence(self) -> None:
         """Novel genus classification should have moderate confidence."""
-        score = calculate_protein_confidence_score(
+        score = _calculate_protein_confidence_score(
             novelty_index=32.5,  # Middle of 25-40% range
             placement_uncertainty=3.0,
             num_ambiguous_hits=3,
@@ -167,7 +199,7 @@ class TestProteinConfidenceScore:
 
     def test_ambiguous_low_confidence(self) -> None:
         """Ambiguous classifications should have low confidence."""
-        score = calculate_protein_confidence_score(
+        score = _calculate_protein_confidence_score(
             novelty_index=15.0,
             placement_uncertainty=8.0,  # High uncertainty
             num_ambiguous_hits=10,
@@ -305,7 +337,7 @@ class TestConfidenceScoreConsistency:
     def test_protein_confidence_score_delegates_correctly(self) -> None:
         """Protein confidence score should delegate to parameterized nucleotide function."""
         # Calculate using protein-specific function
-        protein_score = calculate_protein_confidence_score(
+        protein_score = _calculate_protein_confidence_score(
             novelty_index=5.0,
             placement_uncertainty=2.0,
             num_ambiguous_hits=2,
@@ -353,7 +385,7 @@ class TestConfidenceScoreConsistency:
         nuc_score = calculate_confidence_score(**inputs)
 
         # Protein mode with protein scaling
-        prot_score = calculate_protein_confidence_score(**inputs)
+        prot_score = _calculate_protein_confidence_score(**inputs)
 
         # Scores should be different due to different scaling parameters
         # Note: The exact difference depends on the specific inputs and thresholds

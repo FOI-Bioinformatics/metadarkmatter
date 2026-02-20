@@ -13,9 +13,6 @@ from metadarkmatter.models.classification import (
 )
 from metadarkmatter.models.config import (
     BlastConfig,
-    Bowtie2Config,
-    GlobalConfig,
-    KrakenConfig,
     ScoringConfig,
 )
 from metadarkmatter.models.genomes import AccessionList, GenomeAccession
@@ -25,10 +22,7 @@ __all__ = [
     "BlastConfig",
     "BlastHit",
     "BlastResult",
-    "Bowtie2Config",
     "GenomeAccession",
-    "GlobalConfig",
-    "KrakenConfig",
     "ReadClassification",
     "ScoringConfig",
     "TaxonomicCall",

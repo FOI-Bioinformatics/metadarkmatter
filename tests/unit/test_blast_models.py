@@ -385,11 +385,3 @@ class TestBlastResultAmbiguousHits:
         # That's hits 0-12 (bitscores 250-238)
         assert len(ambiguous) == 13
 
-    def test_sorted_by_bitscore_returns_self(self, multi_hit_blast_data):
-        """sorted_by_bitscore should return self (already sorted)."""
-        hits = tuple(BlastHit(**d) for d in multi_hit_blast_data)
-        result = BlastResult(read_id="read_001", hits=hits)
-
-        sorted_result = result.sorted_by_bitscore()
-
-        assert sorted_result is result
