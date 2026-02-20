@@ -1,13 +1,12 @@
 """
 Cross-classifier equivalence tests.
 
-Verifies that base (ANIWeightedClassifier), vectorized (VectorizedClassifier),
-and parallel (ParallelClassifier) classifiers produce identical taxonomic_call
-values for the same input data.
+Verifies that base (ANIWeightedClassifier) and vectorized (VectorizedClassifier)
+classifiers produce identical taxonomic_call values for the same input data.
 
 confidence_score is excluded from comparison because the vectorized classifier
 uses a different scoring approach (alignment-length + bitscore-gap based)
-compared to the base/parallel classifiers (novelty-margin based).
+compared to the base classifier (novelty-margin based).
 """
 
 from __future__ import annotations
@@ -20,7 +19,6 @@ import pytest
 
 from metadarkmatter.core.classification.ani_matrix import ANIMatrix
 from metadarkmatter.core.classification.classifiers.base import ANIWeightedClassifier
-from metadarkmatter.core.classification.classifiers.parallel import ParallelClassifier
 from metadarkmatter.core.classification.classifiers.vectorized import VectorizedClassifier
 from metadarkmatter.models.config import ScoringConfig
 
@@ -144,7 +142,7 @@ COMPARE_COLUMNS = [
 
 
 class TestClassifierEquivalence:
-    """Verify base, vectorized, and parallel classifiers agree on taxonomic calls."""
+    """Verify base and vectorized classifiers agree on taxonomic calls."""
 
     def test_base_vs_vectorized(self, blast_file, ani_matrix, config):
         base_clf = ANIWeightedClassifier(ani_matrix=ani_matrix, config=config)
@@ -168,29 +166,6 @@ class TestClassifierEquivalence:
                 f"Column '{col}' differs between base and vectorized:\n"
                 f"  base:       {base_vals}\n"
                 f"  vectorized: {vec_vals}"
-            )
-
-    def test_base_vs_parallel(self, blast_file, ani_matrix, config):
-        base_clf = ANIWeightedClassifier(ani_matrix=ani_matrix, config=config)
-        par_clf = ParallelClassifier(ani_matrix=ani_matrix, config=config, num_workers=1)
-
-        base_df = base_clf.classify_to_dataframe(blast_file)
-        par_df = par_clf.classify_file(blast_file)
-
-        base_sorted = base_df.sort("read_id")
-        par_sorted = par_df.sort("read_id")
-
-        assert base_sorted["read_id"].to_list() == par_sorted["read_id"].to_list(), (
-            "Classifiers returned different read sets"
-        )
-
-        for col in ["taxonomic_call", "best_match_genome", "novelty_index"]:
-            base_vals = base_sorted[col].to_list()
-            par_vals = par_sorted[col].to_list()
-            assert base_vals == par_vals, (
-                f"Column '{col}' differs between base and parallel:\n"
-                f"  base:     {base_vals}\n"
-                f"  parallel: {par_vals}"
             )
 
 

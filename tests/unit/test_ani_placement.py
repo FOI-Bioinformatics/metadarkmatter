@@ -19,7 +19,6 @@ import pytest
 from metadarkmatter.core.ani_placement import (
     ANIMatrix,
     ANIWeightedClassifier,
-    SparseANIMatrix,
     VectorizedClassifier,
 )
 from metadarkmatter.models.blast import BlastHit, BlastResult
@@ -142,68 +141,6 @@ class TestANIMatrix:
 
         assert isinstance(mem, int)
         assert mem > 0
-
-
-class TestSparseANIMatrix:
-    """Tests for SparseANIMatrix class."""
-
-    def test_create_from_dict(self, small_ani_dict):
-        """Should create SparseANIMatrix from nested dictionary."""
-        matrix = SparseANIMatrix(small_ani_dict)
-
-        assert len(matrix) == 3
-
-    def test_get_ani_same_genome(self, small_ani_dict):
-        """get_ani with same genome should return 100.0."""
-        matrix = SparseANIMatrix(small_ani_dict)
-
-        ani = matrix.get_ani("GCF_000123456.1", "GCF_000123456.1")
-
-        assert ani == 100.0
-
-    def test_get_ani_known_pair(self, small_ani_dict):
-        """get_ani should return correct value for stored pairs."""
-        matrix = SparseANIMatrix(small_ani_dict)
-
-        ani = matrix.get_ani("GCF_000123456.1", "GCF_000789012.1")
-
-        assert ani == 95.5
-
-    def test_get_ani_below_threshold(self, small_ani_dict):
-        """get_ani should return default for pairs below min_ani."""
-        matrix = SparseANIMatrix(small_ani_dict, min_ani=90.0, default_ani=70.0)
-
-        # GCF_000123456.1 <-> GCA_000111222.1 has ANI 80.0, below threshold
-        ani = matrix.get_ani("GCF_000123456.1", "GCA_000111222.1")
-
-        assert ani == 70.0  # Default value
-
-    def test_default_ani_for_unknown(self, small_ani_dict):
-        """Unknown genome pairs should return default ANI."""
-        matrix = SparseANIMatrix(small_ani_dict, default_ani=65.0)
-
-        ani = matrix.get_ani("GCF_000123456.1", "unknown_genome")
-
-        assert ani == 65.0
-
-    def test_density(self, small_ani_dict):
-        """density should return fraction of non-default values."""
-        matrix = SparseANIMatrix(small_ani_dict, min_ani=75.0)
-
-        density = matrix.density()
-
-        # Density can exceed 1.0 if matrix stores both (i,j) and (j,i)
-        # or if implementation differs from expected upper triangle only
-        assert density >= 0.0
-
-    def test_memory_usage_sparse(self, small_ani_dict):
-        """Sparse matrix should report lower memory for sparse data."""
-        sparse = SparseANIMatrix(small_ani_dict, min_ani=90.0)
-        dense = ANIMatrix(small_ani_dict)
-
-        # For small matrix, difference may not be significant
-        assert sparse.memory_usage_bytes() > 0
-        assert dense.memory_usage_bytes() > 0
 
 
 class TestANIWeightedClassifier:

@@ -46,7 +46,7 @@ class VectorizedClassifier:
         - Uses Polars' internal parallelism (no multiprocessing overhead)
         - Memory usage: ~1.5x input file size for in-memory operations
         - For 10M reads with 10 hits each: ~15GB memory
-        - Use ParallelClassifier for memory-constrained systems
+        - Consider chunked processing for memory-constrained systems
 
     Memory trade-offs:
         - Loads entire BLAST file into memory for vectorized operations
