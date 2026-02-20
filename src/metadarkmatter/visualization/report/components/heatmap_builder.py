@@ -7,7 +7,7 @@ statistics cards for genome similarity matrices (ANI and AAI).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -32,6 +32,70 @@ class SimilarityStats:
     same_category_count: int  # e.g., same species for ANI
     boundary_count: int
     different_category_count: int
+
+
+@dataclass
+class HeatmapConfig:
+    """Configuration for similarity heatmap rendering."""
+
+    metric_name: str
+    default_value: float
+    same_threshold: float
+    boundary_lower: float
+    colorscale: list[list]
+    zmin: float
+    zmax: float = 100.0
+    tick_vals: list[float] = field(default_factory=list)
+    tick_text: list[str] = field(default_factory=list)
+    same_label: str = ""
+    boundary_label: str = ""
+    different_label: str = ""
+
+
+ANI_HEATMAP_CONFIG = HeatmapConfig(
+    metric_name="ANI",
+    default_value=70.0,
+    same_threshold=95.0,
+    boundary_lower=93.0,
+    colorscale=[
+        [0.0, "#4575b4"],    # 70% - Blue (distant/different genera)
+        [0.167, "#74add1"],  # 75%
+        [0.333, "#abd9e9"],  # 80%
+        [0.5, "#ffffbf"],    # 85% - Yellow (genus boundary)
+        [0.667, "#fee090"],  # 90%
+        [0.833, "#fdae61"],  # 95% - Orange (species boundary)
+        [1.0, "#d73027"],    # 100% - Red (identical/same species)
+    ],
+    zmin=70,
+    tick_vals=[70, 75, 80, 85, 90, 95, 100],
+    tick_text=["70", "75", "80", "85 (genus)", "90", "95 (species)", "100"],
+    same_label="Same species (ANI >= 95%)",
+    boundary_label="Boundary zone (ANI 93-95%)",
+    different_label="Different species (ANI < 93%)",
+)
+
+AAI_HEATMAP_CONFIG = HeatmapConfig(
+    metric_name="AAI",
+    default_value=40.0,
+    same_threshold=65.0,
+    boundary_lower=58.0,
+    colorscale=[
+        [0.0, "#313695"],     # 40% - Dark blue (very distant)
+        [0.167, "#4575b4"],   # 50%
+        [0.333, "#abd9e9"],   # 60%
+        [0.417, "#ffffbf"],   # 65% - Yellow (genus boundary)
+        [0.5, "#fee090"],     # 70%
+        [0.583, "#fdae61"],   # 75%
+        [0.75, "#f46d43"],    # 85%
+        [1.0, "#a50026"],     # 100% - Dark red (identical)
+    ],
+    zmin=40,
+    tick_vals=[40, 50, 60, 65, 70, 80, 90, 100],
+    tick_text=["40", "50", "60", "65 (genus)", "70", "80", "90", "100"],
+    same_label="Same genus (AAI >= 65%)",
+    boundary_label="Boundary zone (AAI 58-65%)",
+    different_label="Different genera (AAI < 58%)",
+)
 
 
 def compute_similarity_stats(
@@ -79,6 +143,96 @@ def compute_similarity_stats(
     )
 
 
+def _build_similarity_heatmap(
+    matrix: pl.DataFrame,
+    genome_labels_map: dict[str, str],
+    config: HeatmapConfig,
+) -> tuple[go.Figure, SimilarityStats, bool]:
+    """
+    Build a similarity heatmap with hierarchical clustering.
+
+    Shared implementation for both ANI and AAI heatmaps.
+
+    Args:
+        matrix: Similarity matrix DataFrame (wide format)
+        genome_labels_map: Mapping from accession to display label
+        config: Heatmap rendering configuration
+
+    Returns:
+        Tuple of (plotly_figure, statistics, clustering_succeeded)
+    """
+    # Extract genome names and matrix data
+    matrix_cols = matrix.columns
+    if "genome" in matrix_cols:
+        genome_accessions = matrix["genome"].to_list()
+        z_data = matrix.drop("genome").to_numpy()
+    else:
+        genome_accessions = list(matrix_cols)
+        z_data = matrix.to_numpy()
+
+    # Fill missing values
+    z_filled = np.where(z_data == 0.0, config.default_value, z_data)
+
+    # Hierarchical clustering
+    z_clustered, genome_accessions_ordered, clustering_succeeded = (
+        perform_hierarchical_clustering(z_filled, genome_accessions, config.default_value)
+    )
+
+    # Create labels
+    genome_labels = [
+        genome_labels_map.get(acc, acc) for acc in genome_accessions_ordered
+    ]
+
+    # Compute statistics
+    stats = compute_similarity_stats(
+        z_clustered,
+        default_value=config.default_value,
+        same_threshold=config.same_threshold,
+        boundary_lower=config.boundary_lower,
+    )
+
+    # Convert to Python list for JSON serialization
+    z_list = [[float(v) for v in row] for row in z_clustered]
+
+    # Create heatmap
+    fig = go.Figure(
+        data=go.Heatmap(
+            z=z_list,
+            x=genome_labels,
+            y=genome_labels,
+            colorscale=config.colorscale,
+            zmin=config.zmin,
+            zmax=config.zmax,
+            colorbar=dict(
+                title=f"{config.metric_name} (%)",
+                tickvals=config.tick_vals,
+                ticktext=config.tick_text,
+            ),
+            hovertemplate=(
+                "Genome 1: %{y}<br>"
+                "Genome 2: %{x}<br>"
+                f"{config.metric_name}: %{{z:.1f}}%<extra></extra>"
+            ),
+        )
+    )
+
+    # Conditional title
+    title = f"{config.metric_name} Matrix Heatmap"
+    if clustering_succeeded:
+        title += " (Hierarchically Clustered)"
+
+    fig.update_layout(
+        title=title,
+        width=1000,
+        height=900,
+        template="plotly_white",
+        xaxis=dict(tickangle=45, tickfont=dict(size=8)),
+        yaxis=dict(tickfont=dict(size=8)),
+    )
+
+    return fig, stats, clustering_succeeded
+
+
 def build_ani_heatmap(
     ani_matrix: pl.DataFrame,
     genome_labels_map: dict[str, str],
@@ -95,87 +249,7 @@ def build_ani_heatmap(
     Returns:
         Tuple of (plotly_figure, statistics, clustering_succeeded)
     """
-    # Extract genome names and matrix data
-    matrix_cols = ani_matrix.columns
-    if "genome" in matrix_cols:
-        genome_accessions = ani_matrix["genome"].to_list()
-        z_data = ani_matrix.drop("genome").to_numpy()
-    else:
-        genome_accessions = list(matrix_cols)
-        z_data = ani_matrix.to_numpy()
-
-    # Fill missing values
-    z_filled = np.where(z_data == 0.0, default_ani, z_data)
-
-    # Hierarchical clustering
-    z_clustered, genome_accessions_ordered, clustering_succeeded = (
-        perform_hierarchical_clustering(z_filled, genome_accessions, default_ani)
-    )
-
-    # Create labels
-    genome_labels = [
-        genome_labels_map.get(acc, acc) for acc in genome_accessions_ordered
-    ]
-
-    # Compute statistics
-    stats = compute_similarity_stats(
-        z_clustered,
-        default_value=default_ani,
-        same_threshold=95.0,  # Species boundary
-        boundary_lower=93.0,
-    )
-
-    # Convert to Python list for JSON serialization
-    z_list = [[float(v) for v in row] for row in z_clustered]
-
-    # Inverted colorscale: red = high ANI (similar), blue = low ANI (distant)
-    ani_colorscale = [
-        [0.0, "#4575b4"],    # 70% - Blue (distant/different genera)
-        [0.167, "#74add1"],  # 75%
-        [0.333, "#abd9e9"],  # 80%
-        [0.5, "#ffffbf"],    # 85% - Yellow (genus boundary)
-        [0.667, "#fee090"],  # 90%
-        [0.833, "#fdae61"],  # 95% - Orange (species boundary)
-        [1.0, "#d73027"],    # 100% - Red (identical/same species)
-    ]
-
-    # Create heatmap
-    fig = go.Figure(
-        data=go.Heatmap(
-            z=z_list,
-            x=genome_labels,
-            y=genome_labels,
-            colorscale=ani_colorscale,
-            zmin=70,
-            zmax=100,
-            colorbar=dict(
-                title="ANI (%)",
-                tickvals=[70, 75, 80, 85, 90, 95, 100],
-                ticktext=["70", "75", "80", "85 (genus)", "90", "95 (species)", "100"],
-            ),
-            hovertemplate=(
-                "Genome 1: %{y}<br>"
-                "Genome 2: %{x}<br>"
-                "ANI: %{z:.1f}%<extra></extra>"
-            ),
-        )
-    )
-
-    # Conditional title
-    title = "ANI Matrix Heatmap"
-    if clustering_succeeded:
-        title += " (Hierarchically Clustered)"
-
-    fig.update_layout(
-        title=title,
-        width=1000,
-        height=900,
-        template="plotly_white",
-        xaxis=dict(tickangle=45, tickfont=dict(size=8)),
-        yaxis=dict(tickfont=dict(size=8)),
-    )
-
-    return fig, stats, clustering_succeeded
+    return _build_similarity_heatmap(ani_matrix, genome_labels_map, ANI_HEATMAP_CONFIG)
 
 
 def build_aai_heatmap(
@@ -194,89 +268,51 @@ def build_aai_heatmap(
     Returns:
         Tuple of (plotly_figure, statistics, clustering_succeeded)
     """
-    # Extract genome names and matrix data
-    matrix_cols = aai_matrix.columns
-    if "genome" in matrix_cols:
-        genome_accessions = aai_matrix["genome"].to_list()
-        z_data = aai_matrix.drop("genome").to_numpy()
-    else:
-        genome_accessions = list(matrix_cols)
-        z_data = aai_matrix.to_numpy()
+    return _build_similarity_heatmap(aai_matrix, genome_labels_map, AAI_HEATMAP_CONFIG)
 
-    # Fill missing values
-    z_filled = np.where(z_data == 0.0, default_aai, z_data)
 
-    # Hierarchical clustering
-    z_clustered, genome_accessions_ordered, clustering_succeeded = (
-        perform_hierarchical_clustering(z_filled, genome_accessions, default_aai)
-    )
+def _build_stats_cards(stats: SimilarityStats, config: HeatmapConfig) -> str:
+    """
+    Generate HTML for similarity statistics cards.
 
-    # Create labels
-    genome_labels = [
-        genome_labels_map.get(acc, acc) for acc in genome_accessions_ordered
-    ]
+    Shared implementation for both ANI and AAI stats cards.
 
-    # Compute statistics
-    stats = compute_similarity_stats(
-        z_clustered,
-        default_value=default_aai,
-        same_threshold=65.0,  # Genus boundary
-        boundary_lower=58.0,
-    )
+    Args:
+        stats: Computed similarity statistics
+        config: Heatmap configuration with metric name and category labels
 
-    # Convert to Python list for JSON serialization
-    z_list = [[float(v) for v in row] for row in z_clustered]
-
-    # AAI colorscale: 40-100% range for protein-level comparisons
-    # Matches the phylogenetic context heatmap scale
-    aai_colorscale = [
-        [0.0, "#313695"],     # 40% - Dark blue (very distant)
-        [0.167, "#4575b4"],   # 50%
-        [0.333, "#abd9e9"],   # 60%
-        [0.417, "#ffffbf"],   # 65% - Yellow (genus boundary)
-        [0.5, "#fee090"],     # 70%
-        [0.583, "#fdae61"],   # 75%
-        [0.75, "#f46d43"],    # 85%
-        [1.0, "#a50026"],     # 100% - Dark red (identical)
-    ]
-
-    # Create heatmap
-    fig = go.Figure(
-        data=go.Heatmap(
-            z=z_list,
-            x=genome_labels,
-            y=genome_labels,
-            colorscale=aai_colorscale,
-            zmin=40,
-            zmax=100,
-            colorbar=dict(
-                title="AAI (%)",
-                tickvals=[40, 50, 60, 65, 70, 80, 90, 100],
-                ticktext=["40", "50", "60", "65 (genus)", "70", "80", "90", "100"],
-            ),
-            hovertemplate=(
-                "Genome 1: %{y}<br>"
-                "Genome 2: %{x}<br>"
-                "AAI: %{z:.1f}%<extra></extra>"
-            ),
-        )
-    )
-
-    # Conditional title
-    title = "AAI Matrix Heatmap"
-    if clustering_succeeded:
-        title += " (Hierarchically Clustered)"
-
-    fig.update_layout(
-        title=title,
-        width=1000,
-        height=900,
-        template="plotly_white",
-        xaxis=dict(tickangle=45, tickfont=dict(size=8)),
-        yaxis=dict(tickfont=dict(size=8)),
-    )
-
-    return fig, stats, clustering_succeeded
+    Returns:
+        HTML string with metric cards
+    """
+    return f"""
+    <div class="metric-cards">
+        <div class="metric-card">
+            <div class="metric-value">{stats.num_genomes}</div>
+            <div class="metric-label">Genomes</div>
+            <div class="metric-subtext">In {config.metric_name} matrix</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value">{stats.mean_value:.1f}%</div>
+            <div class="metric-label">Mean {config.metric_name}</div>
+            <div class="metric-subtext">Range: {stats.min_value:.1f}% - {stats.max_value:.1f}%</div>
+        </div>
+        <div class="metric-card success">
+            <div class="metric-value">{stats.same_category_count}</div>
+            <div class="metric-label">Genome Pairs</div>
+            <div class="metric-subtext">{config.same_label}</div>
+        </div>
+        <div class="metric-card warning">
+            <div class="metric-value">{stats.boundary_count}</div>
+            <div class="metric-label">Genome Pairs</div>
+            <div class="metric-subtext">{config.boundary_label}</div>
+        </div>
+        <div class="metric-card danger">
+            <div class="metric-value">{stats.different_category_count}</div>
+            <div class="metric-label">Genome Pairs</div>
+            <div class="metric-subtext">{config.different_label}</div>
+        </div>
+    </div>
+    """
 
 
 def build_ani_stats_cards(stats: SimilarityStats) -> str:
@@ -289,35 +325,7 @@ def build_ani_stats_cards(stats: SimilarityStats) -> str:
     Returns:
         HTML string with metric cards
     """
-    return f"""
-    <div class="metric-cards">
-        <div class="metric-card">
-            <div class="metric-value">{stats.num_genomes}</div>
-            <div class="metric-label">Genomes</div>
-            <div class="metric-subtext">In ANI matrix</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value">{stats.mean_value:.1f}%</div>
-            <div class="metric-label">Mean ANI</div>
-            <div class="metric-subtext">Range: {stats.min_value:.1f}% - {stats.max_value:.1f}%</div>
-        </div>
-        <div class="metric-card success">
-            <div class="metric-value">{stats.same_category_count}</div>
-            <div class="metric-label">Genome Pairs</div>
-            <div class="metric-subtext">Same species (ANI >= 95%)</div>
-        </div>
-        <div class="metric-card warning">
-            <div class="metric-value">{stats.boundary_count}</div>
-            <div class="metric-label">Genome Pairs</div>
-            <div class="metric-subtext">Boundary zone (ANI 93-95%)</div>
-        </div>
-        <div class="metric-card danger">
-            <div class="metric-value">{stats.different_category_count}</div>
-            <div class="metric-label">Genome Pairs</div>
-            <div class="metric-subtext">Different species (ANI < 93%)</div>
-        </div>
-    </div>
-    """
+    return _build_stats_cards(stats, ANI_HEATMAP_CONFIG)
 
 
 def build_aai_stats_cards(stats: SimilarityStats) -> str:
@@ -330,35 +338,7 @@ def build_aai_stats_cards(stats: SimilarityStats) -> str:
     Returns:
         HTML string with metric cards
     """
-    return f"""
-    <div class="metric-cards">
-        <div class="metric-card">
-            <div class="metric-value">{stats.num_genomes}</div>
-            <div class="metric-label">Genomes</div>
-            <div class="metric-subtext">In AAI matrix</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value">{stats.mean_value:.1f}%</div>
-            <div class="metric-label">Mean AAI</div>
-            <div class="metric-subtext">Range: {stats.min_value:.1f}% - {stats.max_value:.1f}%</div>
-        </div>
-        <div class="metric-card success">
-            <div class="metric-value">{stats.same_category_count}</div>
-            <div class="metric-label">Genome Pairs</div>
-            <div class="metric-subtext">Same genus (AAI >= 65%)</div>
-        </div>
-        <div class="metric-card warning">
-            <div class="metric-value">{stats.boundary_count}</div>
-            <div class="metric-label">Genome Pairs</div>
-            <div class="metric-subtext">Boundary zone (AAI 58-65%)</div>
-        </div>
-        <div class="metric-card danger">
-            <div class="metric-value">{stats.different_category_count}</div>
-            <div class="metric-label">Genome Pairs</div>
-            <div class="metric-subtext">Different genera (AAI < 58%)</div>
-        </div>
-    </div>
-    """
+    return _build_stats_cards(stats, AAI_HEATMAP_CONFIG)
 
 
 def build_phylogenetic_context_heatmap(
