@@ -228,58 +228,66 @@ class VectorizedClassifier:
 
     def classify_file(
         self,
-        blast_path: Path,
+        blast_input: Path | pl.DataFrame,
         id_mapping: ContigIdMapping | None = None,
         compute_qc: bool = False,
     ) -> pl.DataFrame | tuple[pl.DataFrame, "QCMetrics"]:
         """
-        Classify BLAST file using fully vectorized Polars operations.
+        Classify BLAST hits using fully vectorized Polars operations.
 
         All operations run in Polars' Rust backend with automatic
         parallelization. No Python loops involved.
 
         Args:
-            blast_path: Path to BLAST tabular output
+            blast_input: Path to BLAST tabular output, or a pre-loaded
+                DataFrame with standard BLAST columns and genome_name.
             id_mapping: Optional ID mapping for external BLAST results.
                 If provided, transforms sseqid values before genome extraction.
+                Ignored when blast_input is a DataFrame.
             compute_qc: If True, return (DataFrame, QCMetrics) tuple.
 
         Returns:
             DataFrame with classification results, or (DataFrame, QCMetrics)
             tuple if compute_qc is True.
         """
-        from metadarkmatter.core.parsers import (
-            StreamingBlastParser,
-            extract_genome_name_expr,
-        )
+        if isinstance(blast_input, pl.DataFrame):
+            # DataFrame passed directly (e.g. from stream_to_file partitions).
+            # Assumes genome_name column and alignment filters already applied.
+            df = blast_input
+            raw_df = df if compute_qc else None
+        else:
+            from metadarkmatter.core.parsers import (
+                StreamingBlastParser,
+                extract_genome_name_expr,
+            )
 
-        parser = StreamingBlastParser(blast_path)
+            parser = StreamingBlastParser(blast_input)
 
-        # Read all data
-        df = parser.parse_lazy().collect()
+            # Read all data
+            df = parser.parse_lazy().collect()
 
-        # Apply ID transformation if mapping provided (for external BLAST results)
-        if id_mapping is not None:
-            df = id_mapping.transform_column(df, "sseqid")
+            # Apply ID transformation if mapping provided (for external BLAST results)
+            if id_mapping is not None:
+                df = id_mapping.transform_column(df, "sseqid")
 
-        # Capture raw count before filtering (for QC)
-        raw_df = df if compute_qc else None
+            # Capture raw count before filtering (for QC)
+            raw_df = df if compute_qc else None
 
-        # Apply alignment quality filters (GTDB-compatible)
-        if self.config.min_alignment_length > 0:
-            df = df.filter(pl.col("length") >= self.config.min_alignment_length)
+            # Apply alignment quality filters (GTDB-compatible)
+            if self.config.min_alignment_length > 0:
+                df = df.filter(pl.col("length") >= self.config.min_alignment_length)
 
-        # Note: alignment fraction filter requires read length which isn't
-        # in standard BLAST output. Use qend - qstart + 1 as proxy.
-        if self.config.min_alignment_fraction > 0:
-            df = df.with_columns([
-                ((pl.col("qend") - pl.col("qstart") + 1) / pl.col("qend")).alias("_approx_af")
-            ]).filter(
-                pl.col("_approx_af") >= self.config.min_alignment_fraction
-            ).drop("_approx_af")
+            # Note: alignment fraction filter requires read length which isn't
+            # in standard BLAST output. Use qend - qstart + 1 as proxy.
+            if self.config.min_alignment_fraction > 0:
+                df = df.with_columns([
+                    ((pl.col("qend") - pl.col("qstart") + 1) / pl.col("qend")).alias("_approx_af")
+                ]).filter(
+                    pl.col("_approx_af") >= self.config.min_alignment_fraction
+                ).drop("_approx_af")
 
-        # Add genome_name column (extracts accession from standardized sseqid)
-        df = df.with_columns([extract_genome_name_expr()])
+            # Add genome_name column (extracts accession from standardized sseqid)
+            df = df.with_columns([extract_genome_name_expr()])
 
         # Family validation: partition hits by ANI matrix membership
         family_validation_active = self.config.target_family is not None
@@ -1004,265 +1012,6 @@ class VectorizedClassifier:
             }
         )
 
-    def _classify_partition(self, df: pl.DataFrame) -> pl.DataFrame:
-        """
-        Classify a partition of BLAST hits.
-
-        Internal method that processes a subset of data.
-        Used by streaming methods to process in chunks.
-
-        Args:
-            df: DataFrame with BLAST hits (must have genome_name column)
-
-        Returns:
-            DataFrame with classification results
-        """
-        if df.is_empty():
-            return self._empty_dataframe()
-
-        # Add read_length column for coverage calculation
-        if "qlen" in df.columns:
-            df = df.with_columns([
-                pl.when(pl.col("qlen").is_not_null())
-                .then(pl.col("qlen"))
-                .otherwise(pl.col("qend"))
-                .alias("read_length")
-            ])
-        else:
-            df = df.with_columns([
-                pl.col("qend").alias("read_length")
-            ])
-
-        # Calculate coverage and weighted score if enabled
-        if self.config.coverage_weight_mode != "none":
-            df = df.with_columns([
-                ((pl.col("qend") - pl.col("qstart") + 1) / pl.col("read_length"))
-                .clip(0.0, 1.0)
-                .alias("coverage"),
-            ]).with_columns([
-                self._coverage_weight_expr(
-                    pl.col("coverage"),
-                    self.config.coverage_weight_mode,
-                    self.config.coverage_weight_strength,
-                ).alias("coverage_weight"),
-            ]).with_columns([
-                (pl.col("bitscore") * pl.col("coverage_weight")).alias("weighted_bitscore"),
-            ])
-        else:
-            df = df.with_columns([
-                pl.col("bitscore").alias("weighted_bitscore"),
-            ])
-
-        # Sort for deterministic tie-breaking when multiple hits share max weighted_bitscore
-        df = df.sort(["qseqid", "weighted_bitscore", "pident", "genome_name"], descending=[False, True, True, False])
-
-        # Step 1: Find best hit per read
-        best_hits = (
-            df.group_by("qseqid", maintain_order=True)
-            .agg([
-                pl.col("weighted_bitscore").max().alias("max_weighted_bitscore"),
-                pl.col("bitscore").max().alias("max_bitscore"),
-                pl.col("pident").filter(
-                    pl.col("weighted_bitscore") == pl.col("weighted_bitscore").max()
-                ).first().alias("top_pident"),
-                pl.col("genome_name").filter(
-                    pl.col("weighted_bitscore") == pl.col("weighted_bitscore").max()
-                ).first().alias("best_genome"),
-            ])
-        )
-
-        # Step 2: Weighted bitscore threshold
-        threshold_pct = self.config.bitscore_threshold_pct / 100.0
-        best_hits = best_hits.with_columns([
-            (pl.col("max_weighted_bitscore") * threshold_pct).alias("weighted_bitscore_threshold"),
-        ])
-
-        # Step 3: Find ambiguous hits
-        df_with_threshold = df.join(
-            best_hits.select(["qseqid", "weighted_bitscore_threshold", "best_genome"]),
-            on="qseqid",
-            how="left",
-        )
-        ambiguous = df_with_threshold.filter(
-            pl.col("weighted_bitscore") >= pl.col("weighted_bitscore_threshold")
-        )
-
-        # Step 4: Count ambiguous hits
-        hit_counts = ambiguous.group_by("qseqid").len().rename({"len": "num_ambiguous_hits"})
-
-        # Step 4b: Calculate second_hit_identity (best pident to a DIFFERENT genome)
-        secondary_all = df_with_threshold.filter(
-            pl.col("genome_name") != pl.col("best_genome")
-        )
-        if not secondary_all.is_empty():
-            second_hit_metrics = (
-                secondary_all
-                .group_by("qseqid")
-                .agg([
-                    pl.col("pident").max().alias("second_hit_identity"),
-                ])
-            )
-        else:
-            second_hit_metrics = pl.DataFrame({
-                "qseqid": [],
-                "second_hit_identity": [],
-            }).cast({
-                "qseqid": pl.Utf8,
-                "second_hit_identity": pl.Float64,
-            })
-
-        # Step 5: Find max ANI to secondary genomes
-        secondary = ambiguous.filter(pl.col("genome_name") != pl.col("best_genome"))
-
-        has_ani_lookup = (
-            hasattr(self, '_ani_lookup_symmetric')
-            and not self._ani_lookup_symmetric.is_empty()
-        )
-        if not secondary.is_empty() and has_ani_lookup:
-            secondary_with_ani = secondary.join(
-                self._ani_lookup_symmetric,
-                left_on=["best_genome", "genome_name"],
-                right_on=["genome1", "genome2"],
-                how="left",
-            )
-            # Max ANI per read (for "max" mode)
-            max_ani_per_read = (
-                secondary_with_ani
-                .group_by("qseqid")
-                .agg(pl.col("ani").max().fill_null(0.0).alias("max_ani"))
-            )
-            # Second genome ANI per read (for "second" mode)
-            # Filter out same-genome hits (different contigs) since ANI lookup
-            # doesn't have diagonal entries
-            second_genome_ani_per_read = (
-                secondary_with_ani
-                .filter(pl.col("genome_name") != pl.col("best_genome"))
-                .sort(["qseqid", "bitscore"], descending=[False, True])
-                .group_by("qseqid")
-                .agg(pl.col("ani").first().fill_null(0.0).alias("second_genome_ani"))
-            )
-            max_ani_per_read = max_ani_per_read.join(
-                second_genome_ani_per_read, on="qseqid", how="left"
-            ).with_columns([
-                pl.col("second_genome_ani").fill_null(0.0),
-            ])
-        else:
-            max_ani_per_read = pl.DataFrame({
-                "qseqid": [], "max_ani": [], "second_genome_ani": []
-            }).cast({
-                "qseqid": pl.Utf8, "max_ani": pl.Float64, "second_genome_ani": pl.Float64
-            })
-
-        # Step 6: Combine metrics
-        result = (
-            best_hits
-            .join(hit_counts, on="qseqid", how="left")
-            .join(max_ani_per_read, on="qseqid", how="left")
-            .join(second_hit_metrics, on="qseqid", how="left")
-            .with_columns([
-                pl.col("num_ambiguous_hits").fill_null(1),
-                pl.col("max_ani").fill_null(0.0),
-                pl.col("second_genome_ani").fill_null(0.0),
-                pl.col("second_hit_identity"),
-            ])
-        )
-
-        # Step 7: Calculate metrics and classify
-        # Use effective thresholds for protein vs nucleotide mode
-        eff = self._effective_thresholds
-        cfg = self.config
-        result = (
-            result
-            .with_columns([
-                pl.col("top_pident").clip(0.0, 100.0).alias("top_hit_identity"),
-            ])
-            .with_columns([
-                (100.0 - pl.col("top_hit_identity")).alias("novelty_index"),
-                # Placement uncertainty - mode depends on config
-                pl.when(pl.col("num_ambiguous_hits") <= 1)
-                .then(0.0)
-                .when(pl.lit(cfg.uncertainty_mode == "second"))
-                .then(
-                    pl.when(pl.col("second_genome_ani") == 0.0)
-                    .then(100.0)
-                    .otherwise(100.0 - pl.col("second_genome_ani"))
-                )
-                .otherwise(  # "max" mode (default)
-                    pl.when(pl.col("max_ani") == 0.0)
-                    .then(100.0)
-                    .otherwise(100.0 - pl.col("max_ani"))
-                )
-                .alias("placement_uncertainty"),
-                # Identity gap: difference between best hit and second-best hit to DIFFERENT genome
-                pl.when(pl.col("second_hit_identity").is_not_null())
-                .then(pl.col("top_hit_identity") - pl.col("second_hit_identity"))
-                .otherwise(pl.lit(None))
-                .alias("identity_gap"),
-            ])
-            .with_columns([
-                # Uncertainty-based checks first (ANI-based, more biologically meaningful)
-                # High uncertainty - conserved within genus (no ambiguity_scope in fast mode)
-                pl.when(pl.col("placement_uncertainty") >= eff["uncertainty_conserved_min"])
-                .then(pl.lit("Ambiguous"))
-                # Moderate uncertainty (2-5%): species boundary zone
-                .when(pl.col("placement_uncertainty") >= eff["uncertainty_novel_genus_max"])
-                .then(pl.lit("Species Boundary"))
-                .when(
-                    (pl.col("novelty_index") < eff["novelty_known_max"])
-                    & (pl.col("placement_uncertainty") < eff["uncertainty_known_max"])
-                )
-                .then(pl.lit("Known Species"))
-                # Rule 0b: Single-hit inferred uncertainty check
-                .when(
-                    (pl.col("num_ambiguous_hits") <= 1)
-                    & (pl.col("novelty_index") >= eff["novelty_novel_species_min"])
-                    & (
-                        pl.when(pl.col("novelty_index") < eff["novelty_known_max"])
-                        .then(5.0 + pl.col("novelty_index") * 0.5)
-                        .when(pl.col("novelty_index") < eff["novelty_novel_species_max"])
-                        .then(self._inferred_known_break + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)
-                        .when(pl.col("novelty_index") < eff["novelty_novel_genus_max"])
-                        .then(self._inferred_species_break + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)
-                        .otherwise(35.0)
-                        >= pl.lit(cfg.single_hit_uncertainty_threshold)
-                    )
-                )
-                .then(pl.lit("Ambiguous"))
-                .when(
-                    (pl.col("novelty_index") >= eff["novelty_novel_species_min"])
-                    & (pl.col("novelty_index") < eff["novelty_novel_species_max"])
-                    & (pl.col("placement_uncertainty") < eff["uncertainty_novel_species_max"])
-                )
-                .then(pl.lit("Novel Species"))
-                .when(
-                    (pl.col("novelty_index") >= eff["novelty_novel_genus_min"])
-                    & (pl.col("novelty_index") <= eff["novelty_novel_genus_max"])
-                    & (pl.col("placement_uncertainty") < eff["uncertainty_novel_genus_max"])
-                )
-                .then(pl.lit("Novel Genus"))
-                .otherwise(pl.lit("Unclassified"))
-                .alias("taxonomic_call")
-            ])
-            .with_columns([
-                pl.col("taxonomic_call").replace(TAXONOMIC_TO_DIVERSITY).alias("diversity_status"),
-                pl.col("taxonomic_call").is_in(["Novel Species", "Novel Genus"]).alias("is_novel")
-            ])
-        )
-
-        return result.select([
-            pl.col("qseqid").alias("read_id"),
-            pl.col("best_genome").alias("best_match_genome"),
-            "top_hit_identity",
-            "novelty_index",
-            "placement_uncertainty",
-            "num_ambiguous_hits",
-            "second_hit_identity",
-            "identity_gap",
-            "taxonomic_call",
-            "diversity_status",
-            "is_novel",
-        ])
-
     def stream_to_file(
         self,
         blast_path: Path,
@@ -1354,7 +1103,7 @@ class VectorizedClassifier:
 
                     # Classify this partition
                     if not complete_df.is_empty():
-                        result_df = self._classify_partition(complete_df)
+                        result_df = self.classify_file(complete_df)
                         total_reads += len(result_df)
 
                         # Write results
@@ -1382,7 +1131,7 @@ class VectorizedClassifier:
 
             if remaining_data:
                 remaining_df = pl.DataFrame(remaining_data)
-                result_df = self._classify_partition(remaining_df)
+                result_df = self.classify_file(remaining_df)
                 total_reads += len(result_df)
                 self._write_partition(
                     result_df, output_path, output_format, first_partition
