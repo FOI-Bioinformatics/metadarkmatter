@@ -39,7 +39,7 @@ class VectorizedClassifier:
     entirely. This provides automatic parallelization across CPU cores.
 
     Performance characteristics:
-        - 5-10x faster than classify_to_dataframe_fast() for large files
+        - Optimized for large files with vectorized Polars operations
         - Uses Polars' internal parallelism (no multiprocessing overhead)
         - Memory usage: ~1.5x input file size for in-memory operations
         - For 10M reads with 10 hits each: ~15GB memory

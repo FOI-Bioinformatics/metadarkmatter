@@ -10,9 +10,6 @@ Tests ANIMatrix, ANIWeightedClassifier, VectorizedClassifier including:
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
-
 import polars as pl
 import pytest
 
@@ -342,68 +339,6 @@ class TestANIWeightedClassifier:
         assert classification.placement_uncertainty == 20.0
         assert classification.taxonomic_call == TaxonomicCall.AMBIGUOUS
 
-    def test_classify_blast_file(self, classifier, temp_blast_file):
-        """classify_blast_file should yield classifications."""
-        classifications = list(classifier.classify_blast_file(temp_blast_file))
-
-        assert len(classifications) > 0
-        for c in classifications:
-            assert c.read_id is not None
-            assert c.taxonomic_call is not None
-
-    def test_classify_to_dataframe(self, classifier, temp_blast_file):
-        """classify_to_dataframe should return Polars DataFrame."""
-        df = classifier.classify_to_dataframe(temp_blast_file)
-
-        assert isinstance(df, pl.DataFrame)
-        assert "read_id" in df.columns
-        assert "taxonomic_call" in df.columns
-        assert "novelty_index" in df.columns
-
-    def test_classify_to_dataframe_fast(self, classifier, temp_blast_file):
-        """classify_to_dataframe_fast should return same results faster."""
-        df_standard = classifier.classify_to_dataframe(temp_blast_file)
-        df_fast = classifier.classify_to_dataframe_fast(temp_blast_file)
-
-        # Same number of rows
-        assert len(df_standard) == len(df_fast)
-
-        # Same read IDs
-        standard_ids = set(df_standard["read_id"].to_list())
-        fast_ids = set(df_fast["read_id"].to_list())
-        assert standard_ids == fast_ids
-
-    def test_write_classifications_csv(self, classifier, temp_blast_file, temp_dir):
-        """write_classifications should write CSV file."""
-        output_path = temp_dir / "classifications.csv"
-
-        num_classified = classifier.write_classifications(
-            temp_blast_file, output_path, output_format="csv"
-        )
-
-        assert output_path.exists()
-        assert num_classified > 0
-
-        # Verify CSV can be read back
-        df = pl.read_csv(output_path)
-        assert len(df) == num_classified
-
-    def test_write_classifications_parquet(self, classifier, temp_blast_file, temp_dir):
-        """write_classifications should write Parquet file."""
-        output_path = temp_dir / "classifications.parquet"
-
-        num_classified = classifier.write_classifications(
-            temp_blast_file, output_path, output_format="parquet"
-        )
-
-        assert output_path.exists()
-        assert num_classified > 0
-
-        # Verify Parquet can be read back
-        df = pl.read_parquet(output_path)
-        assert len(df) == num_classified
-
-
 class TestClassificationThresholds:
     """Tests for classification threshold boundaries."""
 
@@ -583,23 +518,18 @@ class TestVectorizedClassifier:
         assert "taxonomic_call" in df.columns
         assert len(df) > 0
 
-    def test_classify_file_matches_standard(
+    def test_classify_file_has_expected_columns(
         self, ani_matrix, default_scoring_config, temp_blast_file
     ):
-        """VectorizedClassifier should produce similar results to standard."""
-        standard = ANIWeightedClassifier(ani_matrix, config=default_scoring_config)
+        """VectorizedClassifier should produce DataFrame with expected columns."""
         vectorized = VectorizedClassifier(ani_matrix, config=default_scoring_config)
 
-        df_standard = standard.classify_to_dataframe(temp_blast_file)
-        df_vectorized = vectorized.classify_file(temp_blast_file)
+        df = vectorized.classify_file(temp_blast_file)
 
-        # Same number of reads
-        assert len(df_standard) == len(df_vectorized)
-
-        # Same read IDs
-        standard_ids = set(df_standard["read_id"].to_list())
-        vectorized_ids = set(df_vectorized["read_id"].to_list())
-        assert standard_ids == vectorized_ids
+        assert isinstance(df, pl.DataFrame)
+        assert len(df) > 0
+        for col in ["read_id", "taxonomic_call", "novelty_index", "placement_uncertainty"]:
+            assert col in df.columns
 
     def test_stream_to_file_csv(
         self, ani_matrix, default_scoring_config, temp_blast_file, temp_dir
@@ -640,49 +570,6 @@ class TestVectorizedClassifier:
         # Parser raises ValueError during column detection for empty files
         with pytest.raises(ValueError, match="no data lines"):
             vectorized.classify_file(empty_blast_file)
-
-
-class TestClassifyReadFast:
-    """Tests for fast classification path."""
-
-    def test_classify_read_fast_returns_dict(self, classifier):
-        """classify_read_fast should return dictionary."""
-        from metadarkmatter.core.parsers import BlastHitFast, BlastResultFast
-
-        hit = BlastHitFast(
-            qseqid="read_001",
-            sseqid="GCF_000123456.1",
-            pident=99.0,
-            bitscore=250.0,
-            genome_name="GCF_000123456.1",
-        )
-        result = BlastResultFast(read_id="read_001", hits=(hit,))
-
-        classification = classifier.classify_read_fast(result)
-
-        assert isinstance(classification, dict)
-        assert classification["read_id"] == "read_001"
-        assert classification["taxonomic_call"] == "Known Species"
-
-    def test_classify_read_fast_empty_result(self, classifier):
-        """classify_read_fast with empty hits should return None."""
-        from metadarkmatter.core.parsers import BlastResultFast
-
-        result = BlastResultFast(read_id="read_001", hits=())
-
-        classification = classifier.classify_read_fast(result)
-
-        assert classification is None
-
-    def test_classify_blast_file_fast(self, classifier, temp_blast_file):
-        """classify_blast_file_fast should yield dictionaries."""
-        classifications = list(classifier.classify_blast_file_fast(temp_blast_file))
-
-        assert len(classifications) > 0
-        for c in classifications:
-            assert isinstance(c, dict)
-            assert "read_id" in c
-            assert "taxonomic_call" in c
 
 
 class TestUncertaintyModes:

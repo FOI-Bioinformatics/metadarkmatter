@@ -1,8 +1,9 @@
 """
 Cross-classifier equivalence tests.
 
-Verifies that base (ANIWeightedClassifier) and vectorized (VectorizedClassifier)
-classifiers produce identical taxonomic_call values for the same input data.
+Verifies that base (ANIWeightedClassifier.classify_read) and vectorized
+(VectorizedClassifier.classify_file) classifiers produce identical
+taxonomic_call values for the same input data.
 
 confidence_score is excluded from comparison because the vectorized classifier
 uses a different scoring approach (alignment-length + bitscore-gap based)
@@ -11,7 +12,6 @@ compared to the base classifier (novelty-margin based).
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import polars as pl
@@ -20,6 +20,7 @@ import pytest
 from metadarkmatter.core.classification.ani_matrix import ANIMatrix
 from metadarkmatter.core.classification.classifiers.base import ANIWeightedClassifier
 from metadarkmatter.core.classification.classifiers.vectorized import VectorizedClassifier
+from metadarkmatter.core.parsers import StreamingBlastParser
 from metadarkmatter.models.config import ScoringConfig
 
 
@@ -148,7 +149,15 @@ class TestClassifierEquivalence:
         base_clf = ANIWeightedClassifier(ani_matrix=ani_matrix, config=config)
         vec_clf = VectorizedClassifier(ani_matrix=ani_matrix, config=config)
 
-        base_df = base_clf.classify_to_dataframe(blast_file)
+        # Use streaming parser + classify_read for base classifier
+        parser = StreamingBlastParser(blast_file)
+        base_results = []
+        for blast_result in parser.iter_reads():
+            classification = base_clf.classify_read(blast_result)
+            if classification is not None:
+                base_results.append(classification.to_dict())
+        base_df = pl.DataFrame(base_results)
+
         vec_df = vec_clf.classify_file(blast_file)
 
         # Align on read_id for comparison
