@@ -1,16 +1,14 @@
 """
 Classifier implementations for ANI-weighted taxonomic classification.
 
-This package provides multiple classifier implementations optimized for
+This package provides classifier implementations optimized for
 different use cases and dataset sizes.
 """
 
 from metadarkmatter.core.classification.classifiers.base import ANIWeightedClassifier
-from metadarkmatter.core.classification.classifiers.parallel import ParallelClassifier
 from metadarkmatter.core.classification.classifiers.vectorized import VectorizedClassifier
 
 __all__ = [
     "ANIWeightedClassifier",
-    "ParallelClassifier",
     "VectorizedClassifier",
 ]

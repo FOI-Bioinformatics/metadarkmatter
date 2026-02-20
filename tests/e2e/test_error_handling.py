@@ -158,31 +158,6 @@ class TestInvalidArguments:
         CLIAssertions.assert_failure(result)
         CLIAssertions.assert_output_contains(result, "invalid", case_sensitive=False)
 
-    def test_mutually_exclusive_modes(
-        self,
-        standard_dataset: tuple[Path, Path],
-        e2e_temp_dir: Path,
-        e2e_runner,
-    ):
-        """Should error when multiple processing modes specified."""
-        blast_path, ani_path = standard_dataset
-        from metadarkmatter.cli.main import app
-
-        result = e2e_runner.invoke(app, [
-            "score", "classify",
-            "--alignment", str(blast_path),
-            "--ani", str(ani_path),
-            "--output", str(e2e_temp_dir / "error.csv"),
-            "--fast",
-            "--parallel",
-        ])
-
-        CLIAssertions.assert_failure(result)
-        CLIAssertions.assert_output_contains(
-            result, "mutually exclusive", case_sensitive=False
-        )
-
-
 class TestBatchErrorHandling:
     """Tests for batch command error handling."""
 

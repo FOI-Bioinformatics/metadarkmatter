@@ -13,10 +13,9 @@ import pytest
 
 from metadarkmatter.core.novel_diversity import NovelCluster
 from metadarkmatter.visualization.report.components.extended_matrix_builder import (
-    build_extended_ani_matrix,
-    estimate_novel_to_novel_ani,
-    estimate_novel_to_reference_ani,
-    get_cluster_label,
+    build_extended_similarity_matrix,
+    estimate_novel_to_novel_similarity,
+    estimate_novel_to_reference_similarity,
     select_relevant_references,
 )
 
@@ -93,8 +92,8 @@ def genome_labels_map() -> dict[str, str]:
     }
 
 
-class TestEstimateNovelToReferenceAni:
-    """Tests for estimate_novel_to_reference_ani function."""
+class TestEstimateNovelToReferenceSimilarity:
+    """Tests for estimate_novel_to_reference_similarity function."""
 
     def test_direct_reference_returns_estimated_ani(
         self, sample_clusters: list[NovelCluster]
@@ -103,8 +102,8 @@ class TestEstimateNovelToReferenceAni:
         cluster = sample_clusters[0]
         ani_dict: dict[tuple[str, str], float] = {}
 
-        result = estimate_novel_to_reference_ani(
-            cluster, "GCF_001", ani_dict, default_ani=70.0
+        result = estimate_novel_to_reference_similarity(
+            cluster, "GCF_001", ani_dict, default_value=70.0
         )
 
         # estimated_ani = 100 - mean_novelty_index = 100 - 7.5 = 92.5
@@ -121,8 +120,8 @@ class TestEstimateNovelToReferenceAni:
             ("GCF_002", "GCF_001"): 95.0,
         }
 
-        result = estimate_novel_to_reference_ani(
-            cluster, "GCF_002", ani_dict, default_ani=70.0
+        result = estimate_novel_to_reference_similarity(
+            cluster, "GCF_002", ani_dict, default_value=70.0
         )
 
         # Should be less than the direct ANI due to additional divergence
@@ -139,8 +138,8 @@ class TestEstimateNovelToReferenceAni:
             ("GCF_004", "GCF_003"): 72.0,
         }
 
-        result = estimate_novel_to_reference_ani(
-            cluster, "GCF_004", ani_dict, default_ani=70.0
+        result = estimate_novel_to_reference_similarity(
+            cluster, "GCF_004", ani_dict, default_value=70.0
         )
 
         # Should be at or near default for distant combinations
@@ -148,8 +147,8 @@ class TestEstimateNovelToReferenceAni:
         assert result <= 100.0
 
 
-class TestEstimateNovelToNovelAni:
-    """Tests for estimate_novel_to_novel_ani function."""
+class TestEstimateNovelToNovelSimilarity:
+    """Tests for estimate_novel_to_novel_similarity function."""
 
     def test_same_nearest_reference(self):
         """Clusters with same nearest reference should have higher similarity."""
@@ -191,7 +190,7 @@ class TestEstimateNovelToNovelAni:
 
         ani_dict: dict[tuple[str, str], float] = {}
 
-        result = estimate_novel_to_novel_ani(cluster1, cluster2, ani_dict, 70.0)
+        result = estimate_novel_to_novel_similarity(cluster1, cluster2, ani_dict, 70.0)
 
         # Average of estimated ANIs minus penalty
         # (93 + 88) / 2 - 2 = 88.5
@@ -208,7 +207,7 @@ class TestEstimateNovelToNovelAni:
             ("GCF_003", "GCF_001"): 85.0,
         }
 
-        result = estimate_novel_to_novel_ani(cluster1, cluster2, ani_dict, 70.0)
+        result = estimate_novel_to_novel_similarity(cluster1, cluster2, ani_dict, 70.0)
 
         # Should be lower than ref-to-ref due to cluster divergences
         assert result < 85.0
@@ -296,8 +295,8 @@ class TestSelectRelevantReferences:
         assert len(selected) == 3
 
 
-class TestBuildExtendedAniMatrix:
-    """Tests for build_extended_ani_matrix function."""
+class TestBuildExtendedSimilarityMatrix:
+    """Tests for build_extended_similarity_matrix function."""
 
     def test_basic_matrix_construction(
         self,
@@ -306,11 +305,11 @@ class TestBuildExtendedAniMatrix:
         genome_labels_map: dict[str, str],
     ):
         """Test basic extended matrix construction."""
-        matrix, labels, is_novel = build_extended_ani_matrix(
-            ani_matrix=sample_ani_matrix,
+        matrix, labels, is_novel = build_extended_similarity_matrix(
+            similarity_matrix=sample_ani_matrix,
             novel_clusters=sample_clusters,
             genome_labels_map=genome_labels_map,
-            default_ani=70.0,
+            default_value=70.0,
             max_references=10,
             max_clusters=10,
         )
@@ -339,8 +338,8 @@ class TestBuildExtendedAniMatrix:
         genome_labels_map: dict[str, str],
     ):
         """Diagonal should be 100% (self-similarity)."""
-        matrix, _, _ = build_extended_ani_matrix(
-            ani_matrix=sample_ani_matrix,
+        matrix, _, _ = build_extended_similarity_matrix(
+            similarity_matrix=sample_ani_matrix,
             novel_clusters=sample_clusters,
             genome_labels_map=genome_labels_map,
         )
@@ -355,8 +354,8 @@ class TestBuildExtendedAniMatrix:
         genome_labels_map: dict[str, str],
     ):
         """Matrix should be symmetric."""
-        matrix, _, _ = build_extended_ani_matrix(
-            ani_matrix=sample_ani_matrix,
+        matrix, _, _ = build_extended_similarity_matrix(
+            similarity_matrix=sample_ani_matrix,
             novel_clusters=sample_clusters,
             genome_labels_map=genome_labels_map,
         )
@@ -372,8 +371,8 @@ class TestBuildExtendedAniMatrix:
         genome_labels_map: dict[str, str],
     ):
         """Novel cluster labels should have [*] prefix."""
-        _, labels, is_novel = build_extended_ani_matrix(
-            ani_matrix=sample_ani_matrix,
+        _, labels, is_novel = build_extended_similarity_matrix(
+            similarity_matrix=sample_ani_matrix,
             novel_clusters=sample_clusters,
             genome_labels_map=genome_labels_map,
         )
@@ -412,8 +411,8 @@ class TestBuildExtendedAniMatrix:
             )
             clusters.append(cluster)
 
-        matrix, labels, is_novel = build_extended_ani_matrix(
-            ani_matrix=sample_ani_matrix,
+        matrix, labels, is_novel = build_extended_similarity_matrix(
+            similarity_matrix=sample_ani_matrix,
             novel_clusters=clusters,
             genome_labels_map=genome_labels_map,
             max_references=4,
@@ -432,32 +431,11 @@ class TestBuildExtendedAniMatrix:
         genome_labels_map: dict[str, str],
     ):
         """With no clusters, should return references only."""
-        matrix, labels, is_novel = build_extended_ani_matrix(
-            ani_matrix=sample_ani_matrix,
+        matrix, labels, is_novel = build_extended_similarity_matrix(
+            similarity_matrix=sample_ani_matrix,
             novel_clusters=[],
             genome_labels_map=genome_labels_map,
         )
 
         assert all(not flag for flag in is_novel)
         assert len(labels) > 0
-
-
-class TestGetClusterLabel:
-    """Tests for get_cluster_label function."""
-
-    def test_label_format(self, sample_clusters: list[NovelCluster]):
-        """Test cluster label formatting."""
-        cluster = sample_clusters[0]
-        label = get_cluster_label(cluster)
-
-        assert "[*]" in label
-        assert cluster.cluster_id in label
-        assert cluster.suggested_name in label
-        assert str(cluster.read_count) in label
-
-    def test_label_includes_read_count(self, sample_clusters: list[NovelCluster]):
-        """Label should include read count."""
-        cluster = sample_clusters[1]
-        label = get_cluster_label(cluster)
-
-        assert f"{cluster.read_count} reads" in label

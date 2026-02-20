@@ -190,13 +190,12 @@ class TestDryRunMode:
             "--alignment", str(blast_path),
             "--ani", str(ani_path),
             "--output", str(e2e_temp_dir / "dry_run.csv"),
-            "--parallel",
             "--dry-run",
         ])
 
         CLIAssertions.assert_success(result)
         CLIAssertions.assert_output_contains(result, "Mode:")
-        CLIAssertions.assert_output_contains(result, "parallel")
+        CLIAssertions.assert_output_contains(result, "vectorized")
 
 
 class TestQuietMode:

@@ -8,7 +8,6 @@ the ANI-weighted placement uncertainty algorithm on existing BLAST results.
 from __future__ import annotations
 
 import logging
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +31,6 @@ from metadarkmatter.cli.utils import QuietConsole, extract_sample_name
 from metadarkmatter.core.aai_matrix_builder import AAIMatrix
 from metadarkmatter.core.ani_placement import (
     ANIMatrix,
-    ANIWeightedClassifier,
     VectorizedClassifier,
 )
 from metadarkmatter.core.id_mapping import ContigIdMapping
@@ -101,57 +99,6 @@ THRESHOLD_PRESETS: dict[str, ScoringConfig] = {
         novelty_novel_genus_max=25.0,
     ),
 }
-
-
-class ProcessingMode(str, Enum):
-    """Processing mode for classification."""
-
-    STANDARD = "standard"
-    FAST = "fast"
-    PARALLEL = "parallel"
-    STREAMING = "streaming"
-
-
-def validate_processing_modes(
-    fast: bool,
-    parallel: bool,
-    streaming: bool,
-) -> ProcessingMode:
-    """
-    Validate that only one processing mode is selected.
-
-    Returns the selected mode or STANDARD if none specified.
-
-    Raises:
-        typer.BadParameter: If multiple modes are specified.
-    """
-    modes_selected = sum([fast, parallel, streaming])
-
-    if modes_selected > 1:
-        selected = []
-        if fast:
-            selected.append("--fast")
-        if parallel:
-            selected.append("--parallel")
-        if streaming:
-            selected.append("--streaming")
-
-        raise typer.BadParameter(
-            f"Processing modes are mutually exclusive. "
-            f"You specified: {', '.join(selected)}. "
-            f"Choose only one:\n\n"
-            f"  --fast      : Single-threaded optimized (~3x faster)\n"
-            f"  --parallel  : Polars vectorized (~16x faster, recommended)\n"
-            f"  --streaming : Memory-efficient for 100M+ alignments"
-        )
-
-    if streaming:
-        return ProcessingMode.STREAMING
-    if parallel:
-        return ProcessingMode.PARALLEL
-    if fast:
-        return ProcessingMode.FAST
-    return ProcessingMode.STANDARD
 
 
 def validate_ani_genome_coverage(
@@ -443,17 +390,6 @@ def classify(
         "-v",
         help="Enable verbose output",
     ),
-    fast: bool = typer.Option(
-        False,
-        "--fast",
-        help="Use optimized fast path (~3x faster for large files)",
-    ),
-    parallel: bool = typer.Option(
-        False,
-        "--parallel",
-        "-p",
-        help="Use vectorized Polars processing (~16x faster, auto-parallel)",
-    ),
     streaming: bool = typer.Option(
         False,
         "--streaming",
@@ -594,15 +530,9 @@ def classify(
     # Validate output extension matches format
     output = validate_output_format_extension(output, output_format, out)
 
-    # Validate processing mode exclusivity
-    try:
-        processing_mode = validate_processing_modes(fast, parallel, streaming)
-    except typer.BadParameter as e:
-        console.print(f"[red]Error: {e}[/red]")
-        raise typer.Exit(code=1) from None
-
     if verbose:
-        out.print(f"[dim]Processing mode: {processing_mode.value}[/dim]")
+        mode_label = "streaming" if streaming else "vectorized"
+        out.print(f"[dim]Processing mode: {mode_label}[/dim]")
 
     # Validate inputs
     if not alignment.exists():
@@ -655,7 +585,7 @@ def classify(
         console.print("\n[bold]Output:[/bold]")
         console.print(f"  File: {output}")
         console.print(f"  Format: {output_format}")
-        console.print(f"  Mode: {processing_mode.value}")
+        console.print(f"  Mode: {'streaming' if streaming else 'vectorized'}")
         if summary:
             console.print(f"  Summary: {summary}")
 
@@ -950,7 +880,7 @@ def classify(
             if contig_mapping:
                 out.print(
                     "[yellow]Note: --genomes/--id-mapping is not supported with --streaming mode.[/yellow]\n"
-                    "[yellow]ID transformation will not be applied. Use --parallel instead.[/yellow]\n"
+                    "[yellow]ID transformation will not be applied. Remove --streaming to enable it.[/yellow]\n"
                 )
 
             vectorized = VectorizedClassifier(ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config)
@@ -991,18 +921,15 @@ def classify(
                     progress_callback=streaming_progress,
                 )
 
-        elif parallel:
-            # Use vectorized classifier (Polars-native, auto-parallel)
+        else:
+            # All non-streaming classification uses VectorizedClassifier
             qc_metrics = None
             with Progress(
                 SpinnerColumn(),
                 TextColumn("[progress.description]{task.description}"),
                 console=console,
             ) as progress:
-                progress.add_task(
-                    description="Classifying reads (parallel, auto-parallel)...",
-                    total=None,
-                )
+                progress.add_task(description="Classifying reads...", total=None)
                 vectorized = VectorizedClassifier(ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config)
                 result = vectorized.classify_file(
                     alignment,
@@ -1013,48 +940,6 @@ def classify(
                     classification_df, qc_metrics = result
                 else:
                     classification_df = result
-
-            num_classified = _finalize_classification(
-                classification_df, genome_metadata, output, output_format
-            )
-
-        elif fast:
-            # Use fast single-threaded path
-            if contig_mapping:
-                out.print(
-                    "[yellow]Note: --genomes/--id-mapping is not supported with --fast mode.[/yellow]\n"
-                    "[yellow]ID transformation will not be applied. Use --parallel instead.[/yellow]\n"
-                )
-
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-            ) as progress:
-                progress.add_task(description="Classifying reads (fast mode)...", total=None)
-                classifier = ANIWeightedClassifier(ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config)
-                classification_df = classifier.classify_to_dataframe_fast(alignment)
-
-            num_classified = _finalize_classification(
-                classification_df, genome_metadata, output, output_format
-            )
-
-        else:
-            # Use standard path
-            if contig_mapping:
-                out.print(
-                    "[yellow]Note: --genomes/--id-mapping is not supported with standard mode.[/yellow]\n"
-                    "[yellow]ID transformation will not be applied. Use --parallel instead.[/yellow]\n"
-                )
-
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-            ) as progress:
-                progress.add_task(description="Classifying reads...", total=None)
-                classifier = ANIWeightedClassifier(ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config)
-                classification_df = classifier.classify_to_dataframe(alignment)
 
             num_classified = _finalize_classification(
                 classification_df, genome_metadata, output, output_format
@@ -1253,16 +1138,6 @@ def batch(
         "-v",
         help="Enable verbose output",
     ),
-    fast: bool = typer.Option(
-        False,
-        "--fast",
-        help="Use optimized fast path (~3x faster for large files)",
-    ),
-    parallel: bool = typer.Option(
-        False,
-        "--parallel",
-        help="Use parallel processing per file (multi-core)",
-    ),
     workers: int = typer.Option(
         0,
         "--workers",
@@ -1309,16 +1184,6 @@ def batch(
             f"Use 'csv' or 'parquet'.[/red]"
         )
         raise typer.Exit(code=1) from None
-
-    # Validate processing mode exclusivity (batch only supports fast and parallel)
-    try:
-        processing_mode = validate_processing_modes(fast, parallel, streaming=False)
-    except typer.BadParameter as e:
-        console.print(f"[red]Error: {e}[/red]")
-        raise typer.Exit(code=1) from None
-
-    if verbose:
-        console.print(f"[dim]Processing mode: {processing_mode.value}[/dim]")
 
     file_ext = ".parquet" if output_format == "parquet" else ".csv"
 
@@ -1463,16 +1328,8 @@ def batch(
             f"fraction >= {config.min_alignment_fraction:.0%}[/dim]"
         )
 
-    # Create appropriate classifier based on mode
     # Note: Batch mode does not currently support AAI matrix
-    if parallel:
-        vectorized = VectorizedClassifier(ani_matrix=ani_matrix, aai_matrix=None, config=config)
-        mode_str = "vectorized (Polars-native parallel)"
-    else:
-        classifier = ANIWeightedClassifier(ani_matrix=ani_matrix, aai_matrix=None, config=config)
-        mode_str = "fast" if fast else "standard"
-
-    console.print(f"Processing mode: {mode_str}\n")
+    vectorized = VectorizedClassifier(ani_matrix=ani_matrix, aai_matrix=None, config=config)
 
     # Process each file
     total_classified = 0
@@ -1486,13 +1343,7 @@ def batch(
         console.print(f"[{i}/{len(alignment_files)}] Processing {sample_name}...")
 
         try:
-            # Classify using the appropriate method
-            if parallel:
-                df = vectorized.classify_file(alignment_file)
-            elif fast:
-                df = classifier.classify_to_dataframe_fast(alignment_file)
-            else:
-                df = classifier.classify_to_dataframe(alignment_file)
+            df = vectorized.classify_file(alignment_file)
             num_classified = len(df)
 
             # Write results in specified format

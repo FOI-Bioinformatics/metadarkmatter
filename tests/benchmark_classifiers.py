@@ -3,9 +3,7 @@
 Benchmark suite for metadarkmatter classifiers.
 
 Compares performance of different classification modes:
-- Standard (ANIWeightedClassifier.classify_to_dataframe)
-- Fast (ANIWeightedClassifier.classify_to_dataframe_fast)
-- Parallel/Vectorized (VectorizedClassifier.classify_file)
+- Vectorized (VectorizedClassifier.classify_file)
 - Streaming (VectorizedClassifier.stream_to_file)
 
 Usage:
@@ -19,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import gc
-import sys
 import tempfile
 import time
 from pathlib import Path
@@ -97,48 +94,6 @@ def generate_test_data(
     return blast_path, ani_path, len(blast_df)
 
 
-def benchmark_standard(ani_matrix, config, blast_path: Path, output_path: Path) -> dict:
-    """Benchmark standard classifier."""
-    from metadarkmatter.core.ani_placement import ANIWeightedClassifier
-
-    gc.collect()
-    classifier = ANIWeightedClassifier(ani_matrix=ani_matrix, config=config)
-
-    start = time.perf_counter()
-    df = classifier.classify_to_dataframe(blast_path)
-    elapsed = time.perf_counter() - start
-
-    df.write_parquet(output_path, compression="zstd")
-
-    return {
-        "mode": "standard",
-        "reads": len(df),
-        "elapsed": elapsed,
-        "rate": len(df) / elapsed,
-    }
-
-
-def benchmark_fast(ani_matrix, config, blast_path: Path, output_path: Path) -> dict:
-    """Benchmark fast classifier."""
-    from metadarkmatter.core.ani_placement import ANIWeightedClassifier
-
-    gc.collect()
-    classifier = ANIWeightedClassifier(ani_matrix=ani_matrix, config=config)
-
-    start = time.perf_counter()
-    df = classifier.classify_to_dataframe_fast(blast_path)
-    elapsed = time.perf_counter() - start
-
-    df.write_parquet(output_path, compression="zstd")
-
-    return {
-        "mode": "fast",
-        "reads": len(df),
-        "elapsed": elapsed,
-        "rate": len(df) / elapsed,
-    }
-
-
 def benchmark_vectorized(ani_matrix, config, blast_path: Path, output_path: Path) -> dict:
     """Benchmark vectorized classifier."""
     from metadarkmatter.core.ani_placement import VectorizedClassifier
@@ -188,7 +143,6 @@ def main():
     parser = argparse.ArgumentParser(description="Benchmark metadarkmatter classifiers")
     parser.add_argument("--reads", type=int, default=100_000, help="Number of reads")
     parser.add_argument("--genomes", type=int, default=50, help="Number of genomes")
-    parser.add_argument("--skip-slow", action="store_true", help="Skip standard mode (slow)")
     args = parser.parse_args()
 
     print("=" * 70)
@@ -225,17 +179,6 @@ def main():
         print("Running benchmarks...")
         print("-" * 70)
 
-        if not args.skip_slow:
-            output = tmpdir / "standard.parquet"
-            result = benchmark_standard(ani_matrix, config, blast_path, output)
-            results.append(result)
-            print(f"  Standard:   {result['elapsed']:6.2f}s  ({result['rate']:10,.0f} reads/s)")
-
-        output = tmpdir / "fast.parquet"
-        result = benchmark_fast(ani_matrix, config, blast_path, output)
-        results.append(result)
-        print(f"  Fast:       {result['elapsed']:6.2f}s  ({result['rate']:10,.0f} reads/s)")
-
         output = tmpdir / "vectorized.parquet"
         result = benchmark_vectorized(ani_matrix, config, blast_path, output)
         results.append(result)
@@ -252,7 +195,7 @@ def main():
         # Summary
         print("SUMMARY")
         print("-" * 70)
-        baseline = next((r for r in results if r["mode"] == "fast"), results[0])
+        baseline = results[0]
         print(f"{'Mode':<30} {'Time (s)':>10} {'Rate':>15} {'Speedup':>10}")
         print("-" * 70)
         for r in results:

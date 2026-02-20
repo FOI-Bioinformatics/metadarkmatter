@@ -115,8 +115,6 @@ def run_classify(
         summary_name: str | None = None,
         output_format: str = "csv",
         bitscore_threshold: float = 95.0,
-        fast: bool = False,
-        parallel: bool = False,
         streaming: bool = False,
         verbose: bool = False,
         extra_args: list[str] | None = None,
@@ -135,10 +133,6 @@ def run_classify(
         if summary_name:
             args.extend(["--summary", str(e2e_temp_dir / summary_name)])
 
-        if fast:
-            args.append("--fast")
-        if parallel:
-            args.append("--parallel")
         if streaming:
             args.append("--streaming")
         if verbose:
@@ -174,8 +168,6 @@ def run_batch(
         pattern: str = "*.blast.tsv",
         output_format: str = "csv",
         bitscore_threshold: float = 95.0,
-        fast: bool = False,
-        parallel: bool = False,
         verbose: bool = False,
         extra_args: list[str] | None = None,
     ) -> Result:
@@ -191,10 +183,6 @@ def run_batch(
             "--bitscore-threshold", str(bitscore_threshold),
         ]
 
-        if fast:
-            args.append("--fast")
-        if parallel:
-            args.append("--parallel")
         if verbose:
             args.append("--verbose")
 

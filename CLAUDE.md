@@ -42,7 +42,7 @@ metadarkmatter mmseqs2 search \
 
 # 5. Classify reads (core algorithm - works with either BLAST or MMseqs2 output)
 metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani_matrix.csv \
-  --metadata genome_metadata.tsv --output classifications.csv --parallel
+  --metadata genome_metadata.tsv --output classifications.csv
 
 # 6. Generate HTML report
 metadarkmatter report generate --classifications classifications.csv \
@@ -60,19 +60,19 @@ metadarkmatter util generate-mapping --genomes genomes/ --output id_mapping.tsv
 # Validate mapping against BLAST file
 metadarkmatter util validate-mapping id_mapping.tsv --blast external_results.tsv.gz
 
-# Classify with mapping (requires --parallel)
+# Classify with mapping
 metadarkmatter score classify --alignment external_results.tsv.gz --ani ani_matrix.csv \
-  --id-mapping id_mapping.tsv --output classifications.csv --parallel
+  --id-mapping id_mapping.tsv --output classifications.csv
 ```
 
 **Key Files:**
-- `cli/util.py` - `generate-mapping`, `validate-mapping` commands
+- `cli/mapping.py` - `generate-mapping`, `validate-mapping` commands
 - `core/id_mapping.py` - `ContigIdMapping` class (from_genome_dir, from_tsv, to_tsv, transform_column)
 - `core/genome_utils.py` - `extract_accession_from_filename()`
 
 **Requirements:**
 - Alignment must be BLAST tabular format (outfmt 6), 12 or 13 columns, tab-separated
-- ID mapping requires `--parallel` mode (not supported with `--fast` or `--streaming`)
+- ID mapping is not supported with `--streaming` mode
 - Genome accessions in mapping must match ANI matrix row/column labels
 
 ## Workflow Notes
@@ -185,9 +185,8 @@ src/metadarkmatter/
 │   │   ├── bayesian.py       # Bayesian posterior probabilities
 │   │   ├── ani_matrix.py     # ANIMatrix class
 │   │   └── classifiers/      # Classifier implementations
-│   │       ├── base.py       # Base classifier with coverage weighting
-│   │       ├── vectorized.py # Polars-based vectorized classifier
-│   │       └── parallel.py   # Multiprocessing classifier
+│   │       ├── base.py       # ANIWeightedClassifier (programmatic API: classify_read())
+│   │       └── vectorized.py # VectorizedClassifier (all CLI classification)
 │   └── phylogeny/            # Phylogenetic tree building and novel cluster placement
 │       ├── tree_builder.py   # ANI-to-Newick conversion, user tree loading
 │       └── placement.py      # Novel cluster extraction and tree placement

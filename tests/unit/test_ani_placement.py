@@ -10,16 +10,12 @@ Tests ANIMatrix, ANIWeightedClassifier, VectorizedClassifier including:
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
-
 import polars as pl
 import pytest
 
 from metadarkmatter.core.ani_placement import (
     ANIMatrix,
     ANIWeightedClassifier,
-    SparseANIMatrix,
     VectorizedClassifier,
 )
 from metadarkmatter.models.blast import BlastHit, BlastResult
@@ -142,68 +138,6 @@ class TestANIMatrix:
 
         assert isinstance(mem, int)
         assert mem > 0
-
-
-class TestSparseANIMatrix:
-    """Tests for SparseANIMatrix class."""
-
-    def test_create_from_dict(self, small_ani_dict):
-        """Should create SparseANIMatrix from nested dictionary."""
-        matrix = SparseANIMatrix(small_ani_dict)
-
-        assert len(matrix) == 3
-
-    def test_get_ani_same_genome(self, small_ani_dict):
-        """get_ani with same genome should return 100.0."""
-        matrix = SparseANIMatrix(small_ani_dict)
-
-        ani = matrix.get_ani("GCF_000123456.1", "GCF_000123456.1")
-
-        assert ani == 100.0
-
-    def test_get_ani_known_pair(self, small_ani_dict):
-        """get_ani should return correct value for stored pairs."""
-        matrix = SparseANIMatrix(small_ani_dict)
-
-        ani = matrix.get_ani("GCF_000123456.1", "GCF_000789012.1")
-
-        assert ani == 95.5
-
-    def test_get_ani_below_threshold(self, small_ani_dict):
-        """get_ani should return default for pairs below min_ani."""
-        matrix = SparseANIMatrix(small_ani_dict, min_ani=90.0, default_ani=70.0)
-
-        # GCF_000123456.1 <-> GCA_000111222.1 has ANI 80.0, below threshold
-        ani = matrix.get_ani("GCF_000123456.1", "GCA_000111222.1")
-
-        assert ani == 70.0  # Default value
-
-    def test_default_ani_for_unknown(self, small_ani_dict):
-        """Unknown genome pairs should return default ANI."""
-        matrix = SparseANIMatrix(small_ani_dict, default_ani=65.0)
-
-        ani = matrix.get_ani("GCF_000123456.1", "unknown_genome")
-
-        assert ani == 65.0
-
-    def test_density(self, small_ani_dict):
-        """density should return fraction of non-default values."""
-        matrix = SparseANIMatrix(small_ani_dict, min_ani=75.0)
-
-        density = matrix.density()
-
-        # Density can exceed 1.0 if matrix stores both (i,j) and (j,i)
-        # or if implementation differs from expected upper triangle only
-        assert density >= 0.0
-
-    def test_memory_usage_sparse(self, small_ani_dict):
-        """Sparse matrix should report lower memory for sparse data."""
-        sparse = SparseANIMatrix(small_ani_dict, min_ani=90.0)
-        dense = ANIMatrix(small_ani_dict)
-
-        # For small matrix, difference may not be significant
-        assert sparse.memory_usage_bytes() > 0
-        assert dense.memory_usage_bytes() > 0
 
 
 class TestANIWeightedClassifier:
@@ -405,68 +339,6 @@ class TestANIWeightedClassifier:
         assert classification.placement_uncertainty == 20.0
         assert classification.taxonomic_call == TaxonomicCall.AMBIGUOUS
 
-    def test_classify_blast_file(self, classifier, temp_blast_file):
-        """classify_blast_file should yield classifications."""
-        classifications = list(classifier.classify_blast_file(temp_blast_file))
-
-        assert len(classifications) > 0
-        for c in classifications:
-            assert c.read_id is not None
-            assert c.taxonomic_call is not None
-
-    def test_classify_to_dataframe(self, classifier, temp_blast_file):
-        """classify_to_dataframe should return Polars DataFrame."""
-        df = classifier.classify_to_dataframe(temp_blast_file)
-
-        assert isinstance(df, pl.DataFrame)
-        assert "read_id" in df.columns
-        assert "taxonomic_call" in df.columns
-        assert "novelty_index" in df.columns
-
-    def test_classify_to_dataframe_fast(self, classifier, temp_blast_file):
-        """classify_to_dataframe_fast should return same results faster."""
-        df_standard = classifier.classify_to_dataframe(temp_blast_file)
-        df_fast = classifier.classify_to_dataframe_fast(temp_blast_file)
-
-        # Same number of rows
-        assert len(df_standard) == len(df_fast)
-
-        # Same read IDs
-        standard_ids = set(df_standard["read_id"].to_list())
-        fast_ids = set(df_fast["read_id"].to_list())
-        assert standard_ids == fast_ids
-
-    def test_write_classifications_csv(self, classifier, temp_blast_file, temp_dir):
-        """write_classifications should write CSV file."""
-        output_path = temp_dir / "classifications.csv"
-
-        num_classified = classifier.write_classifications(
-            temp_blast_file, output_path, output_format="csv"
-        )
-
-        assert output_path.exists()
-        assert num_classified > 0
-
-        # Verify CSV can be read back
-        df = pl.read_csv(output_path)
-        assert len(df) == num_classified
-
-    def test_write_classifications_parquet(self, classifier, temp_blast_file, temp_dir):
-        """write_classifications should write Parquet file."""
-        output_path = temp_dir / "classifications.parquet"
-
-        num_classified = classifier.write_classifications(
-            temp_blast_file, output_path, output_format="parquet"
-        )
-
-        assert output_path.exists()
-        assert num_classified > 0
-
-        # Verify Parquet can be read back
-        df = pl.read_parquet(output_path)
-        assert len(df) == num_classified
-
-
 class TestClassificationThresholds:
     """Tests for classification threshold boundaries."""
 
@@ -646,23 +518,18 @@ class TestVectorizedClassifier:
         assert "taxonomic_call" in df.columns
         assert len(df) > 0
 
-    def test_classify_file_matches_standard(
+    def test_classify_file_has_expected_columns(
         self, ani_matrix, default_scoring_config, temp_blast_file
     ):
-        """VectorizedClassifier should produce similar results to standard."""
-        standard = ANIWeightedClassifier(ani_matrix, config=default_scoring_config)
+        """VectorizedClassifier should produce DataFrame with expected columns."""
         vectorized = VectorizedClassifier(ani_matrix, config=default_scoring_config)
 
-        df_standard = standard.classify_to_dataframe(temp_blast_file)
-        df_vectorized = vectorized.classify_file(temp_blast_file)
+        df = vectorized.classify_file(temp_blast_file)
 
-        # Same number of reads
-        assert len(df_standard) == len(df_vectorized)
-
-        # Same read IDs
-        standard_ids = set(df_standard["read_id"].to_list())
-        vectorized_ids = set(df_vectorized["read_id"].to_list())
-        assert standard_ids == vectorized_ids
+        assert isinstance(df, pl.DataFrame)
+        assert len(df) > 0
+        for col in ["read_id", "taxonomic_call", "novelty_index", "placement_uncertainty"]:
+            assert col in df.columns
 
     def test_stream_to_file_csv(
         self, ani_matrix, default_scoring_config, temp_blast_file, temp_dir
@@ -703,49 +570,6 @@ class TestVectorizedClassifier:
         # Parser raises ValueError during column detection for empty files
         with pytest.raises(ValueError, match="no data lines"):
             vectorized.classify_file(empty_blast_file)
-
-
-class TestClassifyReadFast:
-    """Tests for fast classification path."""
-
-    def test_classify_read_fast_returns_dict(self, classifier):
-        """classify_read_fast should return dictionary."""
-        from metadarkmatter.core.parsers import BlastHitFast, BlastResultFast
-
-        hit = BlastHitFast(
-            qseqid="read_001",
-            sseqid="GCF_000123456.1",
-            pident=99.0,
-            bitscore=250.0,
-            genome_name="GCF_000123456.1",
-        )
-        result = BlastResultFast(read_id="read_001", hits=(hit,))
-
-        classification = classifier.classify_read_fast(result)
-
-        assert isinstance(classification, dict)
-        assert classification["read_id"] == "read_001"
-        assert classification["taxonomic_call"] == "Known Species"
-
-    def test_classify_read_fast_empty_result(self, classifier):
-        """classify_read_fast with empty hits should return None."""
-        from metadarkmatter.core.parsers import BlastResultFast
-
-        result = BlastResultFast(read_id="read_001", hits=())
-
-        classification = classifier.classify_read_fast(result)
-
-        assert classification is None
-
-    def test_classify_blast_file_fast(self, classifier, temp_blast_file):
-        """classify_blast_file_fast should yield dictionaries."""
-        classifications = list(classifier.classify_blast_file_fast(temp_blast_file))
-
-        assert len(classifications) > 0
-        for c in classifications:
-            assert isinstance(c, dict)
-            assert "read_id" in c
-            assert "taxonomic_call" in c
 
 
 class TestUncertaintyModes:
