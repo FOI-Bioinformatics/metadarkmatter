@@ -26,7 +26,8 @@ metadarkmatter proteins predict --genomes genomes/ --missing-only --threads $THR
 # 2. Build ANI matrix
 metadarkmatter ani compute --genomes genomes/ --output ani_matrix.csv --threads $THREADS
 
-# 2b. Build AAI matrix (optional, for genus-level disambiguation)
+# 2b (Optional): Build AAI matrix for protein-level analysis
+# Only needed if you plan to use --alignment-mode protein
 metadarkmatter aai compute --genomes genomes/ --output aai_matrix.csv --threads $THREADS
 
 # 3. Classify metagenome and extract family reads
@@ -392,9 +393,13 @@ This ensures all genomes are represented in the matrix.
 
 ---
 
-## Step 4b: Build the AAI Matrix (Optional but Recommended)
+## Step 4b (Optional): Build the AAI Matrix
 
-AAI (Average Amino Acid Identity) provides genus-level resolution for reads with 20-25% novelty. It's particularly useful for:
+AAI (Average Amino acid Identity) is only needed for protein-level
+classification (`--alignment-mode protein`). Skip this step if you are
+using nucleotide-level classification with BLAST.
+
+AAI provides genus-level resolution for reads with 20-25% novelty. It is particularly useful for:
 - Samples with high genus-level diversity
 - Disambiguating borderline genus/species reads
 - Cross-genus validation

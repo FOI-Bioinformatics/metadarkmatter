@@ -4,7 +4,11 @@
 
 MMseqs2 is integrated into metadarkmatter as an alternative to BLAST for very large datasets. The implementation provides BLAST-compatible output that works seamlessly with the existing classification pipeline.
 
-**⚠️ IMPORTANT**: MMseqs2 is only faster than BLAST for datasets with >100,000 reads. For smaller datasets, use BLAST.
+**Note:** If you are running MMseqs2 outside of metadarkmatter (e.g., on
+an HPC cluster), see the [Workflow Guide](WORKFLOW.md#running-external-alignment-tools)
+for required output format parameters.
+
+**Important**: MMseqs2 is only faster than BLAST for datasets with >100,000 reads. For smaller datasets, use BLAST.
 
 ## When to Use MMseqs2
 

@@ -25,102 +25,23 @@ Complete technical reference for the metadarkmatter package.
 
 ## CLI Workflows
 
-### Standard Nucleotide Workflow
+For complete step-by-step workflows, see the
+[Tutorial](TUTORIAL_ENVIRONMENTAL_SPECIES.md) or the
+[Workflow Guide](WORKFLOW.md).
 
-Complete pipeline for nucleotide-level (BLASTN) read classification:
+### Command Summary
 
-```bash
-# Step 1: Download reference genomes for your bacterial family
-# Note: This automatically creates genome_metadata.tsv with species/genus info
-metadarkmatter download genomes list "f__YourFamily" --output genomes.tsv
-metadarkmatter download genomes fetch --accessions genomes.tsv --output-dir genomes/ --include-protein
-
-# Step 1b: Generate missing protein files with Prodigal (if any)
-metadarkmatter proteins predict --genomes genomes/ --missing-only --threads 16
-
-# Step 2a: Run Kraken2 taxonomic classification
-metadarkmatter kraken2 classify \
-  --reads-1 sample_R1.fastq.gz \
-  --reads-2 sample_R2.fastq.gz \
-  --kraken-db /path/to/kraken2_db \
-  --output kraken_output/
-
-# Step 2b: Extract reads for target family (outputs compressed by default)
-metadarkmatter kraken2 extract \
-  --kraken-output kraken_output/sample.kraken \
-  --reads-1 sample_R1.fastq.gz \
-  --reads-2 sample_R2.fastq.gz \
-  --taxid FAMILY_TAXID \
-  --output extraction/
-
-# Step 3: Build BLAST database from reference genomes
-# Note: Headers are standardized to {accession}|{contig_id} format
-# Creates contig_mapping.tsv for multi-contig draft genome tracking
-metadarkmatter blast makedb \
-  --genomes genomes/ \
-  --output blastdb/pangenome
-
-# Step 4: Run competitive BLAST alignment (accepts compressed query)
-metadarkmatter blast align \
-  --query extraction/sample_taxidFAMILY_TAXID_R1.fastq.gz \
-  --database blastdb/pangenome \
-  --output sample.blast.tsv.gz \
-  --threads 16
-
-# Step 5: Compute ANI matrix from reference genomes
-metadarkmatter ani compute \
-  --genomes genomes/ \
-  --output ani_matrix.csv \
-  --threads 16
-
-# Step 6: ANI-weighted classification (core algorithm)
-# Use --metadata to add species/genus columns and species-level aggregation
-metadarkmatter score classify \
-  --alignment sample.blast.tsv.gz \
-  --ani ani_matrix.csv \
-  --metadata genome_metadata.tsv \
-  --output classifications.csv \
-  --summary summary.json
-
-# Step 7: Generate HTML report with species breakdown
-metadarkmatter report generate \
-  --classifications classifications.csv \
-  --metadata genome_metadata.tsv \
-  --output report.html
-
-# Optional: Multi-sample comparison
-metadarkmatter report multi \
-  --input-dir results/ \
-  --output comparison.html
-```
+| Step | Nucleotide Mode | Protein Mode |
+|------|----------------|--------------|
+| 1. Download genomes | `download genomes list` + `fetch` | Same |
+| 2. Extract reads | `kraken2 classify` + `extract` | Same |
+| 3. Build database | `blast makedb` | `blastx makedb` |
+| 4. Align reads | `blast align` | `blastx align` |
+| 5. Compute matrix | `ani compute` | `ani compute` + `aai compute` |
+| 6. Classify | `score classify` | `score classify --alignment-mode protein` |
+| 7. Report | `report generate` | Same |
 
 ### Protein-Level Workflow
-
-For highly divergent taxa where nucleotide-based alignment may miss homology, use protein-level (BLASTX) classification:
-
-```bash
-# Step 3b (Alternative): Build Diamond protein database from reference proteomes
-metadarkmatter blastx makedb \
-  --proteins genomes/proteins/ \
-  --output blastdb/panproteome \
-  --threads 16
-
-# Step 4b (Alternative): Run BLASTX alignment (DNA reads vs protein database)
-metadarkmatter blastx align \
-  --query extraction/sample_taxidFAMILY_TAXID_R1.fastq.gz \
-  --database blastdb/panproteome \
-  --output sample.blastx.tsv.gz \
-  --threads 16
-
-# Step 6b (Alternative): Protein-level classification (uses protein thresholds)
-metadarkmatter score classify \
-  --alignment sample.blastx.tsv.gz \
-  --ani ani_matrix.csv \
-  --aai aai_matrix.csv \
-  --alignment-mode protein \
-  --output classifications.csv \
-  --summary summary.json
-```
 
 **When to use protein-level classification:**
 - Genus-level novelty where nucleotide identity degrades faster than protein identity

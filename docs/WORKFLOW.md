@@ -2,6 +2,42 @@
 
 A step-by-step guide to analyze metagenomic samples for novel bacterial diversity.
 
+## Prerequisites
+
+Before starting, ensure you have:
+
+- Python 3.11 or higher
+- metadarkmatter installed (`pip install -e .`)
+- Kraken2 database (Standard or PlusPF from https://benlangmead.github.io/aws-indexes/k2)
+- Reference genomes for your target bacterial family
+- 32 GB RAM minimum (64 GB recommended for >1M alignments)
+- ~50-200 GB disk space depending on database strategy
+
+External tools:
+
+    conda install -c bioconda kraken2 krakentools blast skani
+
+Optional:
+
+    conda install -c bioconda mmseqs2    # For datasets >100K reads
+    conda install -c bioconda diamond    # For protein-level classification
+
+## Choosing an Alignment Approach
+
+| Scenario | Tool | Approach |
+|----------|------|----------|
+| <100K reads, local machine | BLAST (built-in) | `metadarkmatter blast makedb` + `blast align` |
+| >100K reads, local machine | MMseqs2 (built-in) | `metadarkmatter mmseqs2 makedb` + `mmseqs2 search` |
+| HPC cluster, BLAST available | BLAST (external) | Run `blastn -outfmt 6`, then import with ID mapping |
+| HPC cluster, MMseqs2 available | MMseqs2 (external) | Run `mmseqs easy-search` with format flags, then import |
+| Existing results from pipeline | Either (external) | Import with ID mapping (see below) |
+
+For built-in alignment, see Step 5 below. For external alignment, see
+[Running External Alignment Tools](#running-external-alignment-tools) and
+[Importing External Alignment Results](#importing-external-alignment-results).
+
+---
+
 ## Database Strategy: Family vs GTDB
 
 Before starting, you must choose a BLAST database strategy. This decision affects sensitivity, specificity, and computational requirements.
@@ -219,21 +255,6 @@ metadarkmatter score classify \
 - When BLASTN fails to find homology
 
 ---
-
-## Prerequisites
-
-Before starting, ensure you have:
-
-- [ ] Python 3.11 or higher
-- [ ] metadarkmatter installed (`pip install -e .`)
-- [ ] Kraken2 database for your target ecosystem
-- [ ] Reference genomes for your bacterial family of interest
-- [ ] Precomputed ANI matrix for reference genomes (see Step 2)
-
-External tools (install via conda):
-```bash
-conda install -c bioconda kraken2 krakentools blast bowtie2 samtools fastani diamond
-```
 
 ## Workflow Overview
 
@@ -482,9 +503,9 @@ metadarkmatter report multi \
 
 | Category | Novelty Index | Placement Uncertainty | Interpretation |
 |----------|---------------|----------------------|----------------|
-| Known Species | < 2% | < 0.5% | Matches reference genome |
-| Novel Species | 5-20% | < 0.5% | New species in known genus |
-| Novel Genus | 20-25% | < 2% | New genus in family |
+| Known Species | < 4% | < 1.5% | Matches reference genome |
+| Novel Species | 4-20% | < 1.5% | New species in known genus |
+| Novel Genus | 20-25% | < 1.5% | New genus in family |
 | Conserved Region | any | > 5% | Ambiguous (rRNA, etc.) |
 
 ### Key Metrics
@@ -626,7 +647,7 @@ qseqid  sseqid  pident  length  mismatch  gapopen  qstart  qend  sstart  send  e
 - Gzipped files (`.gz`) are handled automatically
 - The 13th column (`qlen`) is optional but enables more accurate coverage weighting
 
-This format is the default output of `blastn -outfmt 6` and `mmseqs convertalis`. Most alignment tools can produce it.
+This format is produced by `blastn -outfmt 6`. For MMseqs2, you must explicitly request this format with `--format-mode 0 --format-output` (see [Running External Alignment Tools](#running-external-alignment-tools) below).
 
 ### Important Notes
 
@@ -662,6 +683,64 @@ metadarkmatter report generate \
     --ani ani_matrix.csv \
     --output report.html
 ```
+
+---
+
+## Running External Alignment Tools
+
+If you run alignment on an HPC cluster or through a pipeline, you must ensure
+the output format is compatible with metadarkmatter.
+
+### External BLAST
+
+BLAST tabular format is straightforward:
+
+    blastn -query reads.fasta -db reference_db \
+      -outfmt "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qlen" \
+      -max_target_seqs 100 -num_threads 16 \
+      -out results.tsv
+
+The 13th column (qlen) is optional but enables coverage weighting.
+
+### External MMseqs2
+
+MMseqs2 does NOT output BLAST-compatible format by default. You must
+explicitly request it:
+
+    # Option A: easy-search (single command)
+    mmseqs easy-search query.fasta target_db results.tsv tmp/ \
+      --format-mode 0 \
+      --format-output "query,target,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits,qlen" \
+      --threads 16
+
+    # Option B: search + convertalis (two-step, reusable databases)
+    mmseqs createdb query.fasta query_db
+    mmseqs search query_db target_db results tmp/ --threads 16
+    mmseqs convertalis query_db target_db results results.tsv \
+      --format-output "query,target,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits,qlen"
+
+The `--format-output` column list must match exactly. These are the same
+columns metadarkmatter's built-in `mmseqs2 search` uses internally.
+
+### Paired-End Reads with External MMseqs2
+
+For paired-end data, concatenate reads before searching (standard MMseqs2
+approach):
+
+    cat reads_R1.fastq reads_R2.fastq > reads_combined.fastq
+    mmseqs easy-search reads_combined.fastq target_db results.tsv tmp/ \
+      --format-mode 0 \
+      --format-output "query,target,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits,qlen" \
+      --threads 16
+
+### After External Alignment
+
+Follow the ID mapping workflow above to classify external results:
+
+    metadarkmatter util generate-mapping --genomes reference_genomes/ --output id_mapping.tsv
+    metadarkmatter util validate-mapping id_mapping.tsv --blast results.tsv
+    metadarkmatter score classify --alignment results.tsv --ani ani_matrix.csv \
+      --id-mapping id_mapping.tsv --output classifications.csv
 
 ---
 

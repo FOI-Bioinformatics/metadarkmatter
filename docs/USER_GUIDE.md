@@ -24,29 +24,20 @@ For comprehensive coverage, see specialized documentation:
 
 ## Quick Start
 
-Basic workflow for classifying metagenomic reads:
+For the complete end-to-end workflow (genome download through report
+generation), see the [Tutorial](TUTORIAL_ENVIRONMENTAL_SPECIES.md).
 
-```bash
-# Classify BLAST results using ANI-weighted placement
-metadarkmatter score classify \
-    --alignment results.blast.tsv.gz \
-    --ani ani_matrix.csv \
-    --metadata genome_metadata.tsv \
-    --output classifications.csv
+If you already have alignment results and an ANI matrix, the core
+classification step is:
 
-# Extract novel candidates
-metadarkmatter score extract-novel \
-    --classifications classifications.csv \
-    --output novel_candidates.csv
+    metadarkmatter score classify \
+        --alignment results.blast.tsv.gz \
+        --ani ani_matrix.csv \
+        --metadata genome_metadata.tsv \
+        --output classifications.csv
 
-# Generate HTML report
-metadarkmatter report generate \
-    --classifications classifications.csv \
-    --metadata genome_metadata.tsv \
-    --output report.html
-```
-
-For complete step-by-step workflow, see [TUTORIAL_ENVIRONMENTAL_SPECIES.md](TUTORIAL_ENVIRONMENTAL_SPECIES.md).
+For importing external BLAST/MMseqs2 results, see the
+[Workflow Guide](WORKFLOW.md#importing-external-alignment-results).
 
 ---
 
