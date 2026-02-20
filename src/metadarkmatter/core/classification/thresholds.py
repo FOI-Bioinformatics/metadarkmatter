@@ -44,7 +44,7 @@ def apply_classification_thresholds(
         DataFrame with updated taxonomic_call and diversity_status columns.
     """
     # Build effective thresholds (handles protein vs nucleotide mode)
-    eff = _effective_thresholds(config)
+    eff = config.get_effective_thresholds()
 
     # Compute inferred uncertainty breakpoints (continuous piecewise-linear)
     inferred_known_break = 5.0 + eff["novelty_known_max"] * 0.5
@@ -158,46 +158,3 @@ def apply_classification_thresholds(
         result = pl.concat([result, off_target_rows], how="diagonal_relaxed")
 
     return result
-
-
-def _effective_thresholds(config: ScoringConfig) -> dict[str, float]:
-    """
-    Build effective threshold dictionary from config.
-
-    Handles protein vs nucleotide mode by checking alignment_mode.
-    """
-    if config.alignment_mode == "protein":
-        from metadarkmatter.core.protein_constants import (
-            PROTEIN_NOVELTY_KNOWN_MAX,
-            PROTEIN_NOVELTY_NOVEL_SPECIES_MIN,
-            PROTEIN_NOVELTY_NOVEL_SPECIES_MAX,
-            PROTEIN_NOVELTY_NOVEL_GENUS_MIN,
-            PROTEIN_NOVELTY_NOVEL_GENUS_MAX,
-            PROTEIN_UNCERTAINTY_KNOWN_MAX,
-            PROTEIN_UNCERTAINTY_NOVEL_SPECIES_MAX,
-            PROTEIN_UNCERTAINTY_NOVEL_GENUS_MAX,
-            PROTEIN_UNCERTAINTY_CONSERVED_MIN,
-        )
-        return {
-            "novelty_known_max": config.novelty_known_max if config.novelty_known_max != 4.0 else PROTEIN_NOVELTY_KNOWN_MAX,
-            "novelty_novel_species_min": config.novelty_novel_species_min if config.novelty_novel_species_min != 4.0 else PROTEIN_NOVELTY_NOVEL_SPECIES_MIN,
-            "novelty_novel_species_max": config.novelty_novel_species_max if config.novelty_novel_species_max != 20.0 else PROTEIN_NOVELTY_NOVEL_SPECIES_MAX,
-            "novelty_novel_genus_min": config.novelty_novel_genus_min if config.novelty_novel_genus_min != 20.0 else PROTEIN_NOVELTY_NOVEL_GENUS_MIN,
-            "novelty_novel_genus_max": config.novelty_novel_genus_max if config.novelty_novel_genus_max != 25.0 else PROTEIN_NOVELTY_NOVEL_GENUS_MAX,
-            "uncertainty_known_max": PROTEIN_UNCERTAINTY_KNOWN_MAX,
-            "uncertainty_novel_species_max": PROTEIN_UNCERTAINTY_NOVEL_SPECIES_MAX,
-            "uncertainty_novel_genus_max": PROTEIN_UNCERTAINTY_NOVEL_GENUS_MAX,
-            "uncertainty_conserved_min": PROTEIN_UNCERTAINTY_CONSERVED_MIN,
-        }
-    else:
-        return {
-            "novelty_known_max": config.novelty_known_max,
-            "novelty_novel_species_min": config.novelty_novel_species_min,
-            "novelty_novel_species_max": config.novelty_novel_species_max,
-            "novelty_novel_genus_min": config.novelty_novel_genus_min,
-            "novelty_novel_genus_max": config.novelty_novel_genus_max,
-            "uncertainty_known_max": config.uncertainty_known_max,
-            "uncertainty_novel_species_max": config.uncertainty_novel_species_max,
-            "uncertainty_novel_genus_max": config.uncertainty_novel_genus_max,
-            "uncertainty_conserved_min": config.uncertainty_conserved_min,
-        }
