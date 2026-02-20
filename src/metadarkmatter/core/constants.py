@@ -14,32 +14,12 @@ from __future__ import annotations
 # Default placeholder for unknown or unresolved genome names
 UNKNOWN_GENOME = "unknown"
 
-# BLAST output format string for standard 12-column tabular output
-BLAST_OUTFMT_12COL = (
-    "6 qseqid sseqid pident length mismatch gapopen "
-    "qstart qend sstart send evalue bitscore"
-)
-
 # =============================================================================
-# ANI Thresholds - Literature-backed Values
-#
-# References:
-# - Jain et al. 2018, Nature Communications: 95-96% ANI species boundary
-# - Parks et al. 2020, Nature Biotechnology: GTDB taxonomy standards
+# ANI Thresholds
 # =============================================================================
-
-# ANI values below which genomes are considered different genera
-ANI_GENUS_BOUNDARY = 75.0
-
-# ANI values at which genomes are considered different species
-ANI_SPECIES_BOUNDARY_LOW = 95.0
-ANI_SPECIES_BOUNDARY_HIGH = 96.0
 
 # Default ANI for unrelated genomes (fallback when no ANI available)
 ANI_DEFAULT_UNRELATED = 70.0
-
-# Minimum ANI to consider genomes related enough for comparison
-ANI_MIN_RELATED = 75.0
 
 # =============================================================================
 # AAI Thresholds - Literature-backed Values for Genus-Level Classification
@@ -61,9 +41,6 @@ AAI_GENUS_BOUNDARY_LOW = 58.0
 
 # Default AAI for unrelated genomes (fallback when no AAI available)
 AAI_DEFAULT_UNRELATED = 50.0
-
-# Minimum AAI to consider genomes related enough for comparison
-AAI_MIN_RELATED = 45.0
 
 # =============================================================================
 # Classification Categories
@@ -112,10 +89,6 @@ UNCERTAINTY_CONFIDENT_MAX = 1.5
 
 # Threshold above which hits are considered "Conserved Region"
 UNCERTAINTY_CONSERVED_MIN = 5.0
-
-# Range for "Ambiguous" classification
-UNCERTAINTY_AMBIGUOUS_MIN = 1.5
-UNCERTAINTY_AMBIGUOUS_MAX = 5.0
 
 
 # =============================================================================
