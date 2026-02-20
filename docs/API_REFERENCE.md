@@ -3,7 +3,7 @@
 Complete API documentation for the metadarkmatter Python package. This reference covers all public interfaces for the ANI-weighted placement uncertainty algorithm and supporting data structures.
 
 **Package Version**: 0.1.0
-**Last Updated**: 2025-12-31
+**Last Updated**: 2026-02-20
 
 ---
 
@@ -43,7 +43,7 @@ ANIMatrix instance ready for classification tasks
 
 **Example**:
 ```python
-from metadarkmatter.core.ani_placement import ANIMatrix
+from metadarkmatter.core.classification.ani_matrix import ANIMatrix
 
 ani_dict = {
     "GCF_000001": {"GCF_000001": 100.0, "GCF_000002": 85.3},
@@ -55,7 +55,7 @@ print(f"Memory usage: {ani_matrix.memory_usage_bytes() / 1e6:.1f} MB")
 ```
 
 **Performance Notes**:
-- Initialization time: O(n²) where n is number of genomes (only occurs once)
+- Initialization time: O(n^2) where n is number of genomes (only occurs once)
 - Memory usage: ~4 MB for 1000 genomes (dense matrix)
 - Lookup time: O(1) after initial dict lookup
 
@@ -84,7 +84,7 @@ ANIMatrix instance loaded from file
 **Example**:
 ```python
 from pathlib import Path
-from metadarkmatter.core.ani_placement import ANIMatrix
+from metadarkmatter.core.classification.ani_matrix import ANIMatrix
 
 ani_matrix = ANIMatrix.from_file(Path("ani_matrix.csv"))
 ```
@@ -258,7 +258,7 @@ print(f"ANI matrix memory: {mem_mb:.1f} MB")
 
 ### ANIWeightedClassifier
 
-Main classifier for detecting novel microbial diversity using ANI-weighted placement.
+Main classifier for detecting novel microbial diversity using ANI-weighted placement. This class provides the core single-read classification algorithm used by higher-level classifiers.
 
 #### Constructor
 
@@ -281,7 +281,8 @@ ANIWeightedClassifier instance ready for classification
 
 **Example**:
 ```python
-from metadarkmatter.core.ani_placement import ANIMatrix, ANIWeightedClassifier
+from metadarkmatter.core.classification.classifiers.base import ANIWeightedClassifier
+from metadarkmatter.core.classification.ani_matrix import ANIMatrix
 from metadarkmatter.models.config import ScoringConfig
 
 ani_matrix = ANIMatrix.from_file(Path("ani_matrix.csv"))
@@ -292,7 +293,7 @@ classifier = ANIWeightedClassifier(ani_matrix)
 # Or customize scoring thresholds
 config = ScoringConfig(
     bitscore_threshold_pct=95.0,
-    novelty_novel_species_min=5.0,
+    novelty_novel_species_min=4.0,
     novelty_novel_species_max=20.0,
 )
 classifier = ANIWeightedClassifier(ani_matrix, config)
@@ -339,394 +340,9 @@ if classification:
 
 ---
 
-#### ANIWeightedClassifier.classify_blast_file()
-
-```python
-def classify_blast_file(
-    self,
-    blast_path: Path,
-) -> Iterator[ReadClassification]
-```
-
-**Description**:
-Classify all reads from a BLAST file using memory-efficient streaming. Yields results one at a time without loading entire file into memory.
-
-**Parameters**:
-- `blast_path` (Path): Path to BLAST tabular output
-
-**Yields**:
-ReadClassification objects for each successfully classified read
-
-**Memory Usage**:
-- Constant memory regardless of file size
-- Processes in configurable chunks (default: 1M records per chunk)
-
-**Example**:
-```python
-# Stream results without loading entire file
-for classification in classifier.classify_blast_file(Path("blast.tsv")):
-    if classification.is_novel:
-        print(f"Novel: {classification.read_id} in {classification.best_match_genome}")
-
-# Or collect with early termination
-novel_only = [c for c in classifier.classify_blast_file(Path("blast.tsv"))
-              if c.is_novel]
-```
-
----
-
-#### ANIWeightedClassifier.classify_to_dataframe()
-
-```python
-def classify_to_dataframe(
-    self,
-    blast_path: Path,
-) -> pl.DataFrame
-```
-
-**Description**:
-Classify all reads and return results as a Polars DataFrame. Use for medium-sized files where full results fit in memory.
-
-**Parameters**:
-- `blast_path` (Path): Path to BLAST tabular output
-
-**Returns**:
-Polars DataFrame with columns:
-- `read_id` (Utf8): Read identifier
-- `best_match_genome` (Utf8): Top hit genome name
-- `top_hit_identity` (Float64): Percent identity of best hit (0-100)
-- `novelty_index` (Float64): Divergence metric (0-100)
-- `placement_uncertainty` (Float64): Ambiguity metric (0-100)
-- `num_ambiguous_hits` (Int64): Number of competitive hits
-- `taxonomic_call` (Utf8): Classification result
-- `is_novel` (Boolean): True if Novel Species or Novel Genus
-
-**Example**:
-```python
-df = classifier.classify_to_dataframe(Path("blast.tsv"))
-
-# Analyze results
-novel_count = (df["is_novel"]).sum()
-mean_novelty = df["novelty_index"].mean()
-print(f"Novel reads: {novel_count} / {len(df)}")
-print(f"Mean novelty: {mean_novelty:.2f}")
-
-# Filter and export
-df.filter(pl.col("is_novel")).write_csv("novel_only.csv")
-```
-
----
-
-#### ANIWeightedClassifier.write_classifications()
-
-```python
-def write_classifications(
-    self,
-    blast_path: Path,
-    output_path: Path,
-    output_format: str = "csv",
-) -> int
-```
-
-**Description**:
-Classify reads and write results directly to file. Useful for large files or when further analysis is not needed in memory.
-
-**Parameters**:
-- `blast_path` (Path): Path to BLAST tabular output
-- `output_path` (Path): Path for output file
-- `output_format` (str): Output format - "csv" or "parquet" (default: "csv"). Parquet is 10x smaller and 10x faster for large datasets.
-
-**Returns**:
-Number of reads classified
-
-**Example**:
-```python
-# Write to CSV (human-readable)
-num_reads = classifier.write_classifications(
-    Path("blast.tsv"),
-    Path("classifications.csv"),
-    output_format="csv"
-)
-print(f"Classified {num_reads} reads")
-
-# Write to Parquet (efficient for 100M+ reads)
-num_reads = classifier.write_classifications(
-    Path("blast.tsv"),
-    Path("classifications.parquet"),
-    output_format="parquet"
-)
-```
-
----
-
-#### ANIWeightedClassifier.classify_read_fast()
-
-```python
-def classify_read_fast(
-    self,
-    result: BlastResultFast,
-) -> dict | None
-```
-
-**Description**:
-Classify a read using lightweight data structures. Approximately 10x faster than classify_read() for large-scale processing.
-
-**Performance Optimizations**:
-- Uses BlastResultFast (NamedTuple) instead of Pydantic model
-- Pre-extracted genome names avoid regex in hot path
-- Returns dict directly, bypassing Pydantic on output
-
-**Parameters**:
-- `result` (BlastResultFast): BLAST result with pre-extracted genome names
-
-**Returns**:
-Dictionary with classification results, or None if no hits:
-```python
-{
-    "read_id": str,
-    "best_match_genome": str,
-    "top_hit_identity": float,
-    "novelty_index": float,
-    "placement_uncertainty": float,
-    "num_ambiguous_hits": int,
-    "taxonomic_call": str,
-    "is_novel": bool,
-}
-```
-
-**Example**:
-```python
-parser = StreamingBlastParser(Path("blast.tsv"))
-for result in parser.iter_reads_fast():
-    classification = classifier.classify_read_fast(result)
-    if classification and classification["is_novel"]:
-        print(f"Novel: {classification['read_id']}")
-```
-
----
-
-#### ANIWeightedClassifier.classify_blast_file_fast()
-
-```python
-def classify_blast_file_fast(
-    self,
-    blast_path: Path,
-) -> Iterator[dict]
-```
-
-**Description**:
-High-performance streaming classification using lightweight data structures and vectorized genome extraction. Approximately 10x faster than classify_blast_file().
-
-**Performance Optimizations**:
-- Uses iter_reads_fast() with NamedTuples (~50x faster object creation)
-- Vectorized genome extraction in Polars (~100x faster)
-- Returns dicts instead of Pydantic models
-
-**Parameters**:
-- `blast_path` (Path): Path to BLAST tabular output
-
-**Yields**:
-Dict with classification results for each read
-
-**Example**:
-```python
-# High-performance streaming for large files
-for classification in classifier.classify_blast_file_fast(Path("blast.tsv")):
-    if classification["is_novel"]:
-        print(f"Novel: {classification['read_id']}")
-```
-
----
-
-#### ANIWeightedClassifier.classify_to_dataframe_fast()
-
-```python
-def classify_to_dataframe_fast(
-    self,
-    blast_path: Path,
-) -> pl.DataFrame
-```
-
-**Description**:
-Classify reads and return Polars DataFrame directly using fast methods. This is the fastest method for processing large BLAST files that fit in memory.
-
-**Performance vs classify_to_dataframe()**:
-- ~10x faster for large files (100M+ reads)
-- ~5x less memory usage
-- Streaming-compatible
-
-**Parameters**:
-- `blast_path` (Path): Path to BLAST tabular output
-
-**Returns**:
-Polars DataFrame with classification results (same schema as classify_to_dataframe)
-
-**Example**:
-```python
-# Fast processing for 10M+ read files
-df = classifier.classify_to_dataframe_fast(Path("blast.tsv"))
-print(f"Classified {len(df)} reads in ~30 seconds")
-```
-
----
-
-#### ANIWeightedClassifier.stream_to_file_fast()
-
-```python
-def stream_to_file_fast(
-    self,
-    blast_path: Path,
-    output_path: Path,
-    output_format: str = "parquet",
-    chunk_size: int = 100_000,
-    progress_callback: Callable[[int, int], None] | None = None,
-) -> int
-```
-
-**Description**:
-Stream classification results directly to disk in chunks. Suitable for very large files (100M+ reads) where memory is constrained.
-
-**Parameters**:
-- `blast_path` (Path): Path to BLAST tabular output
-- `output_path` (Path): Output file path
-- `output_format` (str): 'parquet' or 'csv' (default: "parquet")
-- `chunk_size` (int): Number of classifications per batch (default: 100,000)
-- `progress_callback` (Callable, optional): Function called as `progress_callback(processed, total)` for progress reporting
-
-**Returns**:
-Total number of reads classified
-
-**Memory Usage**:
-- Bounded by chunk_size: ~200 bytes per record
-- Default chunk_size (100K) uses ~20 MB per batch
-
-**Example**:
-```python
-def show_progress(done, total):
-    print(f"Processed {done:,} / {total:,} reads...")
-
-total = classifier.stream_to_file_fast(
-    Path("blast.tsv"),
-    Path("classifications.parquet"),
-    chunk_size=100_000,
-    progress_callback=show_progress
-)
-print(f"Total classified: {total:,} reads")
-```
-
----
-
-### ParallelClassifier
-
-Parallel classifier for very large BLAST files using multiprocessing.
-
-#### Constructor
-
-```python
-ParallelClassifier(
-    ani_matrix: ANIMatrix,
-    config: ScoringConfig | None = None,
-    num_workers: int | None = None,
-    chunk_size: int = 50_000,
-) -> ParallelClassifier
-```
-
-**Description**:
-Initialize parallel classifier for multicore processing. The ANI matrix is shared across processes using shared memory, minimizing memory overhead.
-
-**Parameters**:
-- `ani_matrix` (ANIMatrix): Precomputed ANI matrix
-- `config` (ScoringConfig, optional): Scoring configuration (uses defaults if None)
-- `num_workers` (int, optional): Number of worker processes (default: CPU count - 1)
-- `chunk_size` (int): Reads per worker chunk (default: 50,000)
-
-**Returns**:
-ParallelClassifier instance
-
-**Example**:
-```python
-ani_matrix = ANIMatrix.from_file(Path("ani_matrix.csv"))
-parallel = ParallelClassifier(ani_matrix, num_workers=8, chunk_size=50_000)
-```
-
----
-
-#### ParallelClassifier.classify_file()
-
-```python
-def classify_file(
-    self,
-    blast_path: Path,
-    progress_callback: Callable[[int], None] | None = None,
-) -> pl.DataFrame
-```
-
-**Description**:
-Classify BLAST file using parallel processing across multiple CPU cores.
-
-**Parameters**:
-- `blast_path` (Path): Path to BLAST tabular output
-- `progress_callback` (Callable, optional): Function called as `progress_callback(chunks_completed)` for progress
-
-**Returns**:
-Polars DataFrame with classification results
-
-**Performance**:
-- Ideal for files with 10M+ reads where single-threaded processing becomes a bottleneck
-- Memory efficient through chunked processing
-- Automatic CPU core utilization
-
-**Example**:
-```python
-def progress(chunks):
-    print(f"Completed {chunks} chunks...")
-
-df = parallel.classify_file(
-    Path("blast.tsv"),
-    progress_callback=progress
-)
-print(f"Classified {len(df)} reads using {parallel.num_workers} workers")
-```
-
----
-
-#### ParallelClassifier.stream_to_file()
-
-```python
-def stream_to_file(
-    self,
-    blast_path: Path,
-    output_path: Path,
-    output_format: str = "parquet",
-    progress_callback: Callable[[int], None] | None = None,
-) -> int
-```
-
-**Description**:
-Classify and stream results to file using parallel processing. Combines parallel classification with chunked output for maximum scalability.
-
-**Parameters**:
-- `blast_path` (Path): Path to BLAST tabular output
-- `output_path` (Path): Output file path
-- `output_format` (str): 'parquet' or 'csv'
-- `progress_callback` (Callable, optional): Function called as `progress_callback(chunks_completed)`
-
-**Returns**:
-Total reads classified
-
-**Example**:
-```python
-total = parallel.stream_to_file(
-    Path("blast.tsv"),
-    Path("classifications.parquet")
-)
-```
-
----
-
 ### VectorizedClassifier
 
-Fully vectorized classifier using Polars for maximum performance.
+Fully vectorized classifier using Polars for maximum performance. This is the sole classifier used by the CLI.
 
 #### Constructor
 
@@ -740,11 +356,6 @@ VectorizedClassifier(
 **Description**:
 Initialize vectorized classifier using Polars' native Rust backend. All operations run in Polars with automatic CPU parallelization, avoiding Python loops entirely.
 
-**Performance vs Other Methods**:
-- 5-10x faster than classify_to_dataframe_fast() for large files
-- Uses Polars' internal parallelism (no multiprocessing overhead)
-- Memory-efficient through lazy evaluation
-
 **Parameters**:
 - `ani_matrix` (ANIMatrix): Precomputed ANI matrix
 - `config` (ScoringConfig, optional): Scoring configuration (uses defaults if None)
@@ -754,6 +365,9 @@ VectorizedClassifier instance
 
 **Example**:
 ```python
+from metadarkmatter.core.classification.classifiers.vectorized import VectorizedClassifier
+from metadarkmatter.core.classification.ani_matrix import ANIMatrix
+
 ani_matrix = ANIMatrix.from_file(Path("ani_matrix.csv"))
 vectorized = VectorizedClassifier(ani_matrix)
 ```
@@ -823,109 +437,6 @@ total = vectorized.stream_to_file(
     Path("classifications.parquet"),
     progress_callback=progress
 )
-```
-
----
-
-### SparseANIMatrix
-
-Sparse ANI matrix for very large genome sets (10K+ genomes).
-
-#### Constructor
-
-```python
-SparseANIMatrix(
-    ani_dict: dict[str, dict[str, float]],
-    default_ani: float = 70.0,
-    min_ani: float = 75.0,
-) -> SparseANIMatrix
-```
-
-**Description**:
-Initialize sparse ANI matrix for large genome databases. Stores only non-zero ANI values, reducing memory from 400 MB (dense) to ~20 MB (5% density) for 10K genomes.
-
-**Parameters**:
-- `ani_dict` (dict[str, dict[str, float]]): Nested dictionary of ANI values
-- `default_ani` (float): Default ANI for missing pairs (default: 70.0)
-- `min_ani` (float): Minimum ANI value to store; below this uses default (default: 75.0)
-
-**Returns**:
-SparseANIMatrix instance
-
-**Example**:
-```python
-from metadarkmatter.core.ani_placement import SparseANIMatrix
-
-# Use sparse representation for 10K+ genomes
-sparse_matrix = SparseANIMatrix(ani_dict, default_ani=70.0)
-classifier = ANIWeightedClassifier(sparse_matrix)
-```
-
----
-
-#### SparseANIMatrix.from_file()
-
-```python
-@classmethod
-from_file(cls, path: Path, **kwargs) -> SparseANIMatrix
-```
-
-**Description**:
-Load sparse ANI matrix from file.
-
-**Parameters**:
-- `path` (Path): File path to ANI matrix
-- `**kwargs`: Additional arguments passed to constructor (default_ani, min_ani)
-
-**Returns**:
-SparseANIMatrix instance
-
-**Example**:
-```python
-sparse_matrix = SparseANIMatrix.from_file(Path("ani_matrix.csv"), default_ani=70.0)
-```
-
----
-
-#### SparseANIMatrix.get_ani()
-
-```python
-def get_ani(self, genome1: str, genome2: str) -> float
-```
-
-**Description**:
-Get ANI between two genomes, using default ANI for missing pairs.
-
-**Parameters**:
-- `genome1` (str): First genome identifier
-- `genome2` (str): Second genome identifier
-
-**Returns**:
-ANI value (0-100), or default_ani if genomes not found
-
-**Example**:
-```python
-ani = sparse_matrix.get_ani("GCF_001", "GCF_002")  # Returns default if not stored
-```
-
----
-
-#### SparseANIMatrix.density()
-
-```python
-def density(self) -> float
-```
-
-**Description**:
-Calculate matrix density (fraction of non-default values stored).
-
-**Returns**:
-Density as float between 0 and 1
-
-**Example**:
-```python
-density = sparse_matrix.density()
-print(f"Matrix density: {density:.1%}")  # e.g., "Matrix density: 5.2%"
 ```
 
 ---
@@ -1282,13 +793,24 @@ class ReadClassification(BaseModel):
     novelty_index: float                 # [0-100]
     placement_uncertainty: float         # [0-100]
     num_ambiguous_hits: int
+    second_hit_identity: float | None
+    identity_gap: float | None
+    genus_uncertainty: float | None
+    num_genus_hits: int | None
+    confidence_score: float | None
+    inferred_uncertainty: float | None
+    uncertainty_type: str | None
+    alignment_quality: float | None
+    identity_confidence: float | None
+    placement_confidence: float | None
+    discovery_score: float | None
     taxonomic_call: TaxonomicCall
 ```
 
 **Description**:
 Contains ANI-weighted placement metrics and final taxonomic call for detecting novel bacterial diversity.
 
-**Attributes**:
+**Core Attributes**:
 - `read_id` (str): Original read identifier from FASTQ/BLAST
 - `best_match_genome` (str): Genome with highest BLAST bitscore hit
 - `top_hit_identity` (float): Percent identity of best BLAST hit (0-100)
@@ -1297,8 +819,22 @@ Contains ANI-weighted placement metrics and final taxonomic call for detecting n
 - `num_ambiguous_hits` (int): Number of hits within 95% of top bitscore
 - `taxonomic_call` (TaxonomicCall): Final classification result
 
-**Properties**:
-- `is_novel` (bool, computed): True if taxonomic_call is NOVEL_SPECIES or NOVEL_GENUS
+**Enhanced Scoring Attributes** (always computed):
+- `second_hit_identity` (float | None): Percent identity of second-best hit to different genome
+- `identity_gap` (float | None): Gap between best and second-best hit identity
+- `genus_uncertainty` (float | None): Uncertainty from genus-level hits (90% bitscore threshold)
+- `num_genus_hits` (int | None): Number of hits within genus-level bitscore threshold
+- `confidence_score` (float | None): Overall confidence score (0-100) integrating multiple quality factors
+- `inferred_uncertainty` (float | None): Inferred placement uncertainty for single-hit reads
+- `uncertainty_type` (str | None): Source of uncertainty: 'measured' or 'inferred'
+- `alignment_quality` (float | None): Alignment quality score
+- `identity_confidence` (float | None): Confidence in the identity measurement
+- `placement_confidence` (float | None): Confidence in genome assignment
+- `discovery_score` (float | None): Priority score for novel discoveries (None for non-novel)
+
+**Computed Properties**:
+- `is_novel` (bool): True if taxonomic_call is NOVEL_SPECIES or NOVEL_GENUS
+- `diversity_status` (str): High-level status: 'Known', 'Novel', or 'Uncertain'
 
 **Methods**:
 ```python
@@ -1335,17 +871,27 @@ class TaxonomicCall(str, Enum):
     KNOWN_SPECIES = "Known Species"
     NOVEL_SPECIES = "Novel Species"
     NOVEL_GENUS = "Novel Genus"
+    SPECIES_BOUNDARY = "Species Boundary"
+    AMBIGUOUS = "Ambiguous"
+    AMBIGUOUS_WITHIN_GENUS = "Ambiguous Within Genus"
     CONSERVED_REGION = "Conserved Region"
+    UNCLASSIFIED = "Unclassified"
+    OFF_TARGET = "Off-target"
 ```
 
 **Description**:
 Classification categories based on novelty index and placement uncertainty thresholds from competitive read recruitment methodology.
 
 **Values**:
-- `KNOWN_SPECIES`: Low novelty, low uncertainty (N < 2, U < 0.5)
-- `NOVEL_SPECIES`: Moderate novelty, low uncertainty (5 <= N <= 15, U < 0.5)
-- `NOVEL_GENUS`: High novelty, moderate uncertainty (15 <= N <= 25, U < 2)
-- `CONSERVED_REGION`: High uncertainty or no clear classification (U >= 5)
+- `KNOWN_SPECIES`: High identity, low ambiguity (N < 4%, U < 1.5%)
+- `NOVEL_SPECIES`: Moderate divergence, low ambiguity (4% <= N < 20%, U < 1.5%)
+- `NOVEL_GENUS`: High divergence, low ambiguity (20% <= N <= 25%, U < 1.5%)
+- `SPECIES_BOUNDARY`: Moderate placement ambiguity (1.5% <= U < 5%), indicating the read matches multiple closely-related species at the species boundary zone
+- `AMBIGUOUS`: High placement ambiguity (U >= 5%) within genus, or identity gap ambiguity
+- `AMBIGUOUS_WITHIN_GENUS`: Read hits multiple species within the same genus with similar bitscores but low ANI between them
+- `CONSERVED_REGION`: Very high placement ambiguity (U >= 5%) and hits span multiple genera, indicating a highly conserved gene (e.g., 16S rRNA)
+- `UNCLASSIFIED`: Does not fit clear biological categories (strain variants or very high divergence N > 25%)
+- `OFF_TARGET`: Read has substantially better hits outside the ANI matrix (family validation)
 
 **Example**:
 ```python
@@ -1556,53 +1102,110 @@ Configuration for ANI-weighted placement scoring thresholds.
 
 ```python
 class ScoringConfig(BaseModel):
+    alignment_mode: Literal["nucleotide", "protein"] = "nucleotide"
     bitscore_threshold_pct: float = 95.0
-    novelty_known_max: float = 2.0
-    novelty_novel_species_min: float = 5.0
+    genus_bitscore_threshold_pct: float = 90.0
+    novelty_known_max: float = 4.0
+    novelty_novel_species_min: float = 4.0
     novelty_novel_species_max: float = 20.0
     novelty_novel_genus_min: float = 20.0
     novelty_novel_genus_max: float = 25.0
-    uncertainty_known_max: float = 0.5
-    uncertainty_novel_species_max: float = 0.5
-    uncertainty_novel_genus_max: float = 2.0
+    uncertainty_known_max: float = 1.5
+    uncertainty_novel_species_max: float = 1.5
+    uncertainty_novel_genus_max: float = 1.5
     uncertainty_conserved_min: float = 5.0
+    genus_uncertainty_ambiguous_min: float = 10.0
+    identity_gap_ambiguous_max: float = 2.0
+    confidence_threshold: float = 50.0
+    min_alignment_length: int = 100
+    min_alignment_fraction: float = 0.3
+    coverage_weight_mode: Literal["none", "linear", "log", "sigmoid"] = "linear"
+    coverage_weight_strength: float = 0.5
+    uncertainty_mode: Literal["max", "second"] = "second"
+    single_hit_uncertainty_threshold: float = 10.0
+    aai_genus_boundary_low: float = 58.0
+    aai_genus_boundary_high: float = 65.0
+    use_aai_for_genus: bool = True
+    target_family: str | None = None
+    family_ratio_threshold: float = 0.8
 ```
 
 **Description**:
 Thresholds define boundaries between different taxonomic classifications based on novelty index and placement uncertainty metrics.
 
-**Parameters**:
-- `bitscore_threshold_pct` (float): Percentage of top bitscore for ambiguous hits (default: 95%)
-- `novelty_known_max` (float): Maximum novelty index for known species (default: 2.0)
-- `novelty_novel_species_min` (float): Minimum novelty index for novel species (default: 5.0)
+**Nucleotide Mode Thresholds (default)**:
+- Known Species: N < 4%, U < 1.5%
+- Novel Species: 4% <= N < 20%, U < 1.5%
+- Novel Genus: 20% <= N <= 25%, U < 1.5%
+
+**Protein Mode Thresholds** (`alignment_mode="protein"`):
+- Known Species: N < 10%, U < 5%
+- Novel Species: 10% <= N < 25%, U < 5%
+- Novel Genus: 25% <= N <= 40%, U < 5%
+
+**Key Parameters**:
+- `alignment_mode` (Literal): 'nucleotide' for BLASTN, 'protein' for BLASTX results
+- `bitscore_threshold_pct` (float): Percentage of top bitscore for ambiguous hit detection (default: 95%)
+- `genus_bitscore_threshold_pct` (float): Percentage threshold for genus-level ambiguity (default: 90%)
+- `novelty_known_max` (float): Maximum novelty index for known species (default: 4.0)
+- `novelty_novel_species_min` (float): Minimum novelty index for novel species (default: 4.0)
 - `novelty_novel_species_max` (float): Maximum novelty index for novel species (default: 20.0)
 - `novelty_novel_genus_min` (float): Minimum novelty index for novel genus (default: 20.0)
 - `novelty_novel_genus_max` (float): Maximum novelty index for novel genus (default: 25.0)
-- `uncertainty_known_max` (float): Maximum placement uncertainty for known species (default: 0.5)
-- `uncertainty_novel_species_max` (float): Maximum uncertainty for novel species (default: 0.5)
-- `uncertainty_novel_genus_max` (float): Maximum uncertainty for novel genus (default: 2.0)
+- `uncertainty_known_max` (float): Maximum placement uncertainty for known species (default: 1.5)
+- `uncertainty_novel_species_max` (float): Maximum uncertainty for novel species (default: 1.5)
+- `uncertainty_novel_genus_max` (float): Maximum uncertainty for novel genus (default: 1.5)
 - `uncertainty_conserved_min` (float): Minimum uncertainty for conserved regions (default: 5.0)
+- `genus_uncertainty_ambiguous_min` (float): Minimum genus uncertainty for ambiguous-within-genus flag (default: 10.0)
+- `identity_gap_ambiguous_max` (float): Maximum identity gap before ambiguity flag (default: 2.0)
+- `confidence_threshold` (float): Minimum confidence score for high-confidence classification (default: 50.0)
+- `min_alignment_length` (int): Minimum alignment length in bp (default: 100)
+- `min_alignment_fraction` (float): Minimum fraction of read aligned (default: 0.3)
+- `coverage_weight_mode` (Literal): Coverage weighting mode for hit selection (default: 'linear')
+- `coverage_weight_strength` (float): Magnitude of coverage effect on scoring (default: 0.5)
+- `uncertainty_mode` (Literal): How to calculate placement uncertainty - 'max' or 'second' (default: 'second')
+- `single_hit_uncertainty_threshold` (float): Inferred uncertainty threshold for single-hit reads (default: 10.0)
+- `aai_genus_boundary_low` (float): Lower AAI boundary for genus classification (default: 58.0)
+- `aai_genus_boundary_high` (float): Upper AAI boundary for genus classification (default: 65.0)
+- `use_aai_for_genus` (bool): Use AAI instead of ANI for genus-level decisions when available (default: True)
+- `target_family` (str | None): Target family for off-target detection (default: None)
+- `family_ratio_threshold` (float): Bitscore ratio threshold for off-target reads (default: 0.8)
 
 **Validation**:
 Configuration is validated to ensure threshold relationships:
-- novelty_novel_species_min > novelty_known_max
+- novelty_novel_species_min >= novelty_known_max
 - novelty_novel_genus_min == novelty_novel_species_max (continuous boundaries)
 - uncertainty_novel_species_max <= uncertainty_novel_genus_max
+
+**Methods**:
+```python
+def get_effective_thresholds(self) -> dict[str, float | tuple[float, ...]]
+```
+Get effective thresholds for the current alignment mode. In protein mode, returns wider thresholds from `protein_constants.py`.
+
+```python
+@classmethod
+def for_protein_mode(cls) -> ScoringConfig
+```
+Factory method for protein-level classification configuration.
 
 **Example**:
 ```python
 from metadarkmatter.models.config import ScoringConfig
 
-# Default configuration
+# Default configuration (nucleotide mode)
 config = ScoringConfig()
 
 # Custom thresholds
 config = ScoringConfig(
     bitscore_threshold_pct=95.0,
-    novelty_novel_species_min=5.0,
+    novelty_novel_species_min=4.0,
     novelty_novel_species_max=20.0,
-    uncertainty_novel_species_max=0.5,
+    uncertainty_novel_species_max=1.5,
 )
+
+# Protein mode
+protein_config = ScoringConfig.for_protein_mode()
 ```
 
 ---
@@ -1629,122 +1232,29 @@ class BlastConfig(BaseModel):
 
 ---
 
-### Bowtie2Config
-
-Configuration for Bowtie2 competitive mapping.
-
-```python
-class Bowtie2Config(BaseModel):
-    num_threads: int = 4
-    mode: Literal["local", "end-to-end"] = "local"
-    max_alignments: int = 100
-```
-
-**Parameters**:
-- `num_threads` (int): Number of CPU threads (default: 4)
-- `mode` (Literal["local", "end-to-end"]): Alignment mode (default: "local")
-- `max_alignments` (int): Maximum alignments per read (-k parameter, default: 100)
-
----
-
-### KrakenConfig
-
-Configuration for Kraken2 taxonomic classification.
-
-```python
-class KrakenConfig(BaseModel):
-    database: Path
-    num_threads: int = 4
-    confidence: float = 0.0
-    minimum_base_quality: int = 0
-```
-
-**Parameters**:
-- `database` (Path): Path to Kraken2 database (validated to exist)
-- `num_threads` (int): Number of CPU threads (default: 4)
-- `confidence` (float): Confidence score threshold (default: 0.0)
-- `minimum_base_quality` (int): Minimum base quality for reads (default: 0)
-
----
-
-### GlobalConfig
-
-Global configuration for metadarkmatter pipeline.
-
-```python
-class GlobalConfig(BaseSettings):
-    project_name: str = "metadarkmatter_analysis"
-    output_dir: Path = Path("./results")
-    scoring: ScoringConfig = Field(default_factory=ScoringConfig)
-    blast: BlastConfig = Field(default_factory=BlastConfig)
-    bowtie2: Bowtie2Config = Field(default_factory=Bowtie2Config)
-    kraken: KrakenConfig | None = None
-    num_threads: int = 4
-    verbose: bool = False
-```
-
-**Description**:
-Global configuration using pydantic-settings to load from YAML, environment variables, or CLI arguments.
-
-**Environment Variables**:
-- Prefix: `MDM_`
-- Delimiter: `__` (for nested fields)
-
-**Methods**:
-```python
-def to_yaml(self, path: Path) -> None
-```
-Write configuration to YAML file.
-
-```python
-@classmethod
-def from_yaml(cls, path: Path) -> GlobalConfig
-```
-Load configuration from YAML file.
-
-**Example**:
-```python
-from metadarkmatter.models.config import GlobalConfig
-
-# Load from YAML
-config = GlobalConfig.from_yaml(Path("config.yaml"))
-
-# Save to YAML
-config.to_yaml(Path("config_out.yaml"))
-
-# Access nested config
-print(f"BLAST evalue: {config.blast.evalue}")
-print(f"Novel species min novelty: {config.scoring.novelty_novel_species_min}")
-```
-
----
-
 ---
 
 ## Performance Characteristics
 
-### Memory Usage Comparison
+### Memory Usage
 
-| Component | Dataset Size | Dense ANI | Sparse ANI | Notes |
-|-----------|--------------|-----------|------------|-------|
-| ANIMatrix | 1000 genomes | 4 MB | 4 MB | Minimal difference for small sets |
-| ANIMatrix | 10000 genomes | 400 MB | ~20 MB (5% density) | Sparse recommended for large sets |
-| BLAST Parsing | 100M records | 40+ GB | ~16 GB | Polars streaming keeps memory constant |
-| Full Classification | 100M records | RAM overflow | ~32 GB | Streaming writes to disk in chunks |
+| Component | Dataset Size | Memory | Notes |
+|-----------|--------------|--------|-------|
+| ANIMatrix | 1000 genomes | 4 MB | Dense NumPy matrix |
+| ANIMatrix | 10000 genomes | 400 MB | Dense matrix for large sets |
+| BLAST Parsing | 100M records | ~16 GB | Polars streaming keeps memory constant |
+| Full Classification | 100M records | ~32 GB | Streaming writes to disk in chunks |
 
-### Classification Speed Comparison
+### Classification Speed
 
 | Method | Dataset | Speed | Notes |
 |--------|---------|-------|-------|
-| ANIWeightedClassifier.classify_to_dataframe() | 10M reads | ~5 min | Single-threaded, medium files |
-| ANIWeightedClassifier.classify_to_dataframe_fast() | 10M reads | ~30 sec | Lightweight structures, ~10x faster |
-| VectorizedClassifier.classify_file() | 10M reads | ~3 sec | Fully vectorized, ~100x faster |
-| ParallelClassifier.classify_file() | 10M reads | ~1 min | 8 workers, with multiprocessing overhead |
-| ParallelClassifier (16 workers) | 100M reads | ~2 hours | True horizontal scaling for massive files |
+| VectorizedClassifier.classify_file() | 10M reads | ~3 sec | Fully vectorized, Polars Rust backend |
+| VectorizedClassifier.stream_to_file() | 100M reads | ~5 min | Partitioned processing, bounded memory |
 
 ### Bitscore Threshold Effect
 
-The `bitscore_threshold_pct` parameter significantly affects performance and results:
+The `bitscore_threshold_pct` parameter affects performance and results:
 
 - **95% (default)**: Most reads have 1-5 ambiguous hits, moderate uncertainty
 - **90%**: More competitive placements, higher uncertainty values
@@ -1805,7 +1315,8 @@ config = ScoringConfig(bitscore_threshold_pct=95.0)  # Valid
 ### Validation Examples
 
 ```python
-from metadarkmatter.core.ani_placement import ANIMatrix, ANIWeightedClassifier
+from metadarkmatter.core.classification.ani_matrix import ANIMatrix
+from metadarkmatter.core.classification.classifiers.base import ANIWeightedClassifier
 from metadarkmatter.models.config import ScoringConfig
 from pathlib import Path
 
@@ -1818,22 +1329,17 @@ except ValueError as e:
 
 # Validate configuration
 try:
-    config = ScoringConfig(novelty_novel_species_min=3.0)  # Invalid: must be > 2.0
+    config = ScoringConfig(novelty_novel_species_min=3.0)  # Invalid: must be >= 4.0
 except ValueError as e:
     print(f"Invalid config: {e}")
     exit(1)
 
-# Validate BLAST file
-classifier = ANIWeightedClassifier(ani_matrix)
-try:
-    count = 0
-    for result in classifier.classify_blast_file(Path("blast.tsv")):
-        count += 1
-except Exception as e:
-    print(f"Error classifying reads: {e}")
-    exit(1)
+# Classify with VectorizedClassifier (recommended)
+from metadarkmatter.core.classification.classifiers.vectorized import VectorizedClassifier
 
-print(f"Successfully classified {count} reads")
+vectorized = VectorizedClassifier(ani_matrix)
+df = vectorized.classify_file(Path("blast.tsv"))
+print(f"Successfully classified {len(df)} reads")
 ```
 
 ---
@@ -1842,32 +1348,29 @@ print(f"Successfully classified {count} reads")
 
 ### Most Common Workflows
 
-#### 1. Classify BLAST file with default settings
+#### 1. Classify BLAST file with VectorizedClassifier
 
 ```python
 from pathlib import Path
-from metadarkmatter.core.ani_placement import ANIMatrix, ANIWeightedClassifier
+from metadarkmatter.core.classification.ani_matrix import ANIMatrix
+from metadarkmatter.core.classification.classifiers.vectorized import VectorizedClassifier
 
 # Load ANI matrix
 ani_matrix = ANIMatrix.from_file(Path("ani_matrix.csv"))
 
-# Create classifier
-classifier = ANIWeightedClassifier(ani_matrix)
+# Create classifier and classify
+vectorized = VectorizedClassifier(ani_matrix)
+df = vectorized.classify_file(Path("blast.tsv"))
+print(f"Classified {len(df):,} reads")
 
-# Classify and save results
-num_reads = classifier.write_classifications(
-    Path("blast.tsv"),
-    Path("classifications.csv")
-)
-print(f"Classified {num_reads:,} reads")
+# Save results
+df.write_csv("classifications.csv")
 ```
 
-#### 2. High-performance classification for 100M+ reads
+#### 2. Stream large files to disk
 
 ```python
-# Use vectorized classifier for maximum speed
-vectorized = VectorizedClassifier(ani_matrix)
-
+# Use stream_to_file for 100M+ reads
 total = vectorized.stream_to_file(
     Path("blast.tsv"),
     Path("classifications.parquet"),
@@ -1904,17 +1407,32 @@ from metadarkmatter.models.config import ScoringConfig
 # More stringent novel species threshold
 config = ScoringConfig(
     novelty_novel_species_min=7.0,    # Require higher divergence
-    uncertainty_novel_species_max=0.2,  # Require lower ambiguity
+    novelty_known_max=7.0,            # Must match for continuous boundaries
+    uncertainty_novel_species_max=1.0,  # Require lower ambiguity
 )
 
-classifier = ANIWeightedClassifier(ani_matrix, config)
-df = classifier.classify_to_dataframe_fast(Path("blast.tsv"))
+vectorized = VectorizedClassifier(ani_matrix, config)
+df = vectorized.classify_file(Path("blast.tsv"))
+```
+
+#### 5. Programmatic single-read classification
+
+```python
+from metadarkmatter.core.classification.classifiers.base import ANIWeightedClassifier
+from metadarkmatter.models.blast import BlastResult
+
+# ANIWeightedClassifier exposes single-read classification
+classifier = ANIWeightedClassifier(ani_matrix)
+classification = classifier.classify_read(blast_result)
+if classification:
+    print(f"{classification.read_id}: {classification.taxonomic_call.value}")
 ```
 
 ---
 
 ## Further Reading
 
-- See `IMPLEMENTATION_STRATEGY.md` for architectural details
 - See `CLAUDE.md` for project background and methodology
+- See `docs/METHODS.md` for the scientific methods documentation
+- See `docs/REFERENCE.md` for CLI reference and algorithm details
 - See workflow examples in `src/metadarkmatter/cli/` for CLI usage patterns

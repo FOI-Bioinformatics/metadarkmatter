@@ -141,33 +141,15 @@ metadarkmatter report generate --classifications results.csv --ani ani.csv --no-
 - BioPython (dependency in pyproject.toml)
 - D3.js loaded from CDN in report
 
-## Critical Known Issues
+## ANI/AAI Heatmap Clustering
 
-### ANI/AAI Heatmap Clustering (FIXED)
+scipy is a dependency; hierarchical clustering is enabled by default for all heatmaps.
 
-**Status:** ✅ FIXED - scipy added to dependencies, clustering now works reliably.
+**Key Files:**
+- `visualization/report/components/clustering.py` - `perform_hierarchical_clustering()` (shared by ANI and AAI)
+- `visualization/report/components/heatmap_builder.py` - `HeatmapConfig` dataclass, `_build_similarity_heatmap()` shared renderer, thin wrappers `build_ani_heatmap()` / `build_aai_heatmap()`
 
-**What Was Fixed:**
-1. **Added scipy>=1.11.0 to dependencies** (`pyproject.toml:33`)
-2. **Extracted duplicate clustering logic** to shared `_perform_hierarchical_clustering()` method
-3. **Made titles conditional** - only shows "(Hierarchically Clustered)" when clustering succeeds
-4. **Added logging** - warns users if scipy unavailable (graceful degradation)
-
-**Location:** `src/metadarkmatter/visualization/report/generator.py`
-- Shared clustering method: `_perform_hierarchical_clustering()` (lines 1039-1103)
-- ANI heatmap: `_build_ani_section()` uses shared method
-- AAI heatmap: `_build_aai_section()` uses shared method
-
-**What This Means:**
-- Clustering now works by default for all users
-- Heatmaps show genomes grouped by similarity (species/genus blocks visible)
-- Titles accurately reflect whether clustering was applied
-- Logs warning if scipy somehow unavailable (rare edge case)
-
-**Impact:**
-- Better scientific interpretation of ANI/AAI matrices
-- Visual clustering makes taxonomic structure immediately apparent
-- Same-species genomes now grouped together in heatmap
+Graceful degradation: logs a warning if scipy is unavailable and returns the unclustered matrix.
 
 ## Key Architecture
 
@@ -178,7 +160,7 @@ src/metadarkmatter/
 │   ├── constants.py          # Nucleotide thresholds (default mode)
 │   ├── protein_constants.py  # Protein thresholds (--alignment-mode protein)
 │   ├── classification/       # Classification pipeline
-│   │   ├── thresholds.py     # Extracted threshold application logic
+│   │   ├── thresholds.py     # Threshold application (uses ScoringConfig.get_effective_thresholds())
 │   │   ├── qc.py             # Pre/post-classification QC metrics
 │   │   ├── sensitivity.py    # Threshold sensitivity analysis
 │   │   ├── adaptive.py       # GMM-based adaptive threshold detection
@@ -186,7 +168,10 @@ src/metadarkmatter/
 │   │   ├── ani_matrix.py     # ANIMatrix class
 │   │   └── classifiers/      # Classifier implementations
 │   │       ├── base.py       # ANIWeightedClassifier (programmatic API: classify_read())
-│   │       └── vectorized.py # VectorizedClassifier (all CLI classification)
+│   │       └── vectorized.py # VectorizedClassifier (sole CLI classifier, streaming + batch)
+│   ├── novel_diversity/      # Novel taxa clustering and models
+│   │   ├── clustering.py     # Cluster novel reads by genome proximity
+│   │   └── models.py         # NovelClusterResult, NovelReadInfo dataclasses
 │   └── phylogeny/            # Phylogenetic tree building and novel cluster placement
 │       ├── tree_builder.py   # ANI-to-Newick conversion, user tree loading
 │       └── placement.py      # Novel cluster extraction and tree placement
@@ -196,9 +181,11 @@ src/metadarkmatter/
 └── visualization/    # Plotly charts and HTML report generation
     └── report/
         ├── generator.py      # Single-sample reports (with Bayesian tab)
+        ├── multi_generator.py # Multi-sample comparative reports
         └── components/       # Report building blocks
-            ├── clustering.py # Hierarchical clustering
-            └── heatmap_builder.py # ANI/AAI heatmaps
+            ├── clustering.py          # perform_hierarchical_clustering()
+            ├── heatmap_builder.py     # HeatmapConfig, unified ANI/AAI heatmaps
+            └── extended_matrix_builder.py # Novel-to-reference extended matrices
 ```
 
 ## Classification Thresholds
@@ -233,8 +220,8 @@ Where `min = 1 - strength`, `max = 1 + strength`, `strength` defaults to 0.5.
 
 **Key Files:**
 - `models/blast.py` - `BlastHit.calculate_coverage()`, `calculate_weighted_score()`
-- `models/config.py` - `ScoringConfig.coverage_weight_mode`, `coverage_weight_strength`
-- `core/classification/classifiers/vectorized.py` - Polars-based vectorized classifier
+- `models/config.py` - `ScoringConfig` (sole config class, includes `get_effective_thresholds()`)
+- `core/classification/classifiers/vectorized.py` - VectorizedClassifier (sole CLI classifier)
 
 ## Advanced Classification Features
 

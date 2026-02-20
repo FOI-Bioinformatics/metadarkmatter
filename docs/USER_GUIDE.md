@@ -169,8 +169,8 @@ Reads are assigned to four categories based on novelty and placement uncertainty
 #### 1. Known Species
 
 **Criteria:**
-- Novelty Index < 5%
-- Placement Uncertainty < 2%
+- Novelty Index < 4%
+- Placement Uncertainty < 1.5%
 
 **Interpretation:** Read maps with high identity and low ambiguity to a known reference genome. Likely originates from the matched species or closely related strain.
 
@@ -184,8 +184,8 @@ read_001,GCF_000195955.1,98.75,1.25,0.18,2,Known Species,false
 #### 2. Novel Species
 
 **Criteria:**
-- Novelty Index: 5-20%
-- Placement Uncertainty < 2%
+- Novelty Index: 4-20%
+- Placement Uncertainty < 1.5%
 
 **Interpretation:** Moderate divergence from closest reference but unambiguous placement to a single lineage. Suggests a novel species within a known genus.
 
@@ -203,7 +203,7 @@ read_002,GCF_000195955.1,91.20,8.80,0.35,5,Novel Species,true
 
 **Criteria:**
 - Novelty Index: 20-25%
-- Placement Uncertainty < 2%
+- Placement Uncertainty < 1.5%
 
 **Interpretation:** High divergence from all references but moderate-confidence placement. Suggests a novel genus.
 
@@ -220,7 +220,7 @@ read_003,GCF_000242755.1,82.15,17.85,1.42,3,Novel Genus,true
 #### 4. Conserved Region
 
 **Criteria:**
-- Placement Uncertainty > 2%
+- Placement Uncertainty >= 5%
 
 **Interpretation:** Read maps with similar scores to multiple divergent genomes. Indicates conserved genomic region (housekeeping genes, rRNA, mobile elements). Taxonomic placement is ambiguous.
 
@@ -235,11 +235,11 @@ read_004,GCF_000195955.1,95.30,4.70,6.25,15,Conserved Region,false
 
 | Metric | Threshold | Biological Meaning |
 |--------|-----------|-------------------|
-| Novelty < 5% | Known Species | >95% identity to reference |
-| Novelty 5-20% | Novel Species | 80-95% identity (within genus) |
+| Novelty < 4% | Known Species | >96% identity to reference |
+| Novelty 4-20% | Novel Species | 80-96% identity (within genus) |
 | Novelty 20-25% | Novel Genus | 75-80% identity (genus-level divergence) |
-| Uncertainty < 2% | Confident | ANI >98% between competing genomes |
-| Uncertainty > 2% | Ambiguous | ANI <98% between competing genomes |
+| Uncertainty < 1.5% | Confident | ANI >98.5% between competing genomes |
+| Uncertainty >= 1.5% | Ambiguous | ANI <98.5% between competing genomes |
 
 **Note:** Thresholds are based on 95-96% ANI species boundary (literature-backed).
 
@@ -315,8 +315,7 @@ metadarkmatter score batch \
     --alignment-dir blast_results/ \
     --ani ani_matrix.csv \
     --metadata genome_metadata.tsv \
-    --output-dir classifications/ \
-    --parallel
+    --output-dir classifications/
 ```
 
 Automatically processes all `.blast.tsv` or `.blast.tsv.gz` files in the directory.
@@ -328,19 +327,11 @@ Automatically processes all `.blast.tsv` or `.blast.tsv.gz` files in the directo
 For large datasets, use performance optimization:
 
 ```bash
-# Fast mode (10M+ alignments)
+# Standard mode (suitable for most datasets)
 metadarkmatter score classify \
     --alignment huge_sample.blast.tsv.gz \
     --ani ani_matrix.csv \
-    --output classifications.csv \
-    --fast
-
-# Parallel mode (10M-100M alignments, multi-core)
-metadarkmatter score classify \
-    --alignment huge_sample.blast.tsv.gz \
-    --ani ani_matrix.csv \
-    --output classifications.csv \
-    --parallel
+    --output classifications.csv
 
 # Streaming mode (100M+ alignments, memory-efficient)
 metadarkmatter score classify \

@@ -25,8 +25,6 @@ flowchart TB
 
     subgraph Classifiers["Classifier Variants"]
         STD["ANIWeightedClassifier<br/>(Standard)"]
-        FAST["classify_*_fast()<br/>(Optimized)"]
-        PAR["ParallelClassifier<br/>(Multiprocessing)"]
         VEC["VectorizedClassifier<br/>(Polars Native)"]
     end
 
@@ -49,18 +47,12 @@ flowchart TB
     ANIMAT --> CLASS
 
     CLASS --> STD
-    CLASS --> FAST
-    CLASS --> PAR
     CLASS --> VEC
 
     STD --> CSV
-    FAST --> CSV
-    PAR --> CSV
     VEC --> CSV
 
     STD --> PARQUET
-    FAST --> PARQUET
-    PAR --> PARQUET
     VEC --> PARQUET
 
     CLASSIFY --> SUMMARY
@@ -94,7 +86,6 @@ flowchart LR
                 subgraph classifiers["classifiers/"]
                     base_cls["base.py<br/>Base classifier"]
                     vec_cls["vectorized.py<br/>Polars classifier"]
-                    par_cls["parallel.py<br/>Multiprocessing"]
                 end
             end
 
@@ -212,32 +203,18 @@ sequenceDiagram
 graph LR
     subgraph tier1["Tier 1: Standard"]
         STD["ANIWeightedClassifier.classify_read()"]
-        STD_DESC["Pydantic models<br/>Full validation<br/>~10K reads/sec"]
+        STD_DESC["Pydantic models<br/>Full validation<br/>Programmatic API"]
     end
 
-    subgraph tier2["Tier 2: Fast"]
-        FAST["classify_read_fast()"]
-        FAST_DESC["NamedTuples<br/>Minimal validation<br/>~100K reads/sec"]
-    end
-
-    subgraph tier3["Tier 3: Parallel"]
-        PAR["ParallelClassifier"]
-        PAR_DESC["Multiprocessing<br/>Shared memory ANI<br/>~500K reads/sec"]
-    end
-
-    subgraph tier4["Tier 4: Vectorized"]
+    subgraph tier2["Tier 2: Vectorized"]
         VEC["VectorizedClassifier"]
-        VEC_DESC["Pure Polars<br/>No Python loops<br/>~1M reads/sec"]
+        VEC_DESC["Pure Polars<br/>No Python loops<br/>All CLI paths"]
     end
 
     tier1 --> tier2
-    tier2 --> tier3
-    tier3 --> tier4
 
     style tier1 fill:#f9f,stroke:#333
-    style tier2 fill:#bbf,stroke:#333
-    style tier3 fill:#bfb,stroke:#333
-    style tier4 fill:#ff9,stroke:#333
+    style tier2 fill:#ff9,stroke:#333
 ```
 
 ## ANI Matrix Memory Layout
@@ -247,20 +224,11 @@ flowchart TB
     subgraph dense["ANIMatrix (Dense)"]
         direction LR
         D_DESC["NumPy float32 array<br/>O(1) lookup<br/>Memory: n^2 * 4 bytes"]
-        D_USE["Best for: < 5K genomes"]
-    end
-
-    subgraph sparse["SparseANIMatrix"]
-        direction LR
-        S_DESC["Dict-based storage<br/>Only store ANI >= threshold<br/>Memory: ~5% of dense"]
-        S_USE["Best for: 10K+ genomes"]
+        D_USE["1K genomes ~ 4 MB"]
     end
 
     FILE["ANI Matrix File"] --> dense
-    FILE --> sparse
-
-    dense --> |"1K genomes<br/>4 MB"| LOOKUP["get_ani()"]
-    sparse --> |"10K genomes<br/>~20 MB vs 400 MB"| LOOKUP
+    dense --> LOOKUP["get_ani()"]
 ```
 
 ## Error Handling Hierarchy
@@ -279,7 +247,6 @@ classDiagram
     BlastFileError <|-- MalformedBlastFileError
 
     ConfigurationError <|-- InvalidThresholdError
-    ConfigurationError <|-- ProcessingModeError
 
     class MetadarkmatterError {
         +str message
@@ -326,12 +293,7 @@ flowchart TB
                 VERBOSE_OPT["--verbose, -v"]
                 QUIET_OPT["--quiet, -q"]
                 DRYRUN_OPT["--dry-run"]
-
-                subgraph modes["Processing Modes (mutually exclusive)"]
-                    FAST_OPT["--fast"]
-                    PARALLEL_OPT["--parallel"]
-                    STREAMING_OPT["--streaming"]
-                end
+                STREAMING_OPT["--streaming"]
             end
 
             subgraph batch_opts["batch options"]
@@ -460,9 +422,9 @@ flowchart TD
 ```mermaid
 xychart-beta
     title "Memory Usage per 10M Alignments"
-    x-axis ["Standard", "Fast", "Parallel", "Streaming"]
+    x-axis ["Default", "Streaming"]
     y-axis "Memory (GB)" 0 --> 5
-    bar [4, 3, 2, 0.5]
+    bar [4, 0.5]
 ```
 
 ## Recommended Mode Selection
@@ -471,19 +433,13 @@ xychart-beta
 flowchart TD
     START["Number of alignments?"]
 
-    START --> |"< 1M"| STD["Use Standard<br/>(default)"]
-    START --> |"1M - 10M"| FAST["Use --fast"]
-    START --> |"10M - 100M"| PAR["Use --parallel"]
+    START --> |"< 100M"| DEFAULT["Use Default"]
     START --> |"> 100M"| STREAM["Use --streaming"]
 
-    STD --> OUTPUT["Output"]
-    FAST --> OUTPUT
-    PAR --> OUTPUT
+    DEFAULT --> OUTPUT["Output"]
     STREAM --> OUTPUT
 
-    style STD fill:#f9f
-    style FAST fill:#bbf
-    style PAR fill:#bfb
+    style DEFAULT fill:#f9f
     style STREAM fill:#ff9
 ```
 
@@ -705,7 +661,6 @@ flowchart LR
         subgraph classifiers["classifiers/"]
             BASE["base.py"]
             VEC["vectorized.py"]
-            PAR["parallel.py"]
         end
     end
 
@@ -723,7 +678,6 @@ flowchart LR
     BAYES --> NUMPY
     VEC --> POLARS
     BASE --> ANI_MAT
-    PAR --> BASE
 ```
 
 ## CLI Command Structure (Updated)

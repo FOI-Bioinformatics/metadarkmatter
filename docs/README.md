@@ -99,12 +99,13 @@ metadarkmatter score classify \
 ## Key Concepts
 
 **Novelty Index (N)**: `100 - percent_identity`
-- N < 5%: Known species
-- 5-20%: Novel species
+- N < 4%: Known species (pident > 96%)
+- 4-20%: Novel species
 - 20-25%: Novel genus
 
 **Placement Uncertainty (U)**: `100 - max(ANI between competing genomes)`
-- U < 2%: Clear placement
+- U < 1.5%: Confident placement
+- 1.5-5%: Species boundary zone
 - U >= 5%: Conserved region (ambiguous)
 
 **Species-Level Tracking**: Use `--metadata genome_metadata.tsv` to track diversity by species/genus in classifications and reports.
@@ -140,7 +141,7 @@ docs/
 │   └── mmseqs2-integration.md               # MMseqs2 for large datasets
 │
 └── Technical
-    ├── ARCHITECTURE.md                      # System design
+    ├── ARCHITECTURE.md                      # System design diagrams
     ├── TECHNICAL_MANUAL.md                  # Implementation details
     ├── API_REFERENCE.md                     # Python API
     └── CHANGELOG.md                         # Project changes
@@ -162,10 +163,10 @@ docs/
 
 **Classification Modes:**
 - Default (nucleotide): For BLASTN results
-- Protein mode (`--alignment-mode protein`): For BLASTX results with different thresholds
+- Protein mode (`--alignment-mode protein`): For BLASTX results with wider thresholds
 
 ---
 
 ## Support
 
-GitHub Issues: https://github.com/metadarkmatter/metadarkmatter/issues
+GitHub Issues: https://github.com/FOI-Bioinformatics/metadarkmatter/issues

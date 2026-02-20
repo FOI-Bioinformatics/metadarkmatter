@@ -96,8 +96,8 @@ N = 100 - pident_top
 ```
 
 **Interpretation:**
-- N < 5%: Read shares >95% identity with reference (at species boundary)
-- N = 5-20%: Read shares 80-95% identity (below species boundary)
+- N < 4%: Read shares >96% identity with reference (at species boundary)
+- N = 4-20%: Read shares 80-96% identity (below species boundary)
 - N = 20-25%: Read shares 75-80% identity (genus-level divergence)
 - N > 25%: Very high divergence
 
@@ -124,7 +124,7 @@ else:
     U = 100 - max_ani
 ```
 
-**Key concept**: If the top genome and competitors share high ANI (>98%), they're the same species and placement is confident. If they share low ANI (<95%), they're different species and the read matches a conserved region.
+**Key concept**: If the top genome and competitors share high ANI (>98.5%), they're the same species and placement is confident. If they share low ANI (<95%), they're different species and the read matches a conserved region.
 
 **ANI matrix lookup:**
 - Matrix is symmetric: ANI(A, B) = ANI(B, A)
@@ -145,19 +145,19 @@ Is U >= 5%?  # Competitors are different species (ANI < 95%)
   |
   NO
   v
-Is 2% <= U < 5%?  # Competitors in species boundary zone (95-98% ANI)
+Is 1.5% <= U < 5%?  # Competitors in species boundary zone (95-98.5% ANI)
   |
   YES → AMBIGUOUS (species boundary, unclear placement)
   |
-  NO (U < 2%)  # Competitors are same species (ANI > 98%) OR no competitors
+  NO (U < 1.5%)  # Competitors are same species (ANI > 98.5%) OR no competitors
   v
-Is N < 5%?  # High identity (>95%)
+Is N < 4%?  # High identity (>96%)
   |
   YES → KNOWN SPECIES
   |
   NO
   v
-Is 5% <= N < 20%?  # Moderate divergence (80-95% identity)
+Is 4% <= N < 20%?  # Moderate divergence (80-96% identity)
   |
   YES → NOVEL SPECIES (confident, divergent from references)
   |
@@ -181,13 +181,13 @@ def classify_read(N, U):
         return "Conserved Region"
 
     # Priority 2: Check species boundary zone
-    if 2.0 <= U < 5.0:
+    if 1.5 <= U < 5.0:
         return "Ambiguous"
 
-    # Priority 3: Confident placement (U < 2%), check novelty
-    if N < 5.0:
+    # Priority 3: Confident placement (U < 1.5%), check novelty
+    if N < 4.0:
         return "Known Species"
-    elif 5.0 <= N < 20.0:
+    elif 4.0 <= N < 20.0:
         return "Novel Species"
     elif 20.0 <= N <= 25.0:
         return "Novel Genus"
@@ -233,7 +233,7 @@ metadarkmatter score classify \
 - **If AAI available**: U = 100 - max(AAI between competing genomes)
 - **If AAI missing for a pair, fallback to ANI**: U = 100 - max(ANI for that pair)
 - Thresholds adjusted for slower protein divergence:
-  - Known Species: N < 10%, U < 5% (vs 5%/2% for nucleotide)
+  - Known Species: N < 10%, U < 5% (vs 4%/1.5% for nucleotide)
   - Novel Species: 10% <= N < 25%, U < 5%
   - Novel Genus: 25% <= N <= 40%, U < 5%
 
@@ -308,7 +308,7 @@ ANI(GCF_000195955.1, GCF_000242755.1) = 98.7%  # Look up in matrix
 U = 100 - 98.7 = 1.3%
 
 # Step 5: Classify
-U < 2% and N < 5% → KNOWN SPECIES
+U < 1.5% and N < 4% → KNOWN SPECIES
 ```
 
 **Interpretation:** Both genomes are the same species (98.7% ANI). Read matches with high identity.
@@ -329,7 +329,7 @@ ANI(GCF_000195955.1, GCF_000242755.1) = 98.7%
 U = 100 - 98.7 = 1.3%
 
 # Classify
-U < 2% and 5% <= N < 20% → NOVEL SPECIES
+U < 1.5% and 4% <= N < 20% → NOVEL SPECIES
 ```
 
 **Interpretation:** Competing genomes are same species, but read shows significant divergence (89.5%). Likely a novel species in this genus.
@@ -360,18 +360,18 @@ U >= 5% → CONSERVED REGION
 **Input:**
 ```
 read_004 hits:
-  GCF_000195955.1 (82.0% identity, bitscore 320)
+  GCF_000195955.1 (78.0% identity, bitscore 320)
   (no other hits above threshold)
 ```
 
 **Calculation:**
 ```python
-N = 100 - 82.0 = 18.0%
+N = 100 - 78.0 = 22.0%
 secondary_genomes = {} (empty)
 U = 0.0  # No competition
 
 # Classify
-U < 2% and 20% <= N <= 25% → NOVEL GENUS
+U < 1.5% and 20% <= N <= 25% → NOVEL GENUS
 ```
 
 **Interpretation:** Read shows genus-level divergence with confident placement to single genome lineage.

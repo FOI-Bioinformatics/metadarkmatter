@@ -83,7 +83,7 @@ mdm ani compute --genomes genomes/ --output ani_matrix.csv --threads 16
 
 # 5. Classify reads and generate report
 mdm score classify --alignment sample.blast.tsv.gz --ani ani_matrix.csv \
-  --metadata genome_metadata.tsv --output classifications.csv --parallel
+  --metadata genome_metadata.tsv --output classifications.csv
 mdm report generate --classifications classifications.csv \
   --metadata genome_metadata.tsv --output report.html
 ```
@@ -100,13 +100,17 @@ mdm report generate --classifications classifications.csv \
 | `kraken2 extract` | Extract reads for target taxid |
 | `blast makedb` | Build BLAST database (standardizes headers) |
 | `blast align` | Run competitive BLAST alignment |
+| `mmseqs2 makedb` | Build MMseqs2 database (for large datasets) |
+| `mmseqs2 search` | MMseqs2 search (supports paired-end) |
+| `blastx align` | Protein-level alignment with Diamond |
 | `ani compute` | Compute ANI matrix (skani/fastANI) |
-| `ani validate` | Validate ANI matrix coverage |
-| `score classify` | ANI-weighted classification (supports `--metadata`) |
+| `aai compute` | Compute AAI matrix (Diamond) |
+| `score classify` | ANI-weighted classification (core algorithm) |
 | `score batch` | Batch process multiple samples |
 | `score extract-novel` | Extract candidate novel species/genera |
-| `report generate` | Create HTML report (supports `--metadata` for species tab) |
+| `report generate` | Create HTML report with interactive tabs |
 | `report multi` | Multi-sample comparison |
+| `util generate-mapping` | Generate contig-to-genome ID mapping |
 
 ## Key Features
 
@@ -121,8 +125,8 @@ Metadarkmatter automatically tracks species metadata throughout the pipeline:
 
 ### Novel Diversity Detection
 
-- Identify **Novel Species** candidates (5-20% novelty, <2% uncertainty)
-- Identify **Novel Genus** candidates (20-25% novelty, <2% uncertainty)
+- Identify **Novel Species** candidates (4-20% novelty, <1.5% uncertainty)
+- Identify **Novel Genus** candidates (20-25% novelty, <1.5% uncertainty)
 - Extract candidate reads with `score extract-novel` for targeted assembly
 - Literature-backed thresholds based on 95-96% ANI species boundary
 
@@ -139,12 +143,13 @@ Optional feature to prioritize alignments spanning larger portions of reads:
 
 **Classification Performance** (BLAST results → classifications):
 
+All classification uses the Polars-based vectorized engine with automatic parallelization.
+
 | Dataset | Mode | Runtime | RAM |
 |---------|------|---------|-----|
-| < 1M alignments | default | 2-5 min | 4 GB |
-| 1-10M | `--fast` | 5-10 min | 8 GB |
-| 10-100M | `--parallel` | 15-45 min | 16 GB |
-| 100M+ | `--streaming` | 1-2 hr | 16 GB |
+| < 10M alignments | default | 2-10 min | 4-8 GB |
+| 10-100M | default | 15-45 min | 16 GB |
+| 100M+ | `--streaming` | 1-2 hr | 16 GB (constant) |
 
 **Alignment Performance** (reads → BLAST results):
 

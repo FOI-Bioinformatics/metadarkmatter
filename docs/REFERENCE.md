@@ -80,8 +80,7 @@ metadarkmatter score classify \
   --ani ani_matrix.csv \
   --metadata genome_metadata.tsv \
   --output classifications.csv \
-  --summary summary.json \
-  --parallel
+  --summary summary.json
 
 # Step 7: Generate HTML report with species breakdown
 metadarkmatter report generate \
@@ -120,8 +119,7 @@ metadarkmatter score classify \
   --aai aai_matrix.csv \
   --alignment-mode protein \
   --output classifications.csv \
-  --summary summary.json \
-  --parallel
+  --summary summary.json
 ```
 
 **When to use protein-level classification:**
@@ -438,7 +436,7 @@ Pre- and post-classification QC metrics help identify problematic inputs and fla
 ```bash
 # Save QC metrics as JSON
 metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
-    --qc-output qc_metrics.json --output classifications.csv --parallel
+    --qc-output qc_metrics.json --output classifications.csv
 ```
 
 QC warnings are generated when:
@@ -455,7 +453,7 @@ Detect the species boundary from the ANI matrix distribution instead of using th
 ```bash
 # Enable adaptive threshold detection
 metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
-    --adaptive-thresholds --output classifications.csv --parallel
+    --adaptive-thresholds --output classifications.csv
 ```
 
 This fits a 2-component Gaussian Mixture Model to pairwise ANI values, detecting natural within-species vs. between-species clusters. Falls back to the default threshold if the GMM does not converge or components are not well separated.
@@ -471,7 +469,7 @@ Add posterior probabilities to classification output, providing continuous confi
 ```bash
 # Add Bayesian posterior columns
 metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
-    --bayesian --output classifications.csv --parallel
+    --bayesian --output classifications.csv
 ```
 
 This adds 6 columns to the output:
@@ -499,7 +497,7 @@ metadarkmatter score classify \
     --alignment broad_results.tsv.gz \
     --ani family_ani_matrix.csv \
     --target-family "f__Francisellaceae" \
-    --output classifications.csv --parallel
+    --output classifications.csv
 ```
 
 **Output columns** (when family validation is active):
@@ -518,7 +516,7 @@ Assess whether classification results are robust to threshold choice:
 ```bash
 # Run sensitivity analysis
 metadarkmatter score sensitivity --alignment sample.blast.tsv.gz --ani ani.csv \
-    --output sensitivity.json --parallel
+    --output sensitivity.json
 ```
 
 Sweeps the novelty/uncertainty thresholds across a range and reports how classification counts change at each point.
@@ -534,22 +532,16 @@ metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
     --qc-output qc_metrics.json \
     --output classifications.csv \
     --summary summary.json \
-    --parallel --verbose
+    --verbose
 ```
 
 ### Performance Modes
 
-For large datasets, use appropriate processing mode:
+Classification uses the VectorizedClassifier by default, which handles most dataset sizes efficiently. For very large or memory-constrained scenarios, streaming mode is available:
 
 ```bash
-# Standard mode (< 1M reads)
+# Default mode (handles most datasets efficiently)
 metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv
-
-# Fast mode (1-10M reads)
-metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv --fast
-
-# Parallel mode (10-100M reads) - recommended
-metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv --parallel
 
 # Streaming mode (100M+ reads, memory-constrained)
 metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv --streaming
@@ -633,13 +625,12 @@ metadarkmatter util generate-mapping --genomes genomes/ --output id_mapping.tsv
 # Validate mapping covers the alignment subject IDs
 metadarkmatter util validate-mapping id_mapping.tsv --blast external_results.tsv.gz
 
-# Classify with mapping (requires --parallel)
+# Classify with mapping (not supported in --streaming mode)
 metadarkmatter score classify \
     --alignment external_results.tsv.gz \
     --ani ani_matrix.csv \
     --id-mapping id_mapping.tsv \
-    --output classifications.csv \
-    --parallel
+    --output classifications.csv
 ```
 
 The `--genomes` flag on `score classify` can also auto-generate the mapping at runtime, but pre-generating with `util generate-mapping` is more efficient when processing multiple samples.
@@ -774,8 +765,8 @@ from metadarkmatter.core.constants import (
     BLAST_OUTFMT_12COL,       # Standard BLAST output format string
     ANI_SPECIES_BOUNDARY_LOW, # 95% ANI threshold
     CATEGORY_NOVEL_SPECIES,   # Classification category strings
-    NOVELTY_KNOWN_MAX,        # 5% novelty threshold
-    UNCERTAINTY_CONFIDENT_MAX,# 2% uncertainty threshold
+    NOVELTY_KNOWN_MAX,        # 4% novelty threshold
+    UNCERTAINTY_CONFIDENT_MAX,# 1.5% uncertainty threshold
     calculate_confidence_score,  # Margin-based confidence calculation
 )
 

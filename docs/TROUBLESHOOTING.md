@@ -164,17 +164,7 @@ MemoryError: Unable to allocate array
 
 **Solutions:**
 
-1. Use parallel mode:
-   ```bash
-   metadarkmatter score classify --parallel ...
-   ```
-
-2. Use fast mode as intermediate option:
-   ```bash
-   metadarkmatter score classify --fast ...
-   ```
-
-3. Use Parquet output:
+1. Use Parquet output:
    ```bash
    metadarkmatter score classify --format parquet ...
    ```

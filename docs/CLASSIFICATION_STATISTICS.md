@@ -20,8 +20,8 @@ Where `pident` is the percent identity of the best BLAST hit (highest bitscore).
 
 | Novelty Index | BLAST Identity | Interpretation |
 |---------------|----------------|----------------|
-| N < 5% | pident > 95% | At or above species boundary |
-| 5% <= N < 20% | 80% < pident <= 95% | Below species boundary |
+| N < 4% | pident > 96% | At or above species boundary |
+| 4% <= N < 20% | 80% < pident <= 96% | Below species boundary |
 | 20% <= N <= 25% | 75% <= pident <= 80% | Genus-level divergence |
 | N > 25% | pident < 75% | Very high divergence |
 
@@ -40,8 +40,8 @@ Where:
 
 | Uncertainty | ANI Between Competitors | Interpretation |
 |-------------|------------------------|----------------|
-| U < 2% | ANI > 98% | Same species, confident placement |
-| 2% <= U < 5% | 95% < ANI <= 98% | Species boundary zone, ambiguous |
+| U < 1.5% | ANI > 98.5% | Same species, confident placement |
+| 1.5% <= U < 5% | 95% < ANI <= 98.5% | Species boundary zone, ambiguous |
 | U >= 5% | ANI <= 95% | Different species, conserved gene |
 
 ## Classification Space
@@ -54,34 +54,34 @@ Uncertainty (U)
      |
  5%+ |  [Conserved Region]   [Conserved Region]   [Conserved Region]
      |
- 2-5%|  [Ambiguous]          [Ambiguous]          [Ambiguous]
+1.5-5|  [Ambiguous]          [Ambiguous]          [Ambiguous]
      |
- <2% |  [Known Species]      [Novel Species]      [Novel Genus]
+ <1.5%|  [Known Species]      [Novel Species]      [Novel Genus]
      |
      +------------------------------------------------------> Novelty (N)
-         0%    5%           20%           25%
+         0%    4%           20%           25%
 ```
 
 ## Classification Categories
 
 ### Known Species
-- **Criteria:** N < 5% AND U < 2%
-- **Meaning:** Read matches a known species (>95% identity) with confident placement (competitors share >98% ANI)
+- **Criteria:** N < 4% AND U < 1.5%
+- **Meaning:** Read matches a known species (>96% identity) with confident placement (competitors share >98.5% ANI)
 - **Biological interpretation:** The read originates from a characterized species in the reference database
 
 ### Novel Species
-- **Criteria:** 5% <= N < 20% AND U < 2%
-- **Meaning:** Moderate divergence from reference (85-95% identity) with confident placement
+- **Criteria:** 4% <= N < 20% AND U < 1.5%
+- **Meaning:** Moderate divergence from reference (80-96% identity) with confident placement
 - **Biological interpretation:** Potential novel species - significant divergence from known taxa but placement is unambiguous
 
 ### Novel Genus
-- **Criteria:** 20% <= N <= 25% AND U < 2%
-- **Meaning:** High divergence (75-85% identity) with confident placement
+- **Criteria:** 20% <= N <= 25% AND U < 1.5%
+- **Meaning:** High divergence (75-80% identity) with confident placement
 - **Biological interpretation:** Potential novel genus - substantial divergence suggesting higher taxonomic novelty
 
 ### Ambiguous
-- **Criteria:** 2% <= U < 5% (regardless of N)
-- **Meaning:** Read matches multiple genomes that share 95-98% ANI (species boundary zone)
+- **Criteria:** 1.5% <= U < 5% (regardless of N)
+- **Meaning:** Read matches multiple genomes that share 95-98.5% ANI (species boundary zone)
 - **Biological interpretation:** Cannot confidently assign to a single species; may be shared gene or recent divergence
 
 ### Conserved Region
@@ -107,15 +107,15 @@ START: Read with BLAST hits
          |
         NO
          v
-   Is 2% <= U < 5%? --YES--> AMBIGUOUS
+   Is 1.5% <= U < 5%? --YES--> AMBIGUOUS
          |
-        NO (U < 2%)
+        NO (U < 1.5%)
          v
-   Is N < 5%? ----YES----> KNOWN SPECIES
+   Is N < 4%? ----YES----> KNOWN SPECIES
          |
         NO
          v
-   Is 5% <= N < 20%? --YES--> NOVEL SPECIES
+   Is 4% <= N < 20%? --YES--> NOVEL SPECIES
          |
         NO
          v
@@ -138,7 +138,7 @@ The 95-96% ANI threshold for prokaryotic species is well-established:
 
 ### Confident Placement (>98% ANI)
 
-When competing genomes share >98% ANI:
+When competing genomes share >98.5% ANI:
 - They represent the same species (potentially different strains)
 - Placement ambiguity reflects strain-level variation, not taxonomic uncertainty
 - The read can be confidently assigned to the species level
@@ -158,7 +158,7 @@ metadarkmatter's methods are designed to align with the Genome Taxonomy Database
 
 | Aspect | GTDB | metadarkmatter | Compatibility |
 |--------|------|----------------|---------------|
-| Species boundary | 95% ANI | 95% pident (N < 5%) | **Aligned** |
+| Species boundary | 95% ANI | 96% pident (N < 4%) | **Aligned** |
 | Method | Genome-to-genome (FastANI) | Read-to-genome (BLAST pident) | Different scope |
 | Alignment fraction | Requires AF >= 50% | Configurable (default 0%) | **Optional filter** |
 | Rank normalization | RED (phylogenetic) | ANI-based clustering | Similar concept |
@@ -230,7 +230,7 @@ confidence_score = margin_score + placement_certainty + alignment_quality
 **Components:**
 
 1. **Margin from threshold boundaries (0-40 pts)**: The further a classification falls from decision thresholds, the more confident the call.
-   - Known Species: Distance from 5% novelty boundary
+   - Known Species: Distance from 4% novelty boundary
    - Novel Species: Minimum distance from both 5% and 20% novelty boundaries
    - Novel Genus: Minimum distance from both 20% and 25% boundaries
    - Ambiguous/Unclassified: Base score of 10 pts
@@ -289,8 +289,8 @@ Best hit: GCF_000123456 at 97.5% identity
 Second hit: GCF_000789012 at 96.8% identity (bitscore within 95%)
 ANI(GCF_000123456, GCF_000789012) = 99.2%
 
-N = 100 - 97.5 = 2.5% (< 5%)
-U = 100 - 99.2 = 0.8% (< 2%)
+N = 100 - 97.5 = 2.5% (< 4%)
+U = 100 - 99.2 = 0.8% (< 1.5%)
 
 Classification: KNOWN SPECIES
 Interpretation: Matches E. coli strains K-12 and BL21
@@ -301,10 +301,10 @@ Interpretation: Matches E. coli strains K-12 and BL21
 Read: ERR789012.1
 Best hit: GCF_000234567 at 91.2% identity
 Second hit: GCF_000345678 at 90.5% identity
-ANI(GCF_000234567, GCF_000345678) = 98.5%
+ANI(GCF_000234567, GCF_000345678) = 99.0%
 
-N = 100 - 91.2 = 8.8% (5-20%)
-U = 100 - 98.5 = 1.5% (< 2%)
+N = 100 - 91.2 = 8.8% (4-20%)
+U = 100 - 99.0 = 1.0% (< 1.5%)
 
 Classification: NOVEL SPECIES
 Interpretation: Divergent from known Pseudomonas, but placement is confident
@@ -317,7 +317,7 @@ Best hit: GCF_000456789 at 99.1% identity
 Second hit: GCF_000567890 at 98.9% identity
 ANI(GCF_000456789, GCF_000567890) = 82.3%
 
-N = 100 - 99.1 = 0.9% (< 5%)
+N = 100 - 99.1 = 0.9% (< 4%)
 U = 100 - 82.3 = 17.7% (>= 5%)
 
 Classification: CONSERVED REGION
@@ -331,8 +331,8 @@ Best hit: GCF_000678901 at 94.2% identity
 Second hit: GCF_000789012 at 93.8% identity
 ANI(GCF_000678901, GCF_000789012) = 96.5%
 
-N = 100 - 94.2 = 5.8% (5-20%)
-U = 100 - 96.5 = 3.5% (2-5%)
+N = 100 - 94.2 = 5.8% (4-20%)
+U = 100 - 96.5 = 3.5% (1.5-5%)
 
 Classification: AMBIGUOUS
 Interpretation: Competing genomes are at species boundary; cannot confidently place
@@ -342,12 +342,12 @@ Interpretation: Competing genomes are at species boundary; cannot confidently pl
 
 | Category | Novelty (N) | Uncertainty (U) | BLAST Identity | ANI Range |
 |----------|-------------|-----------------|----------------|-----------|
-| Known Species | < 5% | < 2% | > 95% | > 98% |
-| Novel Species | 5% to <20% | < 2% | 80-95% | > 98% |
-| Novel Genus | 20-25% | < 2% | 75-80% | > 98% |
-| Ambiguous | any | 2% to <5% | any | >95% to 98% |
+| Known Species | < 4% | < 1.5% | > 96% | > 98.5% |
+| Novel Species | 4% to <20% | < 1.5% | 80-96% | > 98.5% |
+| Novel Genus | 20-25% | < 1.5% | 75-80% | > 98.5% |
+| Ambiguous | any | 1.5% to <5% | any | >95% to 98.5% |
 | Conserved Region | any | >= 5% | any | <= 95% |
-| Unclassified | > 25% or edge | < 2% | < 75% | > 98% |
+| Unclassified | > 25% or edge | < 1.5% | < 75% | > 98.5% |
 
 ## References
 

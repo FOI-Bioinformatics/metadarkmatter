@@ -428,13 +428,13 @@ The `--alignment-mode` option selects threshold calibration:
 
 Protein thresholds are wider because amino acid sequences diverge more slowly than nucleotide sequences.
 
-#### Processing Mode Options (Mutually Exclusive)
+#### Processing Mode Options
 
 | Option | Description | Use Case |
 |--------|-------------|----------|
-| `--fast` | Single-threaded optimized (~3x faster) | Small to medium files |
-| `--parallel` | Polars vectorized (~16x faster) | Large files, recommended |
-| `--streaming` | Memory-efficient for 100M+ alignments | Very large files |
+| `--streaming` | Memory-efficient for 100M+ alignments | Very large files (100M+) |
+
+By default, all classification uses the VectorizedClassifier (Polars-based, auto-parallelized). The `--streaming` flag is the only special processing mode, intended for files exceeding 100M alignments where memory is constrained. Note that `--genomes` and `--id-mapping` are not supported in `--streaming` mode.
 
 #### Examples
 
@@ -446,15 +446,14 @@ metadarkmatter score classify \
     --output sample_classifications.csv
 ```
 
-**With Summary and Parallel Processing**
+**With Summary and Parquet Output**
 ```bash
 metadarkmatter score classify \
     --alignment sample.blast.tsv.gz \
     --ani genomes.ani.csv \
     --output sample_classifications.parquet \
     --summary sample_summary.json \
-    --format parquet \
-    --parallel
+    --format parquet
 ```
 
 **Coverage-Weighted Classification**
@@ -492,19 +491,17 @@ metadarkmatter score classify \
     --alignment external_results.tsv.gz \
     --ani ani_matrix.csv \
     --id-mapping id_mapping.tsv \
-    --output classifications.csv \
-    --parallel
+    --output classifications.csv
 
 # Auto-generate mapping from genome directory
 metadarkmatter score classify \
     --alignment external_results.tsv.gz \
     --ani ani_matrix.csv \
     --genomes reference_genomes/ \
-    --output classifications.csv \
-    --parallel
+    --output classifications.csv
 ```
 
-**Note:** `--genomes` and `--id-mapping` require `--parallel` mode. See the [Workflow Guide](WORKFLOW.md#importing-external-alignment-results) for the complete external import workflow.
+See the [Workflow Guide](WORKFLOW.md#importing-external-alignment-results) for the complete external import workflow.
 
 **Protein Mode (for BLASTX output)**
 ```bash
@@ -512,8 +509,7 @@ metadarkmatter score classify \
     --alignment sample.blastx.tsv.gz \
     --ani genomes.ani.csv \
     --output sample_classifications.csv \
-    --alignment-mode protein \
-    --parallel
+    --alignment-mode protein
 ```
 
 **Family Validation (broad-database alignment)**
@@ -523,8 +519,7 @@ metadarkmatter score classify \
     --ani family_ani_matrix.csv \
     --target-family "f__Francisellaceae" \
     --family-ratio-threshold 0.8 \
-    --output classifications.csv \
-    --parallel
+    --output classifications.csv
 ```
 
 ---
@@ -553,13 +548,6 @@ Batch classify multiple alignment files in a directory.
 | `--coverage-weight-mode` | | TEXT | none | Coverage weighting mode |
 | `--coverage-weight-strength` | | FLOAT | 0.5 | Coverage weight strength (0.0-1.0) |
 
-#### Processing Mode Options
-
-| Option | Description |
-|--------|-------------|
-| `--fast` | Single-threaded optimized per file |
-| `--parallel` | Multi-core vectorized per file |
-
 #### Examples
 
 **Basic Batch Processing**
@@ -577,8 +565,7 @@ metadarkmatter score batch \
     --ani genomes.ani.csv \
     --output-dir ./classifications/ \
     --pattern "*.tsv" \
-    --format parquet \
-    --parallel
+    --format parquet
 ```
 
 **With Coverage Weighting**
@@ -587,8 +574,7 @@ metadarkmatter score batch \
     --alignment-dir ./blast_results/ \
     --ani genomes.ani.csv \
     --output-dir ./classifications/ \
-    --coverage-weight-mode linear \
-    --parallel
+    --coverage-weight-mode linear
 ```
 
 ---
@@ -787,18 +773,16 @@ GCA_000111222.1,82.3,83.1,100.0
 
 | Scenario | Recommended Mode | Command |
 |----------|-----------------|---------|
-| < 1M alignments | Standard | (default) |
-| 1-10M alignments | Fast | `--fast` |
-| 10-100M alignments | Parallel | `--parallel` |
+| Up to 100M alignments | Default (VectorizedClassifier) | (default) |
 | > 100M alignments | Streaming | `--streaming` |
+
+All classification uses the VectorizedClassifier by default, which is Polars-based and auto-parallelized. The `--streaming` mode is available for very large files where memory is a constraint.
 
 ### Memory Usage
 
 | Mode | Memory per 10M Alignments |
 |------|--------------------------|
-| Standard | ~4 GB |
-| Fast | ~3 GB |
-| Parallel | ~2 GB |
+| Default (Vectorized) | ~2 GB |
 | Streaming | ~500 MB (bounded) |
 
 ---
@@ -806,9 +790,6 @@ GCA_000111222.1,82.3,83.1,100.0
 ## Troubleshooting
 
 ### Common Errors
-
-**"Processing modes are mutually exclusive"**
-- Use only one of `--fast`, `--parallel`, or `--streaming`
 
 **"No BLAST files found matching pattern"**
 - Check the `--pattern` option matches your files

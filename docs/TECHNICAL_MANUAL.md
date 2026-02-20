@@ -1,7 +1,7 @@
 # Metadarkmatter Technical Manual
 
 **Version:** 0.1.0
-**Last Updated:** 2025-12-31
+**Last Updated:** 2026-02-20
 
 ---
 
@@ -34,12 +34,11 @@ Environmental samples from air filters, water sources, and other ecological matr
 
 ### 1.3 Key Design Principles
 
-The package is built on four foundational design principles:
+The package is built on three foundational design principles:
 
-1. **Performance-First Architecture**: Uses Polars DataFrame library for 10-100x faster processing compared to pandas, enabling analysis of files containing 100 million BLAST alignments
+1. **Performance-First Architecture**: Uses Polars DataFrame library for 10-100x faster processing compared to pandas, enabling analysis of files containing 100 million BLAST alignments. All CLI classification paths use the `VectorizedClassifier`, which executes entirely in Polars' Rust backend with no Python loops.
 2. **Memory Efficiency**: Streaming algorithms with bounded memory usage, processing gigabyte-scale files within 8-16 GB RAM constraints typical of HPC nodes
-3. **Progressive Optimization**: Four classifier implementations offering different performance-complexity tradeoffs (standard, fast, parallel, vectorized)
-4. **Type Safety**: Comprehensive Pydantic validation for all data models with frozen immutability guarantees
+3. **Type Safety**: Comprehensive Pydantic validation for all data models with frozen immutability guarantees
 
 ### 1.4 Target Users
 
@@ -68,9 +67,8 @@ graph TB
 
     subgraph "Core Algorithm"
         ANIM[ANIMatrix<br/>NumPy array O(1) lookup]
-        ANIC[ANIWeightedClassifier<br/>Standard implementation]
+        ANIC[ANIWeightedClassifier<br/>Programmatic API]
         VEC[VectorizedClassifier<br/>Polars-native vectorized]
-        PAR[ParallelClassifier<br/>Multiprocessing]
     end
 
     subgraph "Data Models"
@@ -98,17 +96,13 @@ graph TB
     AP --> ANIM
     BM --> ANIC
     BM --> VEC
-    BM --> PAR
     ANIM --> ANIC
     ANIM --> VEC
-    ANIM --> PAR
     CFG --> ANIC
     CFG --> VEC
-    CFG --> PAR
 
     ANIC --> CM
     VEC --> CM
-    PAR --> CM
 
     CM --> CSV
     CM --> PARQ
@@ -116,9 +110,7 @@ graph TB
 
     MAIN --> SCORE
     MAIN --> BATCH
-    SCORE --> ANIC
     SCORE --> VEC
-    BATCH --> ANIC
     BATCH --> VEC
 ```
 
@@ -129,18 +121,31 @@ metadarkmatter/
 ├── src/metadarkmatter/
 │   ├── __init__.py              # Package initialization
 │   ├── core/                    # Core algorithm implementation
-│   │   ├── ani_placement.py     # Classifier classes (1612 lines)
-│   │   └── parsers.py           # Streaming parsers (610 lines)
+│   │   ├── constants.py         # Nucleotide thresholds
+│   │   ├── protein_constants.py # Protein thresholds
+│   │   ├── parsers.py           # Streaming parsers
+│   │   ├── classification/      # Classification pipeline
+│   │   │   ├── thresholds.py    # Threshold application logic
+│   │   │   ├── qc.py            # Pre/post-classification QC
+│   │   │   ├── sensitivity.py   # Threshold sensitivity analysis
+│   │   │   ├── adaptive.py      # GMM-based adaptive thresholds
+│   │   │   ├── bayesian.py      # Bayesian posterior probabilities
+│   │   │   ├── ani_matrix.py    # ANIMatrix class
+│   │   │   └── classifiers/     # Classifier implementations
+│   │   │       ├── base.py      # ANIWeightedClassifier (programmatic API)
+│   │   │       └── vectorized.py# VectorizedClassifier (CLI classifier)
+│   │   └── phylogeny/           # Phylogenetic tree building
 │   ├── models/                  # Pydantic data models
 │   │   ├── blast.py             # BLAST hit models
 │   │   ├── classification.py    # Result models
-│   │   └── config.py            # Configuration models
+│   │   └── config.py            # ScoringConfig
 │   ├── cli/                     # Command-line interface
 │   │   ├── main.py              # CLI entry point
-│   │   └── score.py             # Scoring commands (588 lines)
+│   │   └── score.py             # Scoring commands
 │   ├── io/                      # File I/O utilities
 │   ├── utils/                   # Helper utilities
-│   └── external/                # External tool wrappers
+│   ├── external/                # External tool wrappers
+│   └── visualization/           # Plotly charts and HTML reports
 ├── tests/                       # Test suite
 ├── config/                      # Default configurations
 └── docs/                        # Documentation
@@ -151,47 +156,30 @@ metadarkmatter/
 ```mermaid
 flowchart LR
     A[BLAST File<br/>100M+ alignments] --> B[StreamingBlastParser<br/>1M row chunks]
-    B --> C{Processing Mode}
-
-    C -->|Standard| D[ANIWeightedClassifier<br/>Iterator-based]
-    C -->|Fast| E[classify_read_fast<br/>NamedTuple bypass]
-    C -->|Parallel| F[ParallelClassifier<br/>Multi-core]
-    C -->|Vectorized| G[VectorizedClassifier<br/>Polars-native]
+    B --> G[VectorizedClassifier<br/>Polars-native]
 
     H[ANI Matrix<br/>CSV] --> I[ANIMatrixParser<br/>Validation]
     I --> J[ANIMatrix<br/>NumPy array]
 
-    J --> D
-    J --> E
-    J --> F
     J --> G
 
-    D --> K[ReadClassification<br/>Pydantic]
-    E --> L[Dict output<br/>No validation]
-    F --> L
     G --> M[Polars DataFrame<br/>Direct]
 
-    K --> N[Polars DataFrame<br/>Conversion]
-    L --> N
-    M --> N
-
-    N --> O{Output Format}
+    M --> O{Output Format}
     O -->|CSV| P[CSV Writer<br/>Streaming append]
     O -->|Parquet| Q[Parquet Writer<br/>Zstd compression]
 ```
 
 ### 2.4 Architectural Patterns
 
-#### 2.4.1 Strategy Pattern: Multiple Classifier Implementations
+#### 2.4.1 Two Classifier Implementations
 
-The package implements the Strategy pattern to provide interchangeable classification algorithms:
+The package provides two classifier implementations for different use cases:
 
-- **Standard (`ANIWeightedClassifier`)**: Pydantic-validated, iterator-based, suitable for medium datasets
-- **Fast**: Lightweight NamedTuple bypass for reduced validation overhead (~3x faster)
-- **Parallel (`ParallelClassifier`)**: Multiprocessing with shared-memory ANI matrix
-- **Vectorized (`VectorizedClassifier`)**: Polars-native operations in Rust backend (~10x faster)
+- **`ANIWeightedClassifier`**: Pydantic-validated, iterator-based programmatic API. Provides `classify_read()` for single-read classification in custom scripts and library usage.
+- **`VectorizedClassifier`**: Polars-native operations in Rust backend. Sole classifier used by all CLI paths (batch, streaming). Executes entire classification pipeline with no Python loops.
 
-Users select strategy via CLI flags (`--fast`, `--parallel`, `--streaming`), allowing runtime optimization without code changes.
+The CLI uses `VectorizedClassifier` exclusively. Users can select streaming mode via `--streaming` for memory-bounded processing of very large files.
 
 #### 2.4.2 Iterator Pattern: Memory-Bounded Streaming
 
@@ -199,11 +187,14 @@ All parsers implement streaming iterators to maintain bounded memory:
 
 ```python
 # File size: 10 GB BLAST results
-# Memory usage: ~1.5 GB (constant regardless of file size)
-parser = StreamingBlastParser(blast_path, chunk_size=1_000_000)
-for result in parser.iter_reads_fast():
-    classification = classifier.classify_read_fast(result)
-    yield classification
+# Memory usage: ~1.8 GB (constant regardless of file size)
+# VectorizedClassifier streaming mode processes in bounded partitions
+vectorized = VectorizedClassifier(ani_matrix, config)
+num_classified = vectorized.stream_to_file(
+    blast_path=blast_path,
+    output_path=output_path,
+    output_format="parquet",
+)
 ```
 
 #### 2.4.3 Immutability Pattern: Frozen Pydantic Models
@@ -255,13 +246,13 @@ N = 100 - TopHitIdentity
 ```
 
 **Interpretation:**
-- `N < 2`: Near-identical match to reference (known species)
-- `5 ≤ N ≤ 15`: Moderate divergence (potential novel species)
-- `15 ≤ N ≤ 25`: High divergence (potential novel genus)
+- `N < 4`: High identity match to reference (known species)
+- `4 <= N < 20`: Moderate divergence (potential novel species)
+- `20 <= N <= 25`: High divergence (potential novel genus)
 - `N > 25`: Very distant homology (beyond genus-level classification)
 
 **Biological Context:**
-Within bacterial taxonomy, species are typically defined by ANI ≥ 95-96% (N ≤ 4-5%). Novel species occupy the 85-92% identity range, while novel genera show 75-85% identity to closest known representatives.
+Within bacterial taxonomy, species are typically defined by ANI >= 96% (N <= 4%). Novel species occupy the 80-96% identity range, while novel genera show 75-80% identity to closest known representatives.
 
 #### 3.1.2 Placement Uncertainty (U)
 
@@ -273,10 +264,9 @@ U = 100 - max(ANI(TopHit, SecondaryHit))
 Where `SecondaryHit` ranges over all BLAST hits within 95% of top bitscore.
 
 **Interpretation:**
-- `U < 0.5`: Unambiguous placement (single clear best match)
-- `0.5 ≤ U < 2`: Low ambiguity (closely related competing genomes)
-- `2 ≤ U < 5`: Moderate ambiguity (divergent competing genomes)
-- `U ≥ 5`: High ambiguity (conserved region matching distant genomes)
+- `U < 1.5`: Confident placement (competing genomes share >98.5% ANI)
+- `1.5 <= U < 5`: Species boundary zone (competing genomes share 95-98.5% ANI)
+- `U >= 5`: High ambiguity, conserved region (competing genomes share <95% ANI)
 
 **Biological Context:**
 High placement uncertainty indicates conserved genomic regions (e.g., ribosomal RNA, housekeeping genes) that provide insufficient phylogenetic resolution. These reads are excluded from novelty detection to avoid false positives.
@@ -285,19 +275,19 @@ High placement uncertainty indicates conserved genomic regions (e.g., ribosomal 
 
 ```mermaid
 graph TD
-    START[Read with BLAST hits] --> CHECK_U{U ≥ 5.0?}
+    START[Read with BLAST hits] --> CHECK_U{U >= 5.0?}
 
     CHECK_U -->|Yes| CONSERVED[Conserved Region<br/>Too ambiguous]
 
-    CHECK_U -->|No| CHECK_KNOWN{N < 2.0 AND<br/>U < 0.5?}
+    CHECK_U -->|No| CHECK_KNOWN{N < 4.0 AND<br/>U < 1.5?}
 
     CHECK_KNOWN -->|Yes| KNOWN[Known Species<br/>High identity, unambiguous]
 
-    CHECK_KNOWN -->|No| CHECK_NOVEL_SP{5.0 ≤ N ≤ 15.0<br/>AND U < 0.5?}
+    CHECK_KNOWN -->|No| CHECK_NOVEL_SP{4.0 <= N < 20.0<br/>AND U < 1.5?}
 
     CHECK_NOVEL_SP -->|Yes| NOVEL_SP[Novel Species<br/>Moderate divergence]
 
-    CHECK_NOVEL_SP -->|No| CHECK_NOVEL_GEN{15.0 ≤ N ≤ 25.0<br/>AND U < 2.0?}
+    CHECK_NOVEL_SP -->|No| CHECK_NOVEL_GEN{20.0 <= N <= 25.0<br/>AND U < 1.5?}
 
     CHECK_NOVEL_GEN -->|Yes| NOVEL_GEN[Novel Genus<br/>High divergence]
 
@@ -371,15 +361,15 @@ if placement_uncertainty >= 5.0:
     return TaxonomicCall.CONSERVED_REGION
 
 # Low novelty + low uncertainty → Known species
-if novelty_index < 2.0 and placement_uncertainty < 0.5:
+if novelty_index < 4.0 and placement_uncertainty < 1.5:
     return TaxonomicCall.KNOWN_SPECIES
 
 # Moderate novelty + low uncertainty → Novel species
-if 5.0 <= novelty_index <= 15.0 and placement_uncertainty < 0.5:
+if 4.0 <= novelty_index < 20.0 and placement_uncertainty < 1.5:
     return TaxonomicCall.NOVEL_SPECIES
 
-# High novelty + moderate uncertainty → Novel genus
-if 15.0 <= novelty_index <= 25.0 and placement_uncertainty < 2.0:
+# High novelty + low uncertainty → Novel genus
+if 20.0 <= novelty_index <= 25.0 and placement_uncertainty < 1.5:
     return TaxonomicCall.NOVEL_GENUS
 
 # Default fallback
@@ -396,32 +386,30 @@ return TaxonomicCall.CONSERVED_REGION
 - Worst case: O(h) where h = total hits per read (bounded by BLAST `max_target_seqs`)
 
 **Full file classification (n reads):**
-- Standard classifier: O(n × k)
-- Vectorized classifier: O(n) amortized (Polars parallelizes operations internally)
+- ANIWeightedClassifier (per-read API): O(n * k)
+- VectorizedClassifier (CLI): O(n) amortized (Polars parallelizes operations internally)
 
 **Memory:**
-- Standard: O(chunk_size) - bounded by streaming chunk
-- Vectorized: O(n) - loads full dataset for parallel aggregation
+- VectorizedClassifier batch: O(n) - loads full dataset for parallel aggregation
+- VectorizedClassifier streaming: O(chunk_size) - bounded by partition size
 
 ---
 
 ## 4. Performance Optimization Strategy
 
-### 4.1 Optimization Hierarchy
+### 4.1 Optimization Strategy
 
-The package implements a four-tier optimization strategy, each building on the previous:
+The package implements a unified high-performance approach using Polars' Rust backend:
 
 ```
-Level 0: Baseline (Pandas + Pydantic)          → 1x speed baseline
-    ↓
-Level 1: Polars Streaming                      → 10x faster I/O
-    ↓
-Level 2: NamedTuple Bypass                     → 3x faster object creation
-    ↓
-Level 3: Vectorized Operations                 → 10x faster classification
-    ↓
-Level 4: Multiprocessing                       → Linear scaling with cores
+Foundation: Polars DataFrame library           → 10-100x faster than pandas
+    +
+Vectorized Classification                     → Zero Python loops, SIMD operations
+    +
+Streaming Mode (optional)                     → Bounded memory for very large files
 ```
+
+All CLI classification paths use `VectorizedClassifier`, which executes the entire pipeline in compiled Rust via Polars expressions. For programmatic single-read classification, `ANIWeightedClassifier.classify_read()` provides a Pydantic-validated API.
 
 ### 4.2 Critical Optimization: ANI Matrix as NumPy Array
 
@@ -531,56 +519,7 @@ result = lazy_df.collect(streaming=True)
 | Memory usage | 42 GB | 6 GB | 7x reduction |
 | **Total** | **595s** | **23s** | **25.8x** |
 
-### 4.4 Critical Optimization: NamedTuple Bypass
-
-#### Problem with Pydantic Validation
-
-```python
-# Slow: Pydantic validates every field on creation
-class BlastHit(BaseModel):
-    qseqid: str
-    pident: float  # Triggers validator
-    bitscore: float  # Triggers validator
-    # ... 12 total fields
-
-    @field_validator("pident")
-    def clamp_pident(cls, v: float) -> float:
-        return max(0.0, min(100.0, v))
-
-# Creating 100M BlastHit objects: ~180 seconds
-```
-
-#### Solution: Lightweight NamedTuple
-
-```python
-class BlastHitFast(NamedTuple):
-    qseqid: str
-    sseqid: str
-    pident: float
-    bitscore: float
-    genome_name: str  # Pre-extracted by Polars
-
-# Creating 100M BlastHitFast objects: ~3.5 seconds (51x faster)
-```
-
-**Trade-off:**
-- Pydantic: Full validation, type safety, auto-documentation → Use for external API boundaries
-- NamedTuple: No validation, minimal overhead → Use for internal hot paths
-
-**Usage pattern:**
-```python
-# External input: Validate once at boundary
-blast_hit = BlastHit.from_blast_line(line)  # Pydantic validation
-
-# Internal processing: Use lightweight structures
-fast_hit = BlastHitFast(
-    qseqid=hit.qseqid,
-    pident=hit.pident,
-    # ...
-)
-```
-
-### 4.5 Vectorized Classification Architecture
+### 4.4 Vectorized Classification Architecture
 
 The `VectorizedClassifier` eliminates Python loops entirely by using Polars' Rust backend:
 
@@ -645,9 +584,8 @@ def classify_file(self, blast_path: Path) -> pl.DataFrame:
 
 | Classifier | Time | Speedup |
 |------------|------|---------|
-| Standard (Python loop) | 245s | 1x |
-| Fast (NamedTuple) | 78s | 3.1x |
-| Vectorized (Polars) | 14s | 17.5x |
+| ANIWeightedClassifier (per-read Python loop) | 245s | 1x |
+| VectorizedClassifier (Polars) | 14s | 17.5x |
 
 ---
 
@@ -863,27 +801,24 @@ This decorator ensures `is_novel` is included in serialization (`.model_dump()`,
 class ScoringConfig(BaseModel):
     bitscore_threshold_pct: float = Field(default=95.0, ge=0, le=100)
 
-    # Novelty thresholds
-    novelty_known_max: float = 2.0
-    novelty_novel_species_min: float = 5.0
+    # Novelty thresholds (N = 100 - TopHitIdentity)
+    novelty_known_max: float = 4.0          # N < 4% = known species (pident > 96%)
+    novelty_novel_species_min: float = 4.0   # Continuous boundary with known_max
     novelty_novel_species_max: float = 20.0
     novelty_novel_genus_min: float = 20.0
     novelty_novel_genus_max: float = 25.0
 
-    # Uncertainty thresholds
-    uncertainty_known_max: float = 0.5
-    uncertainty_novel_species_max: float = 0.5
-    uncertainty_novel_genus_max: float = 2.0
+    # Uncertainty thresholds (U = 100 - max ANI between competing genomes)
+    uncertainty_known_max: float = 1.5       # U < 1.5% = confident placement
+    uncertainty_novel_species_max: float = 1.5
+    uncertainty_novel_genus_max: float = 1.5
     uncertainty_conserved_min: float = 5.0
 
     @model_validator(mode="after")
     def validate_threshold_boundaries(self) -> Self:
         """Ensure thresholds form valid hierarchy."""
-        if self.novelty_novel_species_min <= self.novelty_known_max:
-            raise ValueError("Novel species min must exceed known max")
-
-        if self.novelty_novel_genus_min != self.novelty_novel_species_max:
-            raise ValueError("Genus min must equal species max (continuous boundary)")
+        if self.novelty_novel_species_min < self.novelty_known_max:
+            raise ValueError("Novel species min must be >= known max")
 
         return self
 
@@ -925,9 +860,9 @@ class ScoringConfig(BaseModel):
 
 | Category | Nucleotide | Protein | Biological Basis |
 |----------|-----------|---------|------------------|
-| Known Species | N < 5% | N < 10% | >95% ANI / >90% AAI |
-| Novel Species | 5-20% | 10-25% | 80-95% ANI / 75-90% AAI |
-| Novel Genus | 20-25% | 25-40% | 75-80% ANI / 60-75% AAI |
+| Known Species | N < 4%, U < 1.5% | N < 10%, U < 5% | >96% ANI / >90% AAI |
+| Novel Species | 4% <= N < 20%, U < 1.5% | 10% <= N < 25%, U < 5% | 80-96% ANI / 75-90% AAI |
+| Novel Genus | 20% <= N <= 25%, U < 1.5% | 25% <= N <= 40%, U < 5% | 75-80% ANI / 60-75% AAI |
 
 **Protein constants** are defined in `core/protein_constants.py`:
 
@@ -1148,20 +1083,18 @@ ani_matrix = ANIMatrix(ani_dict)  # Converts to NumPy
 
 ## 7. Classification Implementations
 
-### 7.1 Classifier Comparison Matrix
+### 7.1 Classifier Overview
 
-| Classifier | Speed | Memory | Parallelism | Validation | Best Use Case |
-|------------|-------|--------|-------------|------------|---------------|
-| **ANIWeightedClassifier** | 1x | Low | Single-thread | Full Pydantic | Small-medium files, development |
-| **Fast Mode** | 3x | Low | Single-thread | Minimal | Medium files, quick analysis |
-| **ParallelClassifier** | 6x | Medium | Multi-core | Minimal | Large files, HPC clusters |
-| **VectorizedClassifier** | 10x | Medium-High | Auto-parallel | None | Very large files, production |
+| Classifier | Speed | Memory | Parallelism | Validation | Use Case |
+|------------|-------|--------|-------------|------------|----------|
+| **ANIWeightedClassifier** | 1x | Low | Single-thread | Full Pydantic | Programmatic API (`classify_read()`) |
+| **VectorizedClassifier** | 17x | Medium-High | Auto-parallel (Polars) | None | All CLI paths (batch + streaming) |
 
-### 7.2 ANIWeightedClassifier (Standard)
+### 7.2 ANIWeightedClassifier (Programmatic API)
 
-**File:** `/Users/andreassjodin/Code/metadarkmatter/src/metadarkmatter/core/ani_placement.py:180-438`
+**File:** `src/metadarkmatter/core/classification/classifiers/base.py`
 
-**Architecture:** Iterator-based with full Pydantic validation.
+**Architecture:** Iterator-based with full Pydantic validation. Provides `classify_read()` for single-read classification in custom scripts and library usage. Not used by the CLI.
 
 #### 7.2.1 Core Classification Method
 
@@ -1245,79 +1178,13 @@ def _calculate_placement_uncertainty(
 **Iterator Advantage:**
 Using `iter_ambiguous_hits()` allows early termination when bitscore drops below threshold, avoiding processing of 1000+ hits for some reads.
 
-### 7.3 Fast Mode: NamedTuple Bypass
+### 7.3 VectorizedClassifier: Polars-Native
 
-**File:** `/Users/andreassjodin/Code/metadarkmatter/src/metadarkmatter/core/ani_placement.py:446-579`
+**File:** `src/metadarkmatter/core/classification/classifiers/vectorized.py`
 
-**Optimization:** Bypasses Pydantic on both input and output.
+**Architecture:** Zero Python loops -- entire classification in Polars/Rust. This is the sole classifier used by all CLI paths (both batch and streaming).
 
-```python
-def classify_read_fast(self, result: BlastResultFast) -> dict | None:
-    """Classify using lightweight NamedTuple input."""
-    if not result.hits:
-        return None
-
-    # Direct tuple access (no Pydantic property)
-    best_hit = result.hits[0]
-    top_hit_identity = min(100.0, max(0.0, best_hit.pident))
-    novelty_index = 100.0 - top_hit_identity
-    best_genome = best_hit.genome_name  # Pre-extracted by parser
-
-    # Placement uncertainty (inline to avoid function call overhead)
-    bitscore_cutoff = best_hit.bitscore * (self.config.bitscore_threshold_pct / 100.0)
-    max_ani = 0.0
-    num_ambiguous_hits = 0
-
-    for hit in result.hits:
-        if hit.bitscore < bitscore_cutoff:
-            break
-        num_ambiguous_hits += 1
-        if hit.genome_name != best_genome:
-            ani = self.ani_matrix.get_ani(best_genome, hit.genome_name)
-            if ani > max_ani:
-                max_ani = ani
-
-    placement_uncertainty = (
-        0.0 if num_ambiguous_hits <= 1 else
-        100.0 if max_ani == 0.0 else
-        100.0 - max_ani
-    )
-
-    # Threshold classification (reuses standard method)
-    taxonomic_call = self._classify_by_thresholds(novelty_index, placement_uncertainty)
-
-    # Return plain dict (no Pydantic overhead)
-    return {
-        "read_id": result.read_id,
-        "best_match_genome": best_genome,
-        "top_hit_identity": top_hit_identity,
-        "novelty_index": novelty_index,
-        "placement_uncertainty": placement_uncertainty,
-        "num_ambiguous_hits": num_ambiguous_hits,
-        "taxonomic_call": taxonomic_call.value,
-        "is_novel": taxonomic_call in (TaxonomicCall.NOVEL_SPECIES, TaxonomicCall.NOVEL_GENUS),
-    }
-```
-
-**Performance Gains:**
-
-1. **No input validation:** `BlastResultFast` is a NamedTuple (50x faster creation)
-2. **No output validation:** Returns dict, not Pydantic `ReadClassification`
-3. **Inlined uncertainty calculation:** Avoids method call overhead
-4. **Pre-extracted genome names:** Done once in Polars, not per-hit in Python
-
-**Benchmark (10M reads):**
-- Standard: 245s
-- Fast: 78s
-- **Speedup: 3.1x**
-
-### 7.4 VectorizedClassifier: Polars-Native
-
-**File:** `/Users/andreassjodin/Code/metadarkmatter/src/metadarkmatter/core/ani_placement.py:974-1216`
-
-**Architecture:** Zero Python loops—entire classification in Polars/Rust.
-
-#### 7.4.1 Vectorized Classification Pipeline
+#### 7.3.1 Vectorized Classification Pipeline
 
 ```python
 class VectorizedClassifier:
@@ -1413,23 +1280,23 @@ class VectorizedClassifier:
 
         # Step 9: Classification via nested when/then (vectorized)
         result = result.with_columns([
-            pl.when(pl.col("placement_uncertainty") >= cfg.uncertainty_conserved_min)
+            pl.when(pl.col("placement_uncertainty") >= cfg.uncertainty_conserved_min)  # >= 5.0
               .then(pl.lit("Conserved Region"))
             .when(
-                (pl.col("novelty_index") < cfg.novelty_known_max) &
-                (pl.col("placement_uncertainty") < cfg.uncertainty_known_max)
+                (pl.col("novelty_index") < cfg.novelty_known_max) &  # < 4.0
+                (pl.col("placement_uncertainty") < cfg.uncertainty_known_max)  # < 1.5
             )
               .then(pl.lit("Known Species"))
             .when(
-                (pl.col("novelty_index") >= cfg.novelty_novel_species_min) &
-                (pl.col("novelty_index") <= cfg.novelty_novel_species_max) &
-                (pl.col("placement_uncertainty") < cfg.uncertainty_novel_species_max)
+                (pl.col("novelty_index") >= cfg.novelty_novel_species_min) &  # >= 4.0
+                (pl.col("novelty_index") < cfg.novelty_novel_species_max) &  # < 20.0
+                (pl.col("placement_uncertainty") < cfg.uncertainty_novel_species_max)  # < 1.5
             )
               .then(pl.lit("Novel Species"))
             .when(
-                (pl.col("novelty_index") >= cfg.novelty_novel_genus_min) &
-                (pl.col("novelty_index") <= cfg.novelty_novel_genus_max) &
-                (pl.col("placement_uncertainty") < cfg.uncertainty_novel_genus_max)
+                (pl.col("novelty_index") >= cfg.novelty_novel_genus_min) &  # >= 20.0
+                (pl.col("novelty_index") <= cfg.novelty_novel_genus_max) &  # <= 25.0
+                (pl.col("placement_uncertainty") < cfg.uncertainty_novel_genus_max)  # < 1.5
             )
               .then(pl.lit("Novel Genus"))
             .otherwise(pl.lit("Conserved Region"))
@@ -1455,7 +1322,7 @@ class VectorizedClassifier:
         ])
 ```
 
-#### 7.4.2 ANI Lookup DataFrame
+#### 7.3.2 ANI Lookup DataFrame
 
 **Key Innovation:** Pre-build ANI matrix as Polars DataFrame for join-based lookup.
 
@@ -1515,163 +1382,6 @@ secondary_with_ani = ambiguous.join(
 - Vectorized: 14s
 - **Speedup: 17.5x**
 
-### 7.5 ParallelClassifier: Multi-Core
-
-**File:** `/Users/andreassjodin/Code/metadarkmatter/src/metadarkmatter/core/ani_placement.py:808-972`
-
-**Use Case:** Large files on multi-core HPC nodes (8-64 cores).
-
-#### 7.5.1 Shared-Memory Architecture
-
-```python
-class ParallelClassifier:
-    def __init__(
-        self,
-        ani_matrix: ANIMatrix,
-        config: ScoringConfig,
-        num_workers: int | None = None,
-        chunk_size: int = 50_000,
-    ):
-        self.ani_matrix = ani_matrix
-        self.config = config
-        self.num_workers = num_workers or max(1, mp.cpu_count() - 1)
-        self.chunk_size = chunk_size
-
-        # Pre-serialize config for workers (Pydantic not picklable)
-        self._config_dict = {
-            "bitscore_threshold_pct": config.bitscore_threshold_pct,
-            "novelty_known_max": config.novelty_known_max,
-            # ... all threshold fields
-        }
-
-    def classify_file(self, blast_path: Path) -> pl.DataFrame:
-        """Distribute work across CPU cores."""
-        # Collect reads into chunks
-        parser = StreamingBlastParser(blast_path)
-        chunks = []
-        current_chunk = []
-
-        for result in parser.iter_reads_fast():
-            # Serialize to picklable format
-            hits_data = [
-                (h.qseqid, h.sseqid, h.pident, h.bitscore, h.genome_name)
-                for h in result.hits
-            ]
-            current_chunk.append((result.read_id, hits_data))
-
-            if len(current_chunk) >= self.chunk_size:
-                chunks.append(current_chunk)
-                current_chunk = []
-
-        if current_chunk:
-            chunks.append(current_chunk)
-
-        # Process chunks in parallel
-        all_results = []
-
-        # Share ANI matrix via read-only access (no copy)
-        ani_array = self.ani_matrix._ani_array
-        genome_to_idx = self.ani_matrix._genome_to_idx
-
-        worker_fn = partial(
-            _classify_chunk_worker,
-            ani_array=ani_array,
-            genome_to_idx=genome_to_idx,
-            config_dict=self._config_dict,
-        )
-
-        with mp.Pool(processes=self.num_workers) as pool:
-            for chunk_results in pool.imap(worker_fn, chunks):
-                all_results.extend(chunk_results)
-
-        return pl.DataFrame(all_results)
-```
-
-#### 7.5.2 Worker Function
-
-**Critical:** Worker function must be at module level for pickling.
-
-```python
-def _classify_chunk_worker(
-    chunk_data: list[tuple],
-    ani_array: np.ndarray,       # Shared read-only
-    genome_to_idx: dict[str, int],
-    config_dict: dict[str, float],
-) -> list[dict]:
-    """Worker process for parallel classification."""
-    results = []
-
-    # Extract config thresholds
-    bitscore_pct = config_dict["bitscore_threshold_pct"]
-    # ... other thresholds
-
-    for read_id, hits_data in chunk_data:
-        if not hits_data:
-            continue
-
-        # Reconstruct hits (minimal overhead)
-        best_hit = hits_data[0]
-        best_pident = best_hit[2]
-        best_bitscore = best_hit[3]
-        best_genome = best_hit[4]
-
-        # Calculate metrics (same logic as fast mode)
-        novelty_index = 100.0 - best_pident
-
-        bitscore_cutoff = best_bitscore * (bitscore_pct / 100.0)
-        max_ani = 0.0
-        num_ambiguous_hits = 0
-
-        best_idx = genome_to_idx.get(best_genome)
-
-        for hit in hits_data:
-            if hit[3] < bitscore_cutoff:
-                break
-            num_ambiguous_hits += 1
-            secondary_genome = hit[4]
-            if secondary_genome != best_genome:
-                secondary_idx = genome_to_idx.get(secondary_genome)
-                if best_idx is not None and secondary_idx is not None:
-                    # Direct NumPy indexing (no method call overhead)
-                    ani = float(ani_array[best_idx, secondary_idx])
-                    if ani > max_ani:
-                        max_ani = ani
-
-        placement_uncertainty = (
-            0.0 if num_ambiguous_hits <= 1 else
-            100.0 if max_ani == 0.0 else
-            100.0 - max_ani
-        )
-
-        # Classify using inlined thresholds
-        # ... (classification logic)
-
-        results.append({
-            "read_id": read_id,
-            "best_match_genome": best_genome,
-            "novelty_index": novelty_index,
-            "placement_uncertainty": placement_uncertainty,
-            "taxonomic_call": call,
-            "is_novel": is_novel,
-        })
-
-    return results
-```
-
-**Memory Sharing:**
-
-- **ANI Array:** Passed by reference (read-only), not copied per worker
-- **Genome Index Dict:** Copied once per worker (small: ~100 KB for 1000 genomes)
-- **Results:** Collected and merged in parent process
-
-**Benchmark (10M reads, 16 cores):**
-- Single-threaded fast: 78s
-- Parallel (16 cores): 12s
-- **Speedup: 6.5x** (not linear due to serialization overhead)
-
-**Trade-off:**
-VectorizedClassifier often outperforms ParallelClassifier due to lower overhead, except on very large HPC nodes (64+ cores) where parallelism dominates.
-
 ---
 
 ## 8. CLI Interface
@@ -1698,8 +1408,6 @@ metadarkmatter score classify \
   --output OUTPUT_PATH \
   [--summary SUMMARY_JSON] \
   [--format {csv,parquet}] \
-  [--fast] \
-  [--parallel] \
   [--streaming] \
   [--verbose]
 ```
@@ -1714,8 +1422,6 @@ def classify(
     output: Path,
     summary: Path | None = None,
     output_format: str = "csv",
-    fast: bool = False,
-    parallel: bool = False,
     streaming: bool = False,
     verbose: bool = False,
 ) -> None:
@@ -1724,36 +1430,24 @@ def classify(
     ani_matrix = ANIMatrix.from_file(ani)
     config = ScoringConfig()
 
-    # Select classifier based on flags
+    # All CLI paths use VectorizedClassifier
+    vectorized = VectorizedClassifier(ani_matrix, config)
+
     if streaming:
         # Streaming mode: direct-to-file, bounded memory
-        vectorized = VectorizedClassifier(ani_matrix, config)
         num_classified = vectorized.stream_to_file(
             blast_path=blast,
             output_path=output,
             output_format=output_format,
             progress_callback=streaming_progress,
         )
-
-    elif parallel:
-        # Vectorized mode: auto-parallelized Polars
-        vectorized = VectorizedClassifier(ani_matrix, config)
-        df = vectorized.classify_file(blast)
-        df.write_parquet(output) if output_format == "parquet" else df.write_csv(output)
-        num_classified = len(df)
-
-    elif fast:
-        # Fast mode: NamedTuple bypass
-        classifier = ANIWeightedClassifier(ani_matrix, config)
-        df = classifier.classify_to_dataframe_fast(blast)
-        df.write_csv(output)
-        num_classified = len(df)
-
     else:
-        # Standard mode: full validation
-        classifier = ANIWeightedClassifier(ani_matrix, config)
-        df = classifier.classify_to_dataframe(blast)
-        df.write_csv(output)
+        # Batch mode: load full dataset, auto-parallelized by Polars
+        df = vectorized.classify_file(blast)
+        if output_format == "parquet":
+            df.write_parquet(output)
+        else:
+            df.write_csv(output)
         num_classified = len(df)
 
     # Generate summary if requested
@@ -1878,18 +1572,16 @@ Summary written to: /path/to/summary.json
 
 ### 9.2 End-to-End Performance
 
-| Classifier | Threads | Time | Throughput | Memory Peak | Output Size |
-|------------|---------|------|------------|-------------|-------------|
-| Standard | 1 | 24m 35s | 67,753 reads/s | 2.1 GB | 2.8 GB CSV |
-| Fast | 1 | 7m 42s | 216,450 reads/s | 1.8 GB | 2.8 GB CSV |
-| Parallel | 12 | 3m 18s | 505,050 reads/s | 4.5 GB | 2.8 GB CSV |
-| Vectorized | Auto | 1m 52s | 892,857 reads/s | 6.2 GB | 2.8 GB CSV |
-| Vectorized (Parquet) | Auto | 1m 28s | 1,136,364 reads/s | 6.2 GB | 285 MB Parquet |
+| Mode | Threads | Time | Throughput | Memory Peak | Output Size |
+|------|---------|------|------------|-------------|-------------|
+| VectorizedClassifier (CSV) | Auto | 1m 52s | 892,857 reads/s | 6.2 GB | 2.8 GB CSV |
+| VectorizedClassifier (Parquet) | Auto | 1m 28s | 1,136,364 reads/s | 6.2 GB | 285 MB Parquet |
+| VectorizedClassifier (Streaming) | Auto | 2m 15s | 740,741 reads/s | 1.8 GB | 285 MB Parquet |
 
 **Key Observations:**
 
-1. **Vectorized + Parquet:** Best overall performance (23.8x faster than standard)
-2. **Memory scaling:** Higher performance modes use more RAM but stay within typical HPC constraints
+1. **Batch + Parquet:** Best overall throughput
+2. **Streaming mode:** Bounded memory at ~1.8 GB regardless of file size, modest throughput reduction
 3. **Parquet I/O:** Saves ~30% wall-clock time on output writing
 
 ### 9.3 Scaling Analysis
@@ -1932,24 +1624,6 @@ metadarkmatter score classify --streaming --alignment huge.tsv.gz --ani ani.csv 
 2. **Lookup time constant:** O(1) array indexing regardless of size
 3. **Load time dominated by parsing:** CSV read is bottleneck, not NumPy conversion
 
-**Sparse Matrix Optimization:**
-
-For >10K genomes with low ANI density (<10%), use `SparseANIMatrix`:
-
-```python
-from metadarkmatter.core.ani_placement import SparseANIMatrix
-
-# Only stores ANI values ≥ 75.0 (default)
-sparse_matrix = SparseANIMatrix.from_file(
-    ani_path,
-    min_ani=75.0,     # Threshold for storing values
-    default_ani=70.0  # Default for missing pairs
-)
-
-# 20x memory reduction for large, sparse matrices
-print(sparse_matrix.memory_usage_bytes())  # 40 MB vs 800 MB dense
-```
-
 ### 9.4 I/O Performance
 
 #### 9.4.1 BLAST File Reading
@@ -1984,21 +1658,7 @@ print(sparse_matrix.memory_usage_bytes())  # 40 MB vs 800 MB dense
 
 ### 9.5 Memory Profiling
 
-#### 9.5.1 Standard Classifier Memory Breakdown
-
-**Total Peak:** 2.1 GB for 25M reads
-
-| Component | Memory | Percentage |
-|-----------|--------|------------|
-| BLAST chunk buffer | 200 MB | 9.5% |
-| Pending reads accumulator | 50 MB | 2.4% |
-| ANI matrix (1K genomes) | 8 MB | 0.4% |
-| Pydantic model overhead | 1.2 GB | 57.1% |
-| Results accumulation | 650 MB | 31.0% |
-
-**Bottleneck:** Pydantic validation overhead dominates memory (57%)
-
-#### 9.5.2 Vectorized Classifier Memory Breakdown
+#### 9.5.1 VectorizedClassifier Batch Memory Breakdown
 
 **Total Peak:** 6.2 GB for 25M reads
 
@@ -2012,7 +1672,7 @@ print(sparse_matrix.memory_usage_bytes())  # 40 MB vs 800 MB dense
 
 **Trade-off:** Higher memory usage but 10x faster due to vectorization
 
-#### 9.5.3 Streaming Mode Memory Profile
+#### 9.5.2 VectorizedClassifier Streaming Memory Profile
 
 **Constant Peak:** 1.8 GB regardless of file size
 
@@ -2078,7 +1738,7 @@ exclude_lines = [
 | `models/blast.py` | 95% | 88% |
 | `models/classification.py` | 92% | 85% |
 | `models/config.py` | 88% | 82% |
-| `core/ani_placement.py` | 87% | 79% |
+| `core/classification/classifiers/` | 87% | 79% |
 | `core/parsers.py` | 91% | 84% |
 | `cli/score.py` | 78% | 68% |
 | **Overall** | **87%** | **81%** |
@@ -2138,20 +1798,16 @@ def test_vectorized_classifier_performance(benchmark_blast_file):
 
 ```python
 def test_classification_consistency():
-    """All classifiers produce identical results."""
-    # Standard classifier (reference)
+    """Classifiers produce identical results."""
+    # Per-read classifier (reference)
     standard = ANIWeightedClassifier(ani_matrix, config)
     df_standard = standard.classify_to_dataframe(blast_path)
 
-    # Fast classifier
-    df_fast = standard.classify_to_dataframe_fast(blast_path)
-
-    # Vectorized classifier
+    # Vectorized classifier (used by CLI)
     vectorized = VectorizedClassifier(ani_matrix, config)
     df_vectorized = vectorized.classify_file(blast_path)
 
-    # All should produce same classifications
-    assert_frame_equal(df_standard, df_fast)
+    # Both should produce same classifications
     assert_frame_equal(df_standard, df_vectorized)
 ```
 
@@ -2259,7 +1915,6 @@ metadarkmatter score classify \
   --output /results/${SAMPLE_ID}_classifications.parquet \
   --summary /results/${SAMPLE_ID}_summary.json \
   --format parquet \
-  --parallel \
   --verbose
 ```
 
@@ -2287,8 +1942,7 @@ metadarkmatter score classify \
   --alignment /data/blast/${SAMPLE}.tsv.gz \
   --ani /data/references/ani_matrix.csv \
   --output /results/${SAMPLE}_classifications.parquet \
-  --format parquet \
-  --parallel
+  --format parquet
 ```
 
 ### 11.3 Docker Container
@@ -2327,47 +1981,37 @@ docker run -v /data:/data metadarkmatter:latest \
 
 ### 11.4 Configuration Management
 
-#### 11.4.1 YAML Configuration File
+#### 11.4.1 ScoringConfig
 
-**Example:** `config/production_config.yaml`
-
-```yaml
-project_name: "environmental_survey_2024"
-output_dir: "/scratch/results"
-
-scoring:
-  bitscore_threshold_pct: 95.0
-  novelty_known_max: 2.0
-  novelty_novel_species_min: 5.0
-  novelty_novel_species_max: 20.0
-  novelty_novel_genus_min: 20.0
-  novelty_novel_genus_max: 25.0
-  uncertainty_known_max: 0.5
-  uncertainty_novel_species_max: 0.5
-  uncertainty_novel_genus_max: 2.0
-  uncertainty_conserved_min: 5.0
-
-num_threads: 16
-verbose: true
-```
-
-**Load configuration:**
+Classification thresholds are configured via `ScoringConfig`:
 
 ```python
-from metadarkmatter.models.config import GlobalConfig
+from metadarkmatter.models.config import ScoringConfig
 
-config = GlobalConfig.from_yaml(Path("config/production_config.yaml"))
+# Use defaults (recommended for most analyses)
+config = ScoringConfig()
+
+# Custom thresholds
+config = ScoringConfig(
+    bitscore_threshold_pct=95.0,
+    novelty_known_max=4.0,
+    novelty_novel_species_min=4.0,
+    novelty_novel_species_max=20.0,
+    novelty_novel_genus_min=20.0,
+    novelty_novel_genus_max=25.0,
+    uncertainty_known_max=1.5,
+    uncertainty_novel_species_max=1.5,
+    uncertainty_novel_genus_max=1.5,
+    uncertainty_conserved_min=5.0,
+)
 ```
 
-#### 11.4.2 Environment Variables
+#### 11.4.2 Polars Thread Control
 
 ```bash
-# Set via environment
-export MDM_SCORING__NOVELTY_KNOWN_MAX=1.5
-export MDM_NUM_THREADS=24
-export MDM_VERBOSE=true
+# Control Polars internal parallelism via environment variable
+export POLARS_MAX_THREADS=16
 
-# Automatically loaded by GlobalConfig (pydantic-settings)
 metadarkmatter score classify ...
 ```
 
@@ -2550,26 +2194,13 @@ metadarkmatter score classify \
 
 **Scenario:** 32-core HPC node, want maximum parallelism.
 
-**Option 1:** Vectorized classifier (recommended)
-
 ```bash
 export POLARS_MAX_THREADS=32
 
-metadarkmatter score classify --parallel ...
+metadarkmatter score classify --alignment file.tsv --ani ani.csv --output results.parquet
 ```
 
-**Effect:** Polars uses all 32 cores for internal parallelization.
-
-**Option 2:** Parallel classifier
-
-```python
-from metadarkmatter.core.ani_placement import ParallelClassifier
-
-parallel = ParallelClassifier(ani_matrix, config, num_workers=32)
-df = parallel.classify_file(blast_path)
-```
-
-**Trade-off:** Parallel classifier has higher overhead; vectorized usually faster despite lower theoretical parallelism.
+**Effect:** Polars uses all 32 cores for internal parallelization within VectorizedClassifier. No additional flags needed -- Polars automatically detects available cores.
 
 #### 12.3.3 I/O Bottlenecks
 
@@ -2620,17 +2251,13 @@ MemoryError: Unable to allocate 12.5 GiB for an array with shape (1000, 1000000)
 
 1. **Use streaming mode:**
    ```bash
-   metadarkmatter score classify --streaming ...
+   metadarkmatter score classify --streaming --alignment large_file.tsv.gz --ani ani.csv --output results.parquet
    ```
+   Streaming mode caps memory at ~1.8 GB by processing in bounded partitions.
 
-2. **Reduce chunk size:**
-   ```python
-   parser = StreamingBlastParser(blast_path, chunk_size=500_000)  # Default: 1M
-   ```
-
-3. **Use fast mode instead of vectorized:**
+2. **Reduce Polars thread count** (each thread uses memory):
    ```bash
-   metadarkmatter score classify --fast ...  # Lower memory, still 3x faster
+   export POLARS_MAX_THREADS=4
    ```
 
 #### 12.4.2 ANI Matrix Validation Errors
@@ -2663,33 +2290,26 @@ print("Missing in columns:", row_genomes - col_genomes)
 
 **Symptom:** Processing 10M reads takes >30 minutes (expected: <5 minutes).
 
-**Diagnosis:** Using standard classifier instead of optimized modes.
+**Diagnosis:** Polars may not be using all available cores, or I/O is the bottleneck.
 
-**Solution:** Enable parallelization:
+**Solutions:**
 
-```bash
-# Before (slow):
-metadarkmatter score classify --alignment file.tsv ...
+1. **Ensure Polars uses all cores:**
+   ```bash
+   export POLARS_MAX_THREADS=16
+   metadarkmatter score classify --alignment file.tsv --ani ani.csv --output results.csv
+   ```
 
-# After (fast):
-metadarkmatter score classify --alignment file.tsv --parallel ...
-```
+2. **Use compressed input to reduce I/O:**
+   ```bash
+   gzip -c blast_results.tsv > blast_results.tsv.gz
+   metadarkmatter score classify --alignment blast_results.tsv.gz --ani ani.csv --output results.parquet
+   ```
 
-**Benchmark comparison:**
-
-```python
-import time
-
-# Standard
-start = time.time()
-classifier.classify_to_dataframe(blast_path)
-print(f"Standard: {time.time() - start:.1f}s")
-
-# Vectorized
-start = time.time()
-vectorized.classify_file(blast_path)
-print(f"Vectorized: {time.time() - start:.1f}s")
-```
+3. **Use Parquet output** for faster writes:
+   ```bash
+   metadarkmatter score classify --alignment file.tsv --ani ani.csv --output results.parquet --format parquet
+   ```
 
 #### 12.4.4 Type Validation Failures
 
@@ -2752,5 +2372,5 @@ for result in parser.iter_reads():
 
 **Document Version:** 1.0
 **Package Version:** 0.1.0
-**Generated:** 2025-12-31
+**Generated:** 2026-02-20
 **Maintainer:** Metadarkmatter Development Team

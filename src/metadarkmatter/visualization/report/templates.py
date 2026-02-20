@@ -1177,13 +1177,13 @@ METHODS_SECTION_TEMPLATE: str = '''
                 </thead>
                 <tbody>
                     <tr class="row-known">
-                        <td>N &lt; 5%</td>
-                        <td>pident &gt; 95%</td>
+                        <td>N &lt; 4%</td>
+                        <td>pident &gt; 96%</td>
                         <td>At or above species boundary</td>
                     </tr>
                     <tr class="row-novel-species">
-                        <td>5% &le; N &lt; 20%</td>
-                        <td>80% &lt; pident &le; 95%</td>
+                        <td>4% &le; N &lt; 20%</td>
+                        <td>80% &lt; pident &le; 96%</td>
                         <td>Below species boundary (novel species candidate)</td>
                     </tr>
                     <tr class="row-novel-genus">
@@ -1236,13 +1236,13 @@ METHODS_SECTION_TEMPLATE: str = '''
                 </thead>
                 <tbody>
                     <tr class="row-confident">
-                        <td>U &lt; 2%</td>
-                        <td>ANI &gt; 98%</td>
+                        <td>U &lt; 1.5%</td>
+                        <td>ANI &gt; 98.5%</td>
                         <td>Same species (confident placement)</td>
                     </tr>
                     <tr class="row-boundary">
-                        <td>2% &le; U &lt; 5%</td>
-                        <td>95% &lt; ANI &le; 98%</td>
+                        <td>1.5% &le; U &lt; 5%</td>
+                        <td>95% &lt; ANI &le; 98.5%</td>
                         <td>Species boundary zone (ambiguous)</td>
                     </tr>
                     <tr class="row-conserved">
@@ -1276,17 +1276,17 @@ METHODS_SECTION_TEMPLATE: str = '''
                 </div>
                 <div class="tree-arrow">&darr; NO</div>
                 <div class="tree-branch">
-                    <div class="tree-condition">2% &le; U &lt; 5%?</div>
+                    <div class="tree-condition">1.5% &le; U &lt; 5%?</div>
                     <div class="tree-yes">&rarr; YES &rarr; <span class="cat-boundary">SPECIES BOUNDARY</span></div>
                 </div>
-                <div class="tree-arrow">&darr; NO (U &lt; 2%)</div>
+                <div class="tree-arrow">&darr; NO (U &lt; 1.5%)</div>
                 <div class="tree-branch">
-                    <div class="tree-condition">N &lt; 5%?</div>
+                    <div class="tree-condition">N &lt; 4%?</div>
                     <div class="tree-yes">&rarr; YES &rarr; <span class="cat-known">KNOWN SPECIES</span></div>
                 </div>
                 <div class="tree-arrow">&darr; NO</div>
                 <div class="tree-branch">
-                    <div class="tree-condition">5% &le; N &lt; 20%?</div>
+                    <div class="tree-condition">4% &le; N &lt; 20%?</div>
                     <div class="tree-yes">&rarr; YES &rarr; <span class="cat-novel-species">NOVEL SPECIES</span></div>
                 </div>
                 <div class="tree-arrow">&darr; NO</div>
@@ -1310,22 +1310,22 @@ METHODS_SECTION_TEMPLATE: str = '''
                 <tbody>
                     <tr>
                         <td><span class="cat-known">Known Species</span></td>
-                        <td>N &lt; 5% AND U &lt; 2%</td>
+                        <td>N &lt; 4% AND U &lt; 1.5%</td>
                         <td>Matches characterized species</td>
                     </tr>
                     <tr>
                         <td><span class="cat-novel-species">Novel Species</span></td>
-                        <td>5% &le; N &lt; 20% AND U &lt; 2%</td>
+                        <td>4% &le; N &lt; 20% AND U &lt; 1.5%</td>
                         <td>Significant divergence, confident placement</td>
                     </tr>
                     <tr>
                         <td><span class="cat-novel-genus">Novel Genus</span></td>
-                        <td>20% &le; N &le; 25% AND U &lt; 2%</td>
+                        <td>20% &le; N &le; 25% AND U &lt; 1.5%</td>
                         <td>Genus-level divergence, confident placement</td>
                     </tr>
                     <tr>
                         <td><span class="cat-boundary">Species Boundary</span></td>
-                        <td>2% &le; U &lt; 5%</td>
+                        <td>1.5% &le; U &lt; 5%</td>
                         <td>Matches multiple closely related species</td>
                     </tr>
                     <tr>
@@ -1397,14 +1397,14 @@ METHODS_SECTION_TEMPLATE: str = '''
                 <div class="formula-title">Inferred Uncertainty Formula</div>
                 <table class="formula-table">
                     <tr>
-                        <td>N &lt; 5%</td>
+                        <td>N &lt; 4%</td>
                         <td>U<sub>inferred</sub> = 5.0 + N &times; 0.5</td>
-                        <td>Range: 5.0-7.5%</td>
+                        <td>Range: 5.0-7.0%</td>
                     </tr>
                     <tr>
-                        <td>5% &le; N &lt; 20%</td>
-                        <td>U<sub>inferred</sub> = 7.5 + (N - 5) &times; 1.0</td>
-                        <td>Range: 7.5-22.5%</td>
+                        <td>4% &le; N &lt; 20%</td>
+                        <td>U<sub>inferred</sub> = 7.0 + (N - 4) &times; 1.0</td>
+                        <td>Range: 7.0-23.0%</td>
                     </tr>
                     <tr>
                         <td>20% &le; N &lt; 25%</td>
@@ -1434,8 +1434,8 @@ METHODS_SECTION_TEMPLATE: str = '''
                     <tr><th>Parameter</th><th>Value</th><th>Biological Basis</th></tr>
                 </thead>
                 <tbody>
-                    <tr><td>Species boundary (ANI)</td><td>95%</td><td>Jain et al. 2018</td></tr>
-                    <tr><td>Confident placement (ANI)</td><td>&gt;98%</td><td>Same species threshold</td></tr>
+                    <tr><td>Species boundary (ANI)</td><td>96%</td><td>Jain et al. 2018</td></tr>
+                    <tr><td>Confident placement (ANI)</td><td>&gt;98.5%</td><td>Same species threshold</td></tr>
                     <tr><td>Genus boundary (ANI)</td><td>~75-80%</td><td>Qin et al. 2014</td></tr>
                     <tr><td>Bitscore threshold</td><td>95%</td><td>Competitive recruitment</td></tr>
                 </tbody>
@@ -1448,10 +1448,10 @@ METHODS_SECTION_TEMPLATE: str = '''
                     <tr><th>Parameter</th><th>Nucleotide</th><th>Protein</th></tr>
                 </thead>
                 <tbody>
-                    <tr><td>Known species max</td><td>5%</td><td>10%</td></tr>
-                    <tr><td>Novel species range</td><td>5-20%</td><td>10-25%</td></tr>
+                    <tr><td>Known species max</td><td>4%</td><td>10%</td></tr>
+                    <tr><td>Novel species range</td><td>4-20%</td><td>10-25%</td></tr>
                     <tr><td>Novel genus range</td><td>20-25%</td><td>25-40%</td></tr>
-                    <tr><td>Uncertainty (confident)</td><td>&lt;2%</td><td>&lt;5%</td></tr>
+                    <tr><td>Uncertainty (confident)</td><td>&lt;1.5%</td><td>&lt;5%</td></tr>
                 </tbody>
             </table>
         </section>

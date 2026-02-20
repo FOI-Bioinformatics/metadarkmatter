@@ -202,16 +202,15 @@ metadarkmatter score classify \
   --alignment sample.blastx.tsv.gz \
   --ani ani_matrix.csv \
   --alignment-mode protein \
-  --output classifications.csv \
-  --parallel
+  --output classifications.csv
 ```
 
 **Key differences from nucleotide mode:**
 
 | Threshold | Nucleotide | Protein |
 |-----------|-----------|---------|
-| Known Species | N < 5% | N < 10% |
-| Novel Species | 5-20% | 10-25% |
+| Known Species | N < 4% | N < 10% |
+| Novel Species | 4-20% | 10-25% |
 | Novel Genus | 20-25% | 25-40% |
 
 **Best for:**
@@ -424,22 +423,19 @@ metadarkmatter blast align \
 Run the core classification algorithm:
 
 ```bash
-# For most datasets (10-100M alignments)
+# For most datasets
 metadarkmatter score classify \
   --alignment sample.blast.tsv.gz \
   --ani ani_matrix.csv \
   --output classifications.csv \
-  --summary summary.json \
-  --parallel
+  --summary summary.json
 ```
 
 **Processing modes:**
 
 | Dataset Size | Flag | RAM Usage |
 |--------------|------|-----------|
-| < 1M alignments | (default) | 2-4 GB |
-| 1-10M | `--fast` | 4-8 GB |
-| 10-100M | `--parallel` | 8-16 GB |
+| Up to 100M alignments | (default) | 4-16 GB |
 | 100M+ | `--streaming` | 8-16 GB |
 
 **Expected output:**
@@ -539,8 +535,7 @@ done
 metadarkmatter score batch \
   --alignment-dir results/ \
   --ani ani_matrix.csv \
-  --output-dir classifications/ \
-  --parallel
+  --output-dir classifications/
 
 # Multi-sample comparison
 metadarkmatter report multi \
@@ -606,16 +601,14 @@ metadarkmatter score classify \
     --alignment external_results.tsv.gz \
     --ani ani_matrix.csv \
     --id-mapping id_mapping.tsv \
-    --output classifications.csv \
-    --parallel
+    --output classifications.csv
 
 # Option B: Auto-generate mapping from genome directory
 metadarkmatter score classify \
     --alignment external_results.tsv.gz \
     --ani ani_matrix.csv \
     --genomes reference_genomes/ \
-    --output classifications.csv \
-    --parallel
+    --output classifications.csv
 ```
 
 Option A is preferable when processing multiple samples against the same reference set, since the mapping is generated once and reused.
@@ -637,7 +630,7 @@ This format is the default output of `blastn -outfmt 6` and `mmseqs convertalis`
 
 ### Important Notes
 
-- **ID mapping requires `--parallel` mode.** The `--fast`, `--streaming`, and standard modes print a warning that ID transformation will not be applied. Always use `--parallel` when importing external results.
+- **ID mapping is not supported with `--streaming` mode.** The streaming mode prints a warning that ID transformation will not be applied. Use the default mode when importing external results.
 - **Genome accessions must match the ANI matrix.** The accessions extracted from filenames (e.g., `GCF_000195955.2` from `GCF_000195955.2_ASM584v2_genomic.fna`) must match the row/column labels in your ANI matrix.
 - **Use `--dry-run` to check coverage** before running classification to verify that alignment genomes match the ANI matrix.
 
@@ -660,8 +653,7 @@ metadarkmatter score classify \
     --id-mapping id_mapping.tsv \
     --metadata genome_metadata.tsv \
     --output classifications.csv \
-    --summary summary.json \
-    --parallel
+    --summary summary.json
 
 # 4. Generate report
 metadarkmatter report generate \
@@ -688,7 +680,7 @@ metadarkmatter score classify \
     --target-family "f__Francisellaceae" \
     --family-ratio-threshold 0.8 \
     --genomes genomes/ \
-    --output classifications.csv --parallel
+    --output classifications.csv
 
 # 3. Generate report (includes Family Validation tab)
 metadarkmatter report generate \

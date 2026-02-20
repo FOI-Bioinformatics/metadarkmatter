@@ -2,11 +2,11 @@
 
 Optimizing metadarkmatter for different dataset sizes and hardware configurations.
 
-## Processing Modes
+## Classification Modes
 
-The `score classify` command offers four processing modes optimized for different scenarios:
+All classification uses the Polars-based vectorized engine (`VectorizedClassifier`) with automatic parallelization across CPU cores.
 
-### Standard Mode (Default)
+### Default Mode
 
 ```bash
 metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv
@@ -14,37 +14,11 @@ metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --ou
 
 | Metric | Value |
 |--------|-------|
-| Best for | < 1M alignments |
-| RAM usage | 2-4 GB |
-| Speed | Baseline |
+| Best for | Up to ~100M alignments |
+| RAM usage | 4-16 GB (scales with data) |
+| Speed | Automatic multi-core parallelization |
 
-### Fast Mode
-
-```bash
-metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv --fast
-```
-
-| Metric | Value |
-|--------|-------|
-| Best for | 1-10M alignments |
-| RAM usage | 4-8 GB |
-| Speed | ~3x faster |
-
-Optimized single-threaded processing path with reduced object creation overhead.
-
-### Parallel Mode (Recommended)
-
-```bash
-metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv --parallel
-```
-
-| Metric | Value |
-|--------|-------|
-| Best for | 10-100M alignments |
-| RAM usage | 8-16 GB |
-| Speed | ~16x faster |
-
-Uses Polars vectorized operations with automatic parallelization across all CPU cores.
+Loads all data into memory, performs vectorized classification in Polars' Rust backend.
 
 ### Streaming Mode
 
@@ -54,28 +28,20 @@ metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --ou
 
 | Metric | Value |
 |--------|-------|
-| Best for | 100M+ alignments |
+| Best for | 100M+ alignments or memory-constrained systems |
 | RAM usage | 8-16 GB (constant) |
-| Speed | ~10x faster than standard |
+| Speed | Comparable to default for large files |
 
 Processes data in 5M alignment chunks, writing results incrementally. Memory usage remains constant regardless of file size.
 
-## Mode Selection Guide
+### When to Use Streaming
 
 ```
-                    Dataset Size
-                         |
-         +---------------+---------------+
-         |               |               |
-      < 1M           1-10M          > 10M
-         |               |               |
-    Standard          Fast         Memory OK?
-                                        |
-                                   +----+----+
-                                   |         |
-                                  Yes        No
-                                   |         |
-                               Parallel  Streaming
+Dataset size?
+    |
+    +--< 100M alignments --> Default (loads all into memory)
+    |
+    +-->= 100M alignments or limited RAM --> --streaming
 ```
 
 ## Output Format Selection
@@ -117,17 +83,6 @@ metadarkmatter score classify --output results.parquet --format parquet
 | Large (10-100M) | 8-16 | 32 GB | 200 GB | 15-45 min |
 | Very large (100M+) | 16-32 | 64 GB | 1 TB | 1-2 hours |
 
-## Benchmark Results
-
-Tested on 64-core HPC node with 128 GB RAM:
-
-| Mode | 1M reads | 10M reads | 100M reads |
-|------|----------|-----------|------------|
-| Standard | 2.1 min | 21.5 min | 215 min |
-| Fast | 0.7 min | 7.2 min | 72 min |
-| Parallel | 0.4 min | 3.8 min | 38 min |
-| Streaming | 0.8 min | 8.1 min | 45 min |
-
 ## Memory Management
 
 ### If Running Out of Memory
@@ -153,7 +108,7 @@ Tested on 64-core HPC node with 128 GB RAM:
 | Component | Typical Usage |
 |-----------|---------------|
 | ANI matrix (500 genomes) | 2 GB |
-| BLAST parsing (parallel) | 4-8 GB |
+| BLAST data (vectorized) | 4-8 GB |
 | Classification buffer | 2-4 GB |
 
 ## Batch Processing Optimization
@@ -172,15 +127,22 @@ done
 metadarkmatter score batch \
   --alignment-dir samples/ \
   --ani ani.csv \
-  --output-dir results/ \
-  --parallel
+  --output-dir results/
 ```
 
 The batch command loads the ANI matrix once and reuses it for all samples.
 
-## BLAST Optimization
+## Alignment Performance
 
-### Alignment Parameters
+### BLAST vs MMseqs2
+
+| Reads | BLAST Time | MMseqs2 Time | Recommendation |
+|-------|-----------|--------------|----------------|
+| <10K | 10s-10min | Slower | Use BLAST |
+| 100K | 30-60 min | 5-10 min | Either tool works |
+| 1M+ | 3-6 hours | 15-30 min | MMseqs2 recommended |
+
+### BLAST Alignment Parameters
 
 | Parameter | Sensitive | Balanced | Fast |
 |-----------|-----------|----------|------|
@@ -204,8 +166,8 @@ cat reads_part_*.blast.tsv > combined.blast.tsv
 
 1. **Use compressed files:** BLAST output compresses 5-10x
 2. **Use Parquet output:** 10x smaller, 10x faster I/O
-3. **Use parallel mode:** Best balance of speed and memory
-4. **Process on HPC:** Use high-memory nodes for 100M+ reads
+3. **Use MMseqs2:** 5-100x faster than BLAST for >100K reads
+4. **Use streaming mode:** Constant memory for very large files
 5. **Batch process:** Use `score batch` for multiple samples
 
 ## Monitoring Progress

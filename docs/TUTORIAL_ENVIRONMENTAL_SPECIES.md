@@ -58,7 +58,7 @@ metadarkmatter mmseqs2 search \
 metadarkmatter score classify \
   --alignment ${SAMPLE}.blast.tsv.gz --ani ani_matrix.csv --aai aai_matrix.csv \
   --metadata genome_metadata.tsv \
-  --output classifications.csv --summary summary.json --parallel
+  --output classifications.csv --summary summary.json
 
 # 6. Extract novel candidates and generate report (with species breakdown)
 metadarkmatter score extract-novel \
@@ -100,9 +100,9 @@ These metrics enable classification into biologically meaningful categories:
 
 | Category | Novelty | Uncertainty | Interpretation |
 |----------|---------|-------------|----------------|
-| Known Species | < 5% | < 2% | Matches a sequenced species |
-| Novel Species | 5-20% | < 2% | Likely a new species within a known genus |
-| Novel Genus | 20-25% | < 2% | Likely a new genus within the family |
+| Known Species | < 4% | < 1.5% | Matches a sequenced species |
+| Novel Species | 4-20% | < 1.5% | Likely a new species within a known genus |
+| Novel Genus | 20-25% | < 1.5% | Likely a new genus within the family |
 | Conserved Region | any | > 5% | Conserved gene, placement ambiguous |
 
 ### Threshold Basis
@@ -680,14 +680,12 @@ metadarkmatter score classify \
   --aai aai_matrix.csv \
   --metadata genome_metadata.tsv \
   --output classifications.csv \
-  --summary summary.json \
-  --parallel
+  --summary summary.json
 ```
 
 **Key options:**
 - `--aai`: Enables genus-level disambiguation for reads with 20-25% novelty
 - `--metadata`: Adds species/genus columns and enables species-level aggregation
-- `--parallel`: Recommended for datasets with > 10M alignments
 
 **AAI Impact:**
 - AAI is only consulted for reads in the genus boundary range (20-25% novelty)
@@ -704,8 +702,7 @@ metadarkmatter score classify \
   --ani ani_matrix.csv \
   --metadata genome_metadata.tsv \
   --output classifications.csv \
-  --summary summary.json \
-  --parallel
+  --summary summary.json
 ```
 
 ### Processing Modes
@@ -713,8 +710,6 @@ metadarkmatter score classify \
 | Mode | Flag | Best For |
 |------|------|----------|
 | Standard | (none) | < 1M alignments |
-| Fast | --fast | 1-10M alignments |
-| Parallel | --parallel | 10-100M alignments (recommended) |
 | Streaming | --streaming | > 100M alignments, memory-constrained |
 
 Note: `--streaming` mode does not support `--metadata` for species tracking.
@@ -1176,8 +1171,7 @@ metadarkmatter score classify \
   --ani ani_matrix.csv \
   --metadata genome_metadata.tsv \
   --output results/classifications.csv \
-  --summary results/summary.json \
-  --parallel
+  --summary results/summary.json
 
 # Step 8: Extract novel candidates
 echo "Step 8: Extracting novel candidates..."
