@@ -544,38 +544,23 @@ def _cluster_extended_matrix(
     """
     Perform hierarchical clustering on extended matrix.
 
+    Delegates to perform_hierarchical_clustering and additionally
+    reorders the novel/reference mask to match the clustered order.
+
     Args:
-        matrix: Extended ANI matrix
+        matrix: Extended similarity matrix (ANI or AAI)
         labels: Labels for matrix entries
         is_novel_mask: Boolean mask indicating novel clusters
-        default_value: Default ANI value
+        default_value: Default similarity value for missing data
 
     Returns:
         Tuple of (clustered_matrix, ordered_labels, ordered_mask, success)
     """
-    try:
-        from scipy.cluster.hierarchy import leaves_list, linkage
-        from scipy.spatial.distance import squareform
-
-        # Fill diagonal
-        np.fill_diagonal(matrix, 100.0)
-
-        # Convert similarity to distance
-        dist_matrix = 100.0 - matrix
-        dist_matrix = (dist_matrix + dist_matrix.T) / 2
-        np.fill_diagonal(dist_matrix, 0.0)
-
-        # Hierarchical clustering
-        condensed_dist = squareform(dist_matrix)
-        linkage_matrix = linkage(condensed_dist, method="average")
-        order = leaves_list(linkage_matrix)
-
-        # Reorder everything
-        clustered = matrix[order][:, order]
-        ordered_labels = [labels[i] for i in order]
-        ordered_mask = [is_novel_mask[i] for i in order]
-
-        return clustered, ordered_labels, ordered_mask, True
-
-    except ImportError:
-        return matrix, labels, is_novel_mask, False
+    z_clustered, ordered_labels, success = perform_hierarchical_clustering(
+        matrix, labels, default_value
+    )
+    if success:
+        acc_to_idx = {acc: i for i, acc in enumerate(labels)}
+        ordered_mask = [is_novel_mask[acc_to_idx[acc]] for acc in ordered_labels]
+        return z_clustered, ordered_labels, ordered_mask, success
+    return z_clustered, labels, is_novel_mask, success

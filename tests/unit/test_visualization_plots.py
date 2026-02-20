@@ -56,12 +56,18 @@ class TestThresholdConfig:
     """Test ThresholdConfig dataclass."""
 
     def test_default_thresholds(self):
+        """Verify ThresholdConfig defaults match ScoringConfig."""
         from metadarkmatter.visualization.plots.base import ThresholdConfig
 
         thresholds = ThresholdConfig()
-        assert thresholds.novelty_known_max == 2.0
-        assert thresholds.novelty_novel_species_min == 5.0
-        assert thresholds.novelty_novel_species_max == 20.0  # Accounts for read-genome gap
+        assert thresholds.novelty_known_max == 4.0
+        assert thresholds.novelty_novel_species_min == 4.0
+        assert thresholds.novelty_novel_species_max == 20.0
+        assert thresholds.novelty_novel_genus_min == 20.0
+        assert thresholds.novelty_novel_genus_max == 25.0
+        assert thresholds.uncertainty_known_max == 1.5
+        assert thresholds.uncertainty_novel_species_max == 1.5
+        assert thresholds.uncertainty_novel_genus_max == 1.5
         assert thresholds.uncertainty_conserved_min == 5.0
 
 

@@ -123,17 +123,17 @@ class PlotConfig:
 class ThresholdConfig:
     """Classification threshold configuration."""
 
-    # Novelty thresholds (20% accounts for read-genome identity gap)
-    novelty_known_max: float = 2.0
-    novelty_novel_species_min: float = 5.0
+    # Novelty thresholds (must match ScoringConfig defaults)
+    novelty_known_max: float = 4.0
+    novelty_novel_species_min: float = 4.0
     novelty_novel_species_max: float = 20.0
     novelty_novel_genus_min: float = 20.0
     novelty_novel_genus_max: float = 25.0
 
-    # Uncertainty thresholds
-    uncertainty_known_max: float = 0.5
-    uncertainty_novel_species_max: float = 0.5
-    uncertainty_novel_genus_max: float = 2.0
+    # Uncertainty thresholds (must match ScoringConfig defaults)
+    uncertainty_known_max: float = 1.5
+    uncertainty_novel_species_max: float = 1.5
+    uncertainty_novel_genus_max: float = 1.5
     uncertainty_conserved_min: float = 5.0
 
     # Identity thresholds (for recruitment plots)
