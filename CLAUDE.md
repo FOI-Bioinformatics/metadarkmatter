@@ -66,7 +66,7 @@ metadarkmatter score classify --alignment external_results.tsv.gz --ani ani_matr
 ```
 
 **Key Files:**
-- `cli/mapping.py` - `generate-mapping`, `validate-mapping` commands
+- `cli/mapping.py` - `generate-mapping`, `validate-mapping`, `select-representatives` commands
 - `core/id_mapping.py` - `ContigIdMapping` class (from_genome_dir, from_tsv, to_tsv, transform_column)
 - `core/genome_utils.py` - `extract_accession_from_filename()`
 
@@ -74,6 +74,47 @@ metadarkmatter score classify --alignment external_results.tsv.gz --ani ani_matr
 - Alignment must be BLAST tabular format (outfmt 6), 12 or 13 columns, tab-separated
 - ID mapping is not supported with `--streaming` mode
 - Genome accessions in mapping must match ANI matrix row/column labels
+
+## Representative Genome Architecture
+
+For large families (>2000 genomes), computing a full ANI matrix is impractical (O(N^2)). The representative genome architecture decouples alignment from classification:
+
+- **Align** against ALL genomes (full sensitivity)
+- **Compute ANI** for species representatives only (one per species from GTDB)
+- **Classify** by mapping each BLAST hit genome to its representative for ANI lookup
+
+```bash
+# Download all genomes with auto-identified representatives
+metadarkmatter download genomes list "f__Pseudomonadaceae" --all-genomes --output genomes.tsv
+
+# Compute ANI for representatives only (~85 instead of ~2000)
+metadarkmatter ani compute --genomes genomes/ --output ani_matrix.csv \
+    --metadata genome_metadata.tsv --representatives-only --threads 16
+
+# Build alignment database from ALL genomes
+metadarkmatter blast makedb --genomes genomes/ --output blastdb/pangenome
+
+# Classify (metadata provides representative mapping automatically)
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani_matrix.csv \
+    --metadata genome_metadata.tsv --output classifications.csv
+```
+
+**Key Files:**
+- `models/genomes.py` - `GenomeAccession.is_representative`, `AccessionList.representative_map`
+- `core/metadata.py` - `GenomeMetadata.get_representative()`, `build_representative_mapping()`, `has_representatives`, `representative_count`
+- `cli/mapping.py` - `select-representatives` command
+- `cli/ani.py` - `--metadata` + `--representatives-only` flags on compute; `--metadata` on validate
+- `cli/score.py` - Wires representative mapping from metadata to VectorizedClassifier
+- `core/classification/classifiers/vectorized.py` - `representative_mapping` parameter, `representative_genome` column for ANI lookups
+
+**Metadata format** (`genome_metadata.tsv`):
+```
+accession	species	genus	family	representative	gtdb_taxonomy
+GCF_000195955.2	F. tularensis	Francisella	Francisellaceae	GCF_000195955.2	d__...
+GCF_001234567.1	F. tularensis	Francisella	Francisellaceae	GCF_000195955.2	d__...
+```
+
+**Backwards compatibility:** If `representative` column is absent, every genome maps to itself (current behavior preserved).
 
 ## Workflow Notes
 

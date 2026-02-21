@@ -12,6 +12,8 @@ from typing import Annotated
 import typer
 from rich.console import Console
 
+import polars as pl
+
 from metadarkmatter.cli.utils import QuietConsole, spinner_progress
 from metadarkmatter.core.id_mapping import ContigIdMapping
 
@@ -138,8 +140,6 @@ def validate_mapping(
     Example:
         metadarkmatter util validate-mapping id_mapping.tsv --blast results.blast.tsv
     """
-    import polars as pl
-
     qc = QuietConsole(console, quiet)
 
     try:
@@ -184,6 +184,137 @@ def validate_mapping(
                     "Some IDs may not be transformed correctly."
                 )
 
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e}", style="bold")
+        raise typer.Exit(1) from e
+
+
+@app.command(name="select-representatives")
+def select_representatives(
+    metadata: Annotated[
+        Path,
+        typer.Option(
+            "--metadata",
+            "-m",
+            help="Path to genome_metadata.tsv file",
+            exists=True,
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output path for updated metadata TSV",
+            dir_okay=False,
+            resolve_path=True,
+        ),
+    ],
+    quiet: Annotated[
+        bool,
+        typer.Option(
+            "--quiet",
+            "-q",
+            help="Suppress progress output",
+        ),
+    ] = False,
+) -> None:
+    """
+    Assign or update species representative genomes in metadata.
+
+    Groups genomes by species name and assigns a representative for each
+    species. If a genome already has a self-referencing representative
+    entry, it is kept. Otherwise, the first accession alphabetically is
+    selected.
+
+    This is useful when:
+    - Metadata was created with --reps-only and more genomes were added later
+    - Custom (non-GTDB) genomes need representative assignments
+    - Representative assignments need to be regenerated
+
+    Example:
+        metadarkmatter util select-representatives \\
+            --metadata genome_metadata.tsv \\
+            --output genome_metadata_updated.tsv
+    """
+    qc = QuietConsole(console, quiet)
+
+    qc.print("[bold]Selecting species representatives[/bold]")
+
+    try:
+        df = pl.read_csv(metadata, separator="\t")
+
+        required = {"accession", "species"}
+        missing = required - set(df.columns)
+        if missing:
+            console.print(f"[red]Error:[/red] Missing required columns: {missing}")
+            raise typer.Exit(1)
+
+        # Group genomes by species
+        has_existing_reps = "representative" in df.columns
+
+        # Build species -> representative mapping
+        species_to_rep: dict[str, str] = {}
+
+        if has_existing_reps:
+            # Preserve existing self-referencing representatives
+            for row in df.iter_rows(named=True):
+                species = row["species"]
+                accession = row["accession"]
+                rep = row.get("representative", "")
+                if species and rep == accession:
+                    species_to_rep[species] = accession
+
+        # For species without a representative, pick first alphabetically
+        species_groups = df.group_by("species").agg(
+            pl.col("accession").sort().first().alias("first_accession")
+        )
+        for row in species_groups.iter_rows(named=True):
+            species = row["species"]
+            if species and species not in species_to_rep:
+                species_to_rep[species] = row["first_accession"]
+
+        # Apply mapping to DataFrame
+        representative_col = [
+            species_to_rep.get(species, accession)
+            for species, accession in zip(
+                df["species"].to_list(),
+                df["accession"].to_list(),
+                strict=True,
+            )
+        ]
+
+        if "representative" in df.columns:
+            df = df.drop("representative")
+
+        # Insert representative column after family (or after genus if no family)
+        insert_after = "family" if "family" in df.columns else "genus"
+        cols = df.columns
+        insert_idx = cols.index(insert_after) + 1
+        before_cols = cols[:insert_idx]
+        after_cols = cols[insert_idx:]
+
+        df = df.select(
+            [pl.col(c) for c in before_cols]
+            + [pl.Series("representative", representative_col)]
+            + [pl.col(c) for c in after_cols]
+        )
+
+        output.parent.mkdir(parents=True, exist_ok=True)
+        df.write_csv(output, separator="\t")
+
+        num_species = len(species_to_rep)
+        num_genomes = len(df)
+        qc.print(
+            f"\n[green]Success![/green] Assigned {num_species:,} representatives "
+            f"for {num_genomes:,} genomes"
+        )
+        qc.print(f"[dim]Output:[/dim] {output}")
+
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}", style="bold")
         raise typer.Exit(1) from e

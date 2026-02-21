@@ -105,17 +105,22 @@ def validate_ani_genome_coverage(
     blast_path: Path,
     ani_matrix: ANIMatrix,
     sample_rows: int = 10000,
+    representative_mapping: dict[str, str] | None = None,
 ) -> tuple[int, int, float, set[str]]:
     """
     Early validation of ANI matrix coverage against BLAST file genomes.
 
     Samples the BLAST file and checks how many unique genomes are present
-    in the ANI matrix. This helps detect mismatched inputs early.
+    in the ANI matrix. When representative_mapping is provided, maps BLAST
+    genomes to their representatives before checking coverage.
 
     Args:
         blast_path: Path to BLAST file
         ani_matrix: Loaded ANI matrix
         sample_rows: Number of rows to sample (default 10000)
+        representative_mapping: Optional mapping from genome accession to
+            representative accession. When provided, checks representative
+            coverage rather than raw genome coverage.
 
     Returns:
         Tuple of (matched_count, total_genomes, coverage_pct, missing_genomes)
@@ -139,11 +144,19 @@ def validate_ani_genome_coverage(
     # Get ANI matrix genomes
     ani_genomes = set(ani_matrix.genomes)
 
-    # Calculate coverage
-    matched = blast_genomes & ani_genomes
-    missing = blast_genomes - ani_genomes
+    # When representative mapping is active, map BLAST genomes to representatives
+    if representative_mapping:
+        check_genomes = {
+            representative_mapping.get(g, g) for g in blast_genomes
+        }
+    else:
+        check_genomes = blast_genomes
 
-    total_genomes = len(blast_genomes)
+    # Calculate coverage
+    matched = check_genomes & ani_genomes
+    missing = check_genomes - ani_genomes
+
+    total_genomes = len(check_genomes)
     matched_count = len(matched)
     coverage_pct = (100.0 * matched_count / total_genomes) if total_genomes > 0 else 0.0
 
@@ -755,6 +768,7 @@ def classify(
 
     # Load genome metadata if provided
     genome_metadata: GenomeMetadata | None = None
+    representative_mapping: dict[str, str] | None = None
     if metadata:
         with Progress(
             SpinnerColumn(),
@@ -770,8 +784,17 @@ def classify(
 
         out.print(
             f"[green]Loaded metadata for {genome_metadata.genome_count} genomes "
-            f"({genome_metadata.species_count} species)[/green]\n"
+            f"({genome_metadata.species_count} species)[/green]"
         )
+
+        # Build representative mapping if metadata has representative column
+        if genome_metadata.has_representatives:
+            representative_mapping = genome_metadata.build_representative_mapping()
+            out.print(
+                f"[dim]Representative mapping: {genome_metadata.genome_count} genomes -> "
+                f"{genome_metadata.representative_count} representatives[/dim]"
+            )
+        out.print()
 
     # Infer target family from metadata if not explicitly provided
     if target_family is None and genome_metadata is not None:
@@ -830,16 +853,23 @@ def classify(
         out.print(f"[green]Loaded ID mapping with {len(contig_mapping):,} entries[/green]\n")
 
     # Early validation: check genome coverage between alignment file and ANI matrix
+    # When representative mapping is active, validate representative coverage
     try:
         matched, total, coverage_pct, missing = validate_ani_genome_coverage(
-            alignment, ani_matrix
+            alignment, ani_matrix, representative_mapping=representative_mapping,
         )
 
         if verbose:
-            out.print(
-                f"[dim]Genome coverage: {matched}/{total} genomes in ANI matrix "
-                f"({coverage_pct:.1f}%)[/dim]"
-            )
+            if representative_mapping:
+                out.print(
+                    f"[dim]Representative coverage: {matched}/{total} representatives in ANI matrix "
+                    f"({coverage_pct:.1f}%)[/dim]"
+                )
+            else:
+                out.print(
+                    f"[dim]Genome coverage: {matched}/{total} genomes in ANI matrix "
+                    f"({coverage_pct:.1f}%)[/dim]"
+                )
 
         if coverage_pct < 50.0 and total > 0:
             out.print(
@@ -883,7 +913,10 @@ def classify(
                     "[yellow]ID transformation will not be applied. Remove --streaming to enable it.[/yellow]\n"
                 )
 
-            vectorized = VectorizedClassifier(ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config)
+            vectorized = VectorizedClassifier(
+                ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config,
+                representative_mapping=representative_mapping,
+            )
 
             # Rich progress with ETA for streaming
             with Progress(
@@ -930,7 +963,10 @@ def classify(
                 console=console,
             ) as progress:
                 progress.add_task(description="Classifying reads...", total=None)
-                vectorized = VectorizedClassifier(ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config)
+                vectorized = VectorizedClassifier(
+                    ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config,
+                    representative_mapping=representative_mapping,
+                )
                 result = vectorized.classify_file(
                     alignment,
                     id_mapping=contig_mapping,

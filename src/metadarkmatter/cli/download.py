@@ -133,6 +133,13 @@ def list_genomes(
     try:
         with spinner_progress("Querying GTDB API...", console, quiet):
             result = client.query_genomes(taxon, representatives_only=representatives_only)
+
+        # When downloading all genomes, also query for representatives
+        # to build species-to-representative mapping
+        reps_result = None
+        if not representatives_only:
+            with spinner_progress("Querying GTDB for species representatives...", console, quiet):
+                reps_result = client.query_genomes(taxon, representatives_only=True)
     except InvalidTaxonFormatError as e:
         console.print(f"\n[red]Error: {e.message}[/red]")
         console.print(f"\n[dim]{e.suggestion}[/dim]")
@@ -183,6 +190,19 @@ def list_genomes(
 
         out.console.print(table)
 
+    # Build representative mapping from reps query
+    representative_map: dict[str, str] = {}
+    rep_accession_set: set[str] = set()
+    if reps_result is not None:
+        for g in reps_result.genomes:
+            if g.species:
+                representative_map[g.species] = g.accession
+                rep_accession_set.add(g.accession)
+        out.print(
+            f"  Identified [green]{len(representative_map):,}[/green] "
+            f"species representatives"
+        )
+
     # Convert to AccessionList
     accessions = [
         GenomeAccession(
@@ -190,6 +210,7 @@ def list_genomes(
             gtdb_taxonomy=g.gtdb_taxonomy,
             species=g.species,
             genome_size=g.genome_size,
+            is_representative=g.accession in rep_accession_set if rep_accession_set else True,
         )
         for g in result.genomes
     ]
@@ -198,6 +219,7 @@ def list_genomes(
         taxon=taxon,
         accessions=accessions,
         genus_counts=result.genus_counts,
+        representative_map=representative_map,
     )
 
     # Save to TSV

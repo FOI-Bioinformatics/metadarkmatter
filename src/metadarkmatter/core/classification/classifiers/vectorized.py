@@ -61,6 +61,7 @@ class VectorizedClassifier:
         ani_matrix: ANIMatrix,
         aai_matrix: AAIMatrix | None = None,
         config: ScoringConfig | None = None,
+        representative_mapping: dict[str, str] | None = None,
     ) -> None:
         """
         Initialize vectorized classifier.
@@ -73,10 +74,16 @@ class VectorizedClassifier:
             config: Scoring configuration (uses defaults if None).
                 When alignment_mode is "protein", classification uses wider
                 novelty thresholds appropriate for protein-level identity.
+            representative_mapping: Optional mapping from genome accession to
+                species representative accession. When provided, ANI lookups
+                use representative genomes while output preserves actual hit
+                genomes. This decouples alignment (all genomes) from
+                classification (representative ANI matrix).
         """
         self.ani_matrix = ani_matrix
         self.aai_matrix = aai_matrix
         self.config = config or ScoringConfig()
+        self.representative_mapping = representative_mapping
 
         # Store effective thresholds based on alignment mode
         self._effective_thresholds = self.config.get_effective_thresholds()
@@ -410,6 +417,23 @@ class VectorizedClassifier:
                 return empty, qc
             return empty
 
+        # Add representative_genome column for ANI lookups
+        # When a representative mapping is provided, ANI lookups use the
+        # representative genome while output preserves the actual hit genome
+        if self.representative_mapping:
+            df = df.with_columns(
+                pl.col("genome_name")
+                .replace_strict(
+                    self.representative_mapping,
+                    default=pl.col("genome_name"),
+                )
+                .alias("representative_genome")
+            )
+        else:
+            df = df.with_columns(
+                pl.col("genome_name").alias("representative_genome")
+            )
+
         # Add read_length column for coverage calculation
         # Use qlen if available, otherwise fall back to qend as proxy
         if "qlen" in df.columns:
@@ -466,6 +490,11 @@ class VectorizedClassifier:
                 .filter(pl.col("weighted_bitscore") == pl.col("weighted_bitscore").max())
                 .first()
                 .alias("best_genome"),
+                # Representative of best genome (for ANI lookups)
+                pl.col("representative_genome")
+                .filter(pl.col("weighted_bitscore") == pl.col("weighted_bitscore").max())
+                .first()
+                .alias("best_representative"),
                 # Alignment length of best hit (for confidence calculation)
                 pl.col("length")
                 .filter(pl.col("weighted_bitscore") == pl.col("weighted_bitscore").max())
@@ -487,7 +516,7 @@ class VectorizedClassifier:
 
         # Step 3: Join back to find all ambiguous hits
         df_with_threshold = df.join(
-            best_hits.select(["qseqid", "weighted_bitscore_threshold", "best_genome"]),
+            best_hits.select(["qseqid", "weighted_bitscore_threshold", "best_genome", "best_representative"]),
             on="qseqid",
             how="left",
         )
@@ -500,10 +529,11 @@ class VectorizedClassifier:
         # Step 4: Count ambiguous hits per read
         hit_counts = ambiguous.group_by("qseqid").len().rename({"len": "num_ambiguous_hits"})
 
-        # Step 4b: Calculate second_hit_identity (best pident to a DIFFERENT genome)
+        # Step 4b: Calculate second_hit_identity (best pident to a DIFFERENT representative)
         # This is used for identity gap calculation to detect ambiguous placement
+        # Use representative_genome to collapse hits to same species
         secondary_hits = df_with_threshold.filter(
-            pl.col("genome_name") != pl.col("best_genome")
+            pl.col("representative_genome") != pl.col("best_representative")
         )
         if not secondary_hits.is_empty():
             # Get the best pident to a secondary genome per read
@@ -524,14 +554,14 @@ class VectorizedClassifier:
             })
 
         # Step 5: Find max ANI to secondary genomes and calculate phylogenetic context
-        # Get secondary genomes (not the best genome)
-        secondary = ambiguous.filter(pl.col("genome_name") != pl.col("best_genome"))
+        # Get secondary genomes (not the best representative - collapses same-species hits)
+        secondary = ambiguous.filter(pl.col("representative_genome") != pl.col("best_representative"))
 
-        # Join with ANI lookup (use pre-computed symmetric table)
+        # Join with ANI lookup using representative genomes (use pre-computed symmetric table)
         if not secondary.is_empty() and not self._ani_lookup.is_empty():
             secondary_with_ani = secondary.join(
                 self._ani_lookup_symmetric,
-                left_on=["best_genome", "genome_name"],
+                left_on=["best_representative", "representative_genome"],
                 right_on=["genome1", "genome2"],
                 how="left",
             )
@@ -544,12 +574,12 @@ class VectorizedClassifier:
             )
 
             # Second genome ANI per read (for "second" mode)
-            # Get ANI to the genome with highest bitscore among secondaries
-            # Filter out same-genome hits (different contigs) since ANI lookup
+            # Get ANI to the representative with highest bitscore among secondaries
+            # Filter out same-representative hits since ANI lookup
             # doesn't have diagonal entries
             second_genome_ani_per_read = (
                 secondary_with_ani
-                .filter(pl.col("genome_name") != pl.col("best_genome"))
+                .filter(pl.col("representative_genome") != pl.col("best_representative"))
                 .sort(["qseqid", "bitscore"], descending=[False, True])
                 .group_by("qseqid")
                 .agg(pl.col("ani").first().fill_null(0.0).alias("second_genome_ani"))
@@ -563,7 +593,7 @@ class VectorizedClassifier:
             ])
 
             # Step 5b: Calculate phylogenetic context metrics
-            # Count secondary genomes and their ANI relationship to best genome
+            # Count secondary representatives and their ANI relationship to best genome
             genus_threshold = 80.0  # Same genus if ANI >= 80%
             species_threshold = 95.0  # Same species if ANI >= 95%
 
@@ -571,13 +601,13 @@ class VectorizedClassifier:
                 secondary_with_ani
                 .group_by("qseqid")
                 .agg([
-                    # Count distinct secondary genomes
-                    pl.col("genome_name").n_unique().alias("num_secondary_genomes"),
-                    # Count genomes in same genus as best hit (ANI >= 80%)
+                    # Count distinct secondary representatives
+                    pl.col("representative_genome").n_unique().alias("num_secondary_genomes"),
+                    # Count representatives in same genus as best hit (ANI >= 80%)
                     pl.col("ani").filter(pl.col("ani") >= genus_threshold).count().alias("same_genus_count"),
-                    # Count genomes in same species as best hit (ANI >= 95%)
+                    # Count representatives in same species as best hit (ANI >= 95%)
                     pl.col("ani").filter(pl.col("ani") >= species_threshold).count().alias("same_species_count"),
-                    # Min ANI to secondary genomes (used for genus uncertainty)
+                    # Min ANI to secondary representatives (used for genus uncertainty)
                     pl.col("ani").min().fill_null(0.0).alias("min_ani_secondary"),
                 ])
             )

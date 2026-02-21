@@ -37,6 +37,7 @@ class GenomeMetadata:
 
         Args:
             metadata_df: DataFrame with columns: accession, species, genus, family, gtdb_taxonomy
+                Optional column: representative (species representative accession)
         """
         self._df = metadata_df
 
@@ -66,6 +67,18 @@ class GenomeMetadata:
             )
         else:
             self._accession_to_family = {}
+
+        # Representative lookup (optional column)
+        if "representative" in metadata_df.columns:
+            self._accession_to_representative: dict[str, str] = dict(
+                zip(
+                    metadata_df["accession"].to_list(),
+                    metadata_df["representative"].to_list(),
+                    strict=False,
+                )
+            )
+        else:
+            self._accession_to_representative = {}
 
     @classmethod
     def from_file(cls, path: Path) -> GenomeMetadata:
@@ -170,6 +183,54 @@ class GenomeMetadata:
         if family_counts.is_empty():
             return None
         return family_counts["family"][0]
+
+    def get_representative(self, accession: str) -> str:
+        """Get the species representative accession for a genome.
+
+        If no representative column exists in metadata, returns the
+        accession itself (identity mapping for backwards compatibility).
+
+        Args:
+            accession: Genome accession (e.g., GCF_000195955.2)
+
+        Returns:
+            Representative genome accession
+        """
+        if not self._accession_to_representative:
+            return accession
+        return self._accession_to_representative.get(accession, accession)
+
+    def build_representative_mapping(self) -> dict[str, str]:
+        """Build a complete accession-to-representative mapping dict.
+
+        Returns a dictionary mapping every genome accession to its species
+        representative accession. If no representative column exists, returns
+        an identity mapping (each genome maps to itself).
+
+        Returns:
+            Dictionary of {accession: representative_accession}
+        """
+        if not self._accession_to_representative:
+            # Identity mapping: each genome is its own representative
+            return {acc: acc for acc in self._accession_to_species}
+        return dict(self._accession_to_representative)
+
+    @property
+    def has_representatives(self) -> bool:
+        """True if representative column exists and has non-self mappings."""
+        if not self._accession_to_representative:
+            return False
+        return any(
+            acc != rep
+            for acc, rep in self._accession_to_representative.items()
+        )
+
+    @property
+    def representative_count(self) -> int:
+        """Number of unique representative genomes."""
+        if not self._accession_to_representative:
+            return self.genome_count
+        return len(set(self._accession_to_representative.values()))
 
     @staticmethod
     def generate_novel_id(read_id: str, accession: str) -> str:

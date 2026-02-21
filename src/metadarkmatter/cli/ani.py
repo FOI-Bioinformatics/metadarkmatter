@@ -112,6 +112,22 @@ def compute(
         "-o",
         help="Output CSV file for ANI matrix",
     ),
+    metadata_path: Path | None = typer.Option(
+        None,
+        "--metadata",
+        "-m",
+        help="Path to genome_metadata.tsv (required for --representatives-only)",
+        exists=True,
+        dir_okay=False,
+    ),
+    representatives_only: bool = typer.Option(
+        False,
+        "--representatives-only",
+        help=(
+            "Compute ANI only for species representative genomes (from metadata). "
+            "Reduces O(N^2) comparisons for large families."
+        ),
+    ),
     backend: ANIBackend = typer.Option(
         ANIBackend.AUTO,
         "--backend",
@@ -240,6 +256,13 @@ def compute(
             console.print("[dim]Install with: conda install -c bioconda fastani[/dim]")
             raise typer.Exit(code=1) from None
 
+    # Validate --representatives-only requires --metadata
+    if representatives_only and metadata_path is None:
+        console.print(
+            "[red]Error: --representatives-only requires --metadata[/red]"
+        )
+        raise typer.Exit(code=1) from None
+
     # Find genome files
     genome_files = _find_genome_files(genomes, genome_pattern)
 
@@ -250,7 +273,37 @@ def compute(
         )
         raise typer.Exit(code=1) from None
 
-    out.print(f"[bold]Input:[/bold] {len(genome_files)} genomes from {genomes}")
+    # Filter to representative genomes only if requested
+    total_genome_count = len(genome_files)
+    if representatives_only and metadata_path is not None:
+        from metadarkmatter.core.genome_utils import extract_accession_from_filename
+        from metadarkmatter.core.metadata import GenomeMetadata
+
+        gm = GenomeMetadata.from_file(metadata_path)
+        rep_mapping = gm.build_representative_mapping()
+        rep_accessions = set(rep_mapping.values())
+
+        genome_files = [
+            f for f in genome_files
+            if extract_accession_from_filename(f.name) in rep_accessions
+        ]
+
+        if not genome_files:
+            console.print(
+                "[red]Error: No representative genome files found in directory[/red]"
+            )
+            console.print(
+                f"[dim]Representatives: {len(rep_accessions)}, "
+                f"genome files: {total_genome_count}[/dim]"
+            )
+            raise typer.Exit(code=1) from None
+
+        out.print(
+            f"[bold]Input:[/bold] {len(genome_files)} representative genomes "
+            f"(of {total_genome_count} total) from {genomes}"
+        )
+    else:
+        out.print(f"[bold]Input:[/bold] {len(genome_files)} genomes from {genomes}")
     out.print(f"[bold]Backend:[/bold] {selected_backend.value}")
     out.print(f"[bold]Threads:[/bold] {threads}")
     if selected_backend == ANIBackend.SKANI:
@@ -396,6 +449,18 @@ def validate(
         exists=True,
         dir_okay=False,
     ),
+    metadata_path: Path | None = typer.Option(
+        None,
+        "--metadata",
+        "-m",
+        help=(
+            "Path to genome_metadata.tsv with representative column. "
+            "When provided, validates that representative genomes are in ANI matrix "
+            "rather than requiring all BLAST genomes."
+        ),
+        exists=True,
+        dir_okay=False,
+    ),
     sample_rows: int = typer.Option(
         100000,
         "--sample-rows",
@@ -476,6 +541,79 @@ def validate(
         console.print(f"[red]Error reading BLAST file: {e}[/red]")
         raise typer.Exit(code=1) from None
 
+    # Representative-aware validation when metadata is provided
+    rep_mapping: dict[str, str] | None = None
+    if metadata_path is not None:
+        from metadarkmatter.core.metadata import GenomeMetadata as GM
+
+        gm = GM.from_file(metadata_path)
+        rep_mapping = gm.build_representative_mapping()
+        if gm.has_representatives:
+            rep_accessions = set(rep_mapping.values())
+            out.print(
+                f"\n[bold]Representative mode:[/bold] {len(rep_accessions)} "
+                f"representative genomes for {gm.genome_count} total genomes"
+            )
+
+            # Check that all representatives are in ANI matrix
+            matched_reps = rep_accessions & ani_genomes
+            missing_reps = rep_accessions - ani_genomes
+
+            out.print(f"  Representatives in ANI matrix: {len(matched_reps)}/{len(rep_accessions)}")
+            if missing_reps:
+                out.print(f"  [yellow]Missing representatives: {len(missing_reps)}[/yellow]")
+                if verbose:
+                    for rep in sorted(missing_reps)[:20]:
+                        out.print(f"    - {rep}")
+
+            # Map BLAST genomes to representatives for coverage check
+            blast_reps = {rep_mapping.get(g, g) for g in blast_genomes}
+            matched_count, total, coverage_pct, missing = validate_ani_coverage(
+                ani_genomes, blast_reps
+            )
+            extra = ani_genomes - blast_reps
+
+            out.print("\n[bold]Coverage Analysis (representative-mapped):[/bold]")
+
+            table = Table(show_header=True, header_style="bold")
+            table.add_column("Metric", style="cyan")
+            table.add_column("Value", justify="right")
+
+            table.add_row("BLAST genomes (sample)", f"{len(blast_genomes):,}")
+            table.add_row("Mapped to representatives", f"{total:,}")
+            table.add_row("ANI matrix genomes", f"{len(ani_genomes):,}")
+            table.add_row("Matched", f"{matched_count:,}")
+            table.add_row("Missing from ANI", f"{len(missing):,}")
+            table.add_row("Extra in ANI", f"{len(extra):,}")
+            table.add_row("Coverage", f"{coverage_pct:.1f}%")
+
+            console.print(table)
+
+            # Warnings/recommendations
+            if coverage_pct < 50.0:
+                console.print(f"\n[yellow]Warning: Low representative coverage ({coverage_pct:.1f}%)[/yellow]")
+            elif coverage_pct < 90.0:
+                console.print(f"\n[yellow]Note: Moderate coverage ({coverage_pct:.1f}%)[/yellow]")
+            else:
+                console.print(f"\n[green]Good representative coverage ({coverage_pct:.1f}%)[/green]")
+
+            # Show missing
+            if missing and verbose:
+                console.print("\n[bold]Missing representative genomes (not in ANI matrix):[/bold]")
+                for genome in sorted(missing)[:20]:
+                    console.print(f"  - {genome}")
+            elif missing:
+                console.print(
+                    f"\n[dim]Use --verbose to see list of {len(missing)} missing representatives[/dim]"
+                )
+
+            if coverage_pct < 50.0:
+                raise typer.Exit(code=1) from None
+
+            out.print()
+            raise typer.Exit(code=0)
+
+    # Standard (non-representative) coverage check
     # Calculate coverage
     matched_count, total, coverage_pct, missing = validate_ani_coverage(
         ani_genomes, blast_genomes
