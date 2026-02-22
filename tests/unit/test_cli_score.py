@@ -657,7 +657,7 @@ class TestThresholdPresets:
 
     def test_expected_presets_exist(self):
         """Expected preset names should all be present."""
-        expected = {"gtdb-strict", "gtdb-relaxed", "conservative", "literature-strict", "coverage-strict"}
+        expected = {"default", "gtdb-strict", "gtdb-relaxed", "conservative", "literature-strict", "coverage-strict", "adaptive"}
         assert expected == set(THRESHOLD_PRESETS.keys())
 
 
@@ -2067,3 +2067,213 @@ class TestClassifyWithSummaryAndQC:
             ],
         )
         assert result.exit_code == 0
+
+
+# =============================================================================
+# Tests for export-config command and YAML config round-trip
+# =============================================================================
+
+import yaml
+
+from metadarkmatter.models.config import ScoringConfig
+
+
+class TestExportConfigCommand:
+    """Tests for the ``score export-config`` CLI subcommand."""
+
+    def test_export_config_creates_yaml(self, cli_runner, temp_dir):
+        """export-config --output config.yaml should create a valid YAML file."""
+        config_path = temp_dir / "config.yaml"
+        result = cli_runner.invoke(
+            app,
+            ["score", "export-config", "--output", str(config_path)],
+        )
+        assert result.exit_code == 0
+        assert config_path.exists()
+
+        # The file should be parseable YAML
+        content = yaml.safe_load(config_path.read_text())
+        assert isinstance(content, dict)
+        assert "alignment_mode" in content
+
+    def test_export_config_from_preset(self, cli_runner, temp_dir):
+        """export-config --preset gtdb-strict should create YAML from preset."""
+        config_path = temp_dir / "config.yaml"
+        result = cli_runner.invoke(
+            app,
+            [
+                "score", "export-config",
+                "--preset", "gtdb-strict",
+                "--output", str(config_path),
+            ],
+        )
+        assert result.exit_code == 0
+        assert config_path.exists()
+
+        content = yaml.safe_load(config_path.read_text())
+        assert isinstance(content, dict)
+
+    def test_export_config_invalid_preset(self, cli_runner, temp_dir):
+        """export-config --preset invalid-name should return exit code 1."""
+        config_path = temp_dir / "config.yaml"
+        result = cli_runner.invoke(
+            app,
+            [
+                "score", "export-config",
+                "--preset", "invalid-name",
+                "--output", str(config_path),
+            ],
+        )
+        assert result.exit_code != 0
+
+    def test_export_config_round_trip(self, cli_runner, temp_dir):
+        """Exported YAML can be loaded back with ScoringConfig.from_yaml."""
+        config_path = temp_dir / "config.yaml"
+        result = cli_runner.invoke(
+            app,
+            ["score", "export-config", "--output", str(config_path)],
+        )
+        assert result.exit_code == 0
+
+        loaded = ScoringConfig.from_yaml(config_path)
+        assert isinstance(loaded, ScoringConfig)
+        # Round-tripped values should match defaults
+        default = ScoringConfig()
+        assert loaded.novelty_known_max == default.novelty_known_max
+        assert loaded.novelty_novel_species_max == default.novelty_novel_species_max
+        assert loaded.novelty_novel_genus_max == default.novelty_novel_genus_max
+        assert loaded.uncertainty_known_max == default.uncertainty_known_max
+        assert loaded.bitscore_threshold_pct == default.bitscore_threshold_pct
+
+    def test_export_config_preset_preserves_thresholds(self, cli_runner, temp_dir):
+        """Exported YAML from preset should preserve key threshold values."""
+        config_path = temp_dir / "gtdb_strict.yaml"
+        result = cli_runner.invoke(
+            app,
+            [
+                "score", "export-config",
+                "--preset", "gtdb-strict",
+                "--output", str(config_path),
+            ],
+        )
+        assert result.exit_code == 0
+
+        loaded = ScoringConfig.from_yaml(config_path)
+        preset = THRESHOLD_PRESETS["gtdb-strict"]
+
+        assert loaded.novelty_known_max == preset.novelty_known_max
+        assert loaded.novelty_novel_species_min == preset.novelty_novel_species_min
+        assert loaded.novelty_novel_species_max == preset.novelty_novel_species_max
+        assert loaded.novelty_novel_genus_min == preset.novelty_novel_genus_min
+        assert loaded.novelty_novel_genus_max == preset.novelty_novel_genus_max
+        assert loaded.min_alignment_length == preset.min_alignment_length
+        assert loaded.min_alignment_fraction == preset.min_alignment_fraction
+
+
+class TestYamlConfigRoundTrip:
+    """Tests for --config YAML loading in classify command and ScoringConfig YAML methods."""
+
+    def test_classify_accepts_yaml_config(self, cli_runner, temp_dir):
+        """Passing --config with a valid YAML should be accepted by classify.
+
+        The command will fail at alignment loading (missing valid data) but
+        should get past config parsing without error.
+        """
+        # Write a valid YAML config
+        config = ScoringConfig()
+        config_path = temp_dir / "config.yaml"
+        config.to_yaml(config_path)
+
+        # Create minimal BLAST and ANI files so the command reaches config parsing
+        genomes = ["GCF_000123456.1", "GCF_000789012.1", "GCA_000111222.1"]
+        ani_data = {"genome": genomes}
+        ani_vals = [
+            [100.0, 95.5, 80.0],
+            [95.5, 100.0, 82.0],
+            [80.0, 82.0, 100.0],
+        ]
+        for i, g in enumerate(genomes):
+            ani_data[g] = ani_vals[i]
+        ani_df = pl.DataFrame(ani_data)
+        ani_path = temp_dir / "test.ani.csv"
+        ani_df.write_csv(ani_path)
+
+        blast_rows = []
+        for read_idx in range(3):
+            for g_idx, genome in enumerate(genomes):
+                blast_rows.append({
+                    "qseqid": f"read_{read_idx:03d}",
+                    "sseqid": f"{genome}_ASM_genomic",
+                    "pident": 98.5 - g_idx * 5,
+                    "length": 150,
+                    "mismatch": 2,
+                    "gapopen": 0,
+                    "qstart": 1,
+                    "qend": 150,
+                    "sstart": 1000,
+                    "send": 1150,
+                    "evalue": 1e-50,
+                    "bitscore": 250.0 - g_idx * 20,
+                })
+        blast_df = pl.DataFrame(blast_rows)
+        blast_path = temp_dir / "test.blast.tsv"
+        blast_df.write_csv(blast_path, separator="\t", include_header=False)
+
+        output = temp_dir / "output.csv"
+        result = cli_runner.invoke(
+            app,
+            [
+                "score", "classify",
+                "--alignment", str(blast_path),
+                "--ani", str(ani_path),
+                "--config", str(config_path),
+                "--output", str(output),
+            ],
+        )
+        # Should succeed (config parsed and classification runs)
+        assert result.exit_code == 0
+        assert "loaded config from" in result.output.lower()
+
+    def test_scoring_config_yaml_round_trip(self, temp_dir):
+        """ScoringConfig.to_yaml -> from_yaml should preserve all values."""
+        original = ScoringConfig(
+            novelty_known_max=5.0,
+            novelty_novel_species_min=5.0,
+            novelty_novel_species_max=18.0,
+            novelty_novel_genus_min=18.0,
+            novelty_novel_genus_max=28.0,
+            uncertainty_known_max=2.0,
+            uncertainty_novel_species_max=2.0,
+            uncertainty_novel_genus_max=2.0,
+            uncertainty_conserved_min=6.0,
+            bitscore_threshold_pct=90.0,
+            min_alignment_length=150,
+            min_alignment_fraction=0.5,
+            coverage_weight_mode="sigmoid",
+            coverage_weight_strength=0.7,
+            uncertainty_mode="max",
+            single_hit_uncertainty_threshold=8.0,
+            family_ratio_threshold=0.9,
+        )
+        config_path = temp_dir / "round_trip.yaml"
+        original.to_yaml(config_path)
+
+        loaded = ScoringConfig.from_yaml(config_path)
+
+        assert loaded.novelty_known_max == original.novelty_known_max
+        assert loaded.novelty_novel_species_min == original.novelty_novel_species_min
+        assert loaded.novelty_novel_species_max == original.novelty_novel_species_max
+        assert loaded.novelty_novel_genus_min == original.novelty_novel_genus_min
+        assert loaded.novelty_novel_genus_max == original.novelty_novel_genus_max
+        assert loaded.uncertainty_known_max == original.uncertainty_known_max
+        assert loaded.uncertainty_novel_species_max == original.uncertainty_novel_species_max
+        assert loaded.uncertainty_novel_genus_max == original.uncertainty_novel_genus_max
+        assert loaded.uncertainty_conserved_min == original.uncertainty_conserved_min
+        assert loaded.bitscore_threshold_pct == original.bitscore_threshold_pct
+        assert loaded.min_alignment_length == original.min_alignment_length
+        assert loaded.min_alignment_fraction == original.min_alignment_fraction
+        assert loaded.coverage_weight_mode == original.coverage_weight_mode
+        assert loaded.coverage_weight_strength == original.coverage_weight_strength
+        assert loaded.uncertainty_mode == original.uncertainty_mode
+        assert loaded.single_hit_uncertainty_threshold == original.single_hit_uncertainty_threshold
+        assert loaded.family_ratio_threshold == original.family_ratio_threshold

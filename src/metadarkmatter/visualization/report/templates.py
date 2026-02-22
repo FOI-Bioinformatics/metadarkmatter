@@ -1932,7 +1932,7 @@ BAYESIAN_SUMMARY_TEMPLATE: str = '''
         <div class="metric-box">
             <div class="metric-title">Mean Posterior Entropy</div>
             <div class="metric-value">{mean_entropy:.2f}</div>
-            <div class="metric-detail">Range: 0 (certain) to 2.0 (uniform)</div>
+            <div class="metric-detail">Range: 0 (certain) to 2.58 (uniform over 6 categories)</div>
             <div class="metric-note">Lower values indicate more confident classifications overall</div>
         </div>
 
@@ -1944,10 +1944,10 @@ BAYESIAN_SUMMARY_TEMPLATE: str = '''
         </div>
 
         <div class="metric-box">
-            <div class="metric-title">MAP Agreement</div>
+            <div class="metric-title">Bayesian-Legacy Agreement</div>
             <div class="metric-value">{map_agreement_pct:.1f}%</div>
             <div class="metric-detail">{map_agreement_count:,} of {total_reads:,} reads</div>
-            <div class="metric-note">Reads where Bayesian MAP matches the threshold classification</div>
+            <div class="metric-note">Reads where the Bayesian primary call matches the legacy threshold call</div>
         </div>
 
         <div class="metric-box">

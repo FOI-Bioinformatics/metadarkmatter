@@ -16,6 +16,11 @@ import polars as pl
 
 from collections.abc import Callable
 
+from metadarkmatter.core.classification.bayesian import (
+    BayesianClassifier,
+    apply_stage2_refinement,
+    entropy_to_confidence,
+)
 from metadarkmatter.core.constants import (
     calculate_confidence_score,
 )
@@ -95,6 +100,9 @@ class VectorizedClassifier:
             self._inferred_known_break
             + (eff["novelty_novel_species_max"] - eff["novelty_known_max"]) * 1.0
         )
+
+        # Initialize Bayesian classifier for primary classification
+        self._bayesian = BayesianClassifier(self.config)
 
         # Pre-build ANI lookup DataFrame for efficient joins
         self._build_ani_lookup()
@@ -302,7 +310,10 @@ class VectorizedClassifier:
         off_target_df = None
 
         if family_validation_active:
-            in_family_genomes = set(self.ani_matrix._genomes)
+            if self.representative_mapping:
+                in_family_genomes = set(self.representative_mapping.keys())
+            else:
+                in_family_genomes = set(self.ani_matrix._genomes)
 
             df = df.with_columns([
                 pl.col("genome_name").is_in(in_family_genomes).alias("_is_in_family"),
@@ -717,240 +728,45 @@ class VectorizedClassifier:
             .alias("ambiguity_scope"),
         ])
 
-        # Step 7b: Calculate confidence score (0-100)
-        # Integrates multiple quality factors:
-        # 1. Alignment quality (0-40 pts): length and coverage
-        # 2. Placement certainty (0-40 pts): bitscore gap and hit count
-        # 3. Phylogenetic context (0-20 pts): scope of ambiguity
-        result = result.with_columns([
-            # Bitscore gap: (best - second) / best * 100
-            # Higher gap = more confident (single clear hit vs many similar hits)
-            pl.when(pl.col("second_weighted_bitscore") == 0.0)
-            .then(100.0)  # Only one hit = max gap
-            .otherwise(
-                ((pl.col("max_bitscore") - pl.col("second_weighted_bitscore")) / pl.col("max_bitscore") * 100.0)
-                .clip(0.0, 100.0)
-            )
-            .alias("_bitscore_gap_pct"),
-        ]).with_columns([
-            # Component 1: Alignment quality score (0-40 points)
-            # - Length: log-scaled, 100bp=20, 300bp=30, 500bp=35, 1000bp=40
-            # - Fraction: linear, 0.5=20, 1.0=40
-            (
-                # Length component (0-40): log2(length/25) clamped to [0, 40]
-                (pl.col("best_alignment_length").cast(pl.Float64).log(2.0) - 4.64)  # log2(25) ≈ 4.64
-                .clip(0.0, 5.32)  # log2(1000/25) ≈ 5.32
-                * (40.0 / 5.32)  # Scale to 0-40
-            ).alias("_alignment_length_score"),
-            # Fraction component (0-40): linear scaling
-            (pl.col("alignment_fraction") * 40.0).clip(0.0, 40.0).alias("_alignment_frac_score"),
-        ]).with_columns([
-            # Combined alignment quality: average of length and fraction scores
-            ((pl.col("_alignment_length_score") + pl.col("_alignment_frac_score")) / 2.0)
-            .alias("_alignment_quality"),
-        ]).with_columns([
-            # Component 2: Placement certainty score (0-40 points)
-            # - Bitscore gap: 0-20 pts (0%=0, 5%=10, 10%+=20)
-            # - Hit count penalty: 1 hit=20, 2-5 hits=15, 6-10 hits=10, >10 hits=5
-            (
-                (pl.col("_bitscore_gap_pct") / 5.0).clip(0.0, 20.0)  # Gap score (0-20)
-                + pl.when(pl.col("num_ambiguous_hits") <= 1).then(20.0)
-                  .when(pl.col("num_ambiguous_hits") <= 5).then(15.0)
-                  .when(pl.col("num_ambiguous_hits") <= 10).then(10.0)
-                  .otherwise(5.0)  # Hit count score (5-20)
-            ).alias("_placement_certainty"),
-        ]).with_columns([
-            # Component 3: Phylogenetic context score (0-20 points)
-            # Rewards biologically expected ambiguity patterns
-            pl.when(pl.col("ambiguity_scope") == "unambiguous").then(20.0)
-            .when(pl.col("ambiguity_scope") == "within_species").then(18.0)  # Strain variation expected
-            .when(pl.col("ambiguity_scope") == "within_genus").then(12.0)  # Genus confident
-            .otherwise(5.0)  # across_genera = low confidence
-            .alias("_phylo_context"),
-        ]).with_columns([
-            # Final confidence score: sum of all components (0-100)
-            (
-                pl.col("_alignment_quality")
-                + pl.col("_placement_certainty")
-                + pl.col("_phylo_context")
-            ).clip(0.0, 100.0).round(1).alias("confidence_score"),
-        ])
+        # Step 7b: Bayesian-primary classification
+        # Uses BayesianClassifier to compute 6-category posteriors and MAP
+        # classification, then applies Stage 2 refinement for sub-categories.
+        # The legacy threshold cascade is preserved as legacy_call for comparison.
+        result = self._bayesian.classify_primary(result)
 
-        # Step 8: Apply classification thresholds
-        # Rule 0 (identity gap) comes first - when competing hits have nearly identical
-        # BLAST identity (gap < 2%), the read cannot be confidently placed.
-        # Uncertainty-based checks come next (ANI-based, more biologically meaningful)
-        result = result.with_columns([
-            # Rule 0: Identity gap check (before all other rules)
-            # When two hits have nearly identical identity (gap < 2%), the read
-            # cannot be confidently placed regardless of ANI between those genomes.
-            pl.when(
-                (pl.col("identity_gap").is_not_null())
-                & (pl.col("num_ambiguous_hits") > 1)
-                & (pl.col("identity_gap") < cfg.identity_gap_ambiguous_max)
-            )
-            .then(pl.lit("Ambiguous"))
-            # Conserved Region: high uncertainty AND hits span multiple genera
-            # This indicates a conserved gene present across genera (e.g., 16S, housekeeping)
-            .when(
-                (pl.col("placement_uncertainty") >= eff["uncertainty_conserved_min"])
-                & (pl.col("ambiguity_scope") == "across_genera")
-            )
-            .then(pl.lit("Conserved Region"))
-            # High uncertainty but NOT across genera = conserved within genus
-            .when(pl.col("placement_uncertainty") >= eff["uncertainty_conserved_min"])
-            .then(pl.lit("Ambiguous"))
-            # Moderate uncertainty (2-5%): species boundary zone
-            # Read matches multiple closely related species (95-98% ANI)
-            .when(pl.col("placement_uncertainty") >= eff["uncertainty_novel_genus_max"])
-            .then(pl.lit("Species Boundary"))
-            .when(
-                (pl.col("novelty_index") < eff["novelty_known_max"])
-                & (pl.col("placement_uncertainty") < eff["uncertainty_known_max"])
-            )
-            .then(pl.lit("Known Species"))
-            # Rule 0b: Single-hit inferred uncertainty check
-            # For single-hit reads with high inferred uncertainty, flag as Ambiguous
-            .when(
-                (pl.col("num_ambiguous_hits") <= 1)
-                & (pl.col("novelty_index") >= eff["novelty_novel_species_min"])
-                # Inferred uncertainty formula: higher novelty = higher uncertainty
-                & (
-                    pl.when(pl.col("novelty_index") < eff["novelty_known_max"])
-                    .then(5.0 + pl.col("novelty_index") * 0.5)
-                    .when(pl.col("novelty_index") < eff["novelty_novel_species_max"])
-                    .then(self._inferred_known_break + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)
-                    .when(pl.col("novelty_index") < eff["novelty_novel_genus_max"])
-                    .then(self._inferred_species_break + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)
-                    .otherwise(35.0)
-                    >= pl.lit(cfg.single_hit_uncertainty_threshold)
-                )
-            )
-            .then(pl.lit("Ambiguous"))
-            .when(
-                (pl.col("novelty_index") >= eff["novelty_novel_species_min"])
-                & (pl.col("novelty_index") < eff["novelty_novel_species_max"])
-                & (pl.col("placement_uncertainty") < eff["uncertainty_novel_species_max"])
-            )
-            .then(pl.lit("Novel Species"))
-            .when(
-                (pl.col("novelty_index") >= eff["novelty_novel_genus_min"])
-                & (pl.col("novelty_index") <= eff["novelty_novel_genus_max"])
-                & (pl.col("placement_uncertainty") < eff["uncertainty_novel_genus_max"])
-                # Check genus-level ambiguity: if genus_uncertainty >= threshold,
-                # this indicates hits to multiple species with low ANI
-                & (
-                    (pl.col("genus_uncertainty") < cfg.genus_uncertainty_ambiguous_min)
-                    | (pl.col("num_secondary_genomes") <= 0)
-                )
-            )
-            .then(pl.lit("Novel Genus"))
-            # Genus-level ambiguous: high novelty but competing species within genus
-            .when(
-                (pl.col("novelty_index") >= eff["novelty_novel_genus_min"])
-                & (pl.col("novelty_index") <= eff["novelty_novel_genus_max"])
-                & (pl.col("placement_uncertainty") < eff["uncertainty_novel_genus_max"])
-                & (pl.col("genus_uncertainty") >= cfg.genus_uncertainty_ambiguous_min)
-                & (pl.col("num_secondary_genomes") > 0)
-            )
-            .then(pl.lit("Ambiguous Within Genus"))
-            .otherwise(pl.lit("Unclassified"))
-            .alias("taxonomic_call")
-        ])
+        # Compute legacy_call using the hard threshold cascade for side-by-side comparison
+        from metadarkmatter.core.classification.thresholds import apply_legacy_thresholds
+        result = apply_legacy_thresholds(result, self.config)
 
         # Add diversity_status, is_novel, and low_confidence flags
+        bay_cfg = self.config.bayesian
         result = result.with_columns([
             pl.col("taxonomic_call").replace(TAXONOMIC_TO_DIVERSITY).alias("diversity_status"),
             pl.col("taxonomic_call").is_in(["Novel Species", "Novel Genus"]).alias("is_novel"),
-            # Low confidence flag: indicates borderline classification quality
-            # Useful for downstream filtering without changing the classification
-            (pl.col("confidence_score") < cfg.confidence_threshold).alias("low_confidence"),
+            (pl.col("posterior_entropy") > bay_cfg.entropy_threshold).alias("low_confidence"),
         ])
 
         # Inferred uncertainty for single-hit reads
         result = result.with_columns([
-            # Inferred uncertainty: estimate for single-hit reads based on novelty
             pl.when(pl.col("num_ambiguous_hits") <= 1)
             .then(
                 pl.when(pl.col("novelty_index") < eff["novelty_known_max"])
-                .then(5.0 + pl.col("novelty_index") * 0.5)  # 5-7.5%
+                .then(5.0 + pl.col("novelty_index") * 0.5)
                 .when(pl.col("novelty_index") < eff["novelty_novel_species_max"])
-                .then(self._inferred_known_break + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)  # 7.5-22.5%
+                .then(self._inferred_known_break + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)
                 .when(pl.col("novelty_index") < eff["novelty_novel_genus_max"])
-                .then(self._inferred_species_break + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)  # 22.5-30%
-                .otherwise(35.0)  # Maximum uncertainty
+                .then(self._inferred_species_break + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)
+                .otherwise(35.0)
             )
             .otherwise(pl.lit(None))
             .alias("inferred_uncertainty"),
-            # Uncertainty type: measured (from ANI) or inferred (from novelty)
             pl.when(pl.col("num_ambiguous_hits") <= 1)
             .then(pl.lit("inferred"))
             .otherwise(pl.lit("measured"))
             .alias("uncertainty_type"),
         ])
 
-        # Alignment quality and confidence dimensions
-        result = result.with_columns([
-            # Alignment quality score (0-100) - simplified for vectorized operations
-            # Uses alignment_fraction as proxy since we don't have mismatch/gap in this context
-            (pl.col("alignment_fraction") * 50.0 + 25.0).clip(0.0, 100.0).round(1)
-            .alias("alignment_quality"),
-        ]).with_columns([
-            # Identity confidence: how reliable is the identity measurement
-            (
-                pl.when(pl.col("novelty_index") < 5).then(80.0)
-                .when(pl.col("novelty_index") < 15).then(60.0 - (pl.col("novelty_index") - 5))
-                .when(pl.col("novelty_index") < 25).then(50.0 - (pl.col("novelty_index") - 15) * 1.5)
-                .otherwise(30.0)
-                + pl.col("alignment_quality") * 0.2
-            ).clip(0.0, 100.0).round(1).alias("identity_confidence"),
-        ]).with_columns([
-            # Placement confidence: how confident are we about genome assignment
-            # Uses effective uncertainty (inferred for single-hit, measured for multi-hit)
-            pl.when(pl.col("num_ambiguous_hits") <= 1)
-            .then(
-                # For single-hit reads, use inferred uncertainty
-                pl.when(pl.col("inferred_uncertainty") < 2).then(65.0)  # 80 - 15 penalty
-                .when(pl.col("inferred_uncertainty") < 5).then(45.0)
-                .when(pl.col("inferred_uncertainty") < 10).then(25.0)
-                .when(pl.col("inferred_uncertainty") < 20).then(10.0)
-                .otherwise(0.0)
-            )
-            .otherwise(
-                # For multi-hit reads, use measured uncertainty with identity gap bonus
-                pl.when(pl.col("placement_uncertainty") < 2).then(80.0)
-                .when(pl.col("placement_uncertainty") < 5).then(60.0)
-                .when(pl.col("placement_uncertainty") < 10).then(40.0)
-                .when(pl.col("placement_uncertainty") < 20).then(25.0)
-                .otherwise(10.0)
-                + pl.when((pl.col("identity_gap").is_not_null()) & (pl.col("identity_gap") >= 5)).then(20.0)
-                .when((pl.col("identity_gap").is_not_null()) & (pl.col("identity_gap") >= 2)).then(10.0)
-                .when((pl.col("identity_gap").is_not_null()) & (pl.col("identity_gap") >= 1)).then(5.0)
-                .otherwise(0.0)
-            )
-            .clip(0.0, 100.0).round(1).alias("placement_confidence"),
-        ]).with_columns([
-            # Discovery score: priority for novel discoveries (null for non-novel)
-            pl.when(pl.col("taxonomic_call") == "Novel Species")
-            .then(
-                # Novelty component (15-30 pts) + quality (0-30) + confidence (0-30)
-                (15.0 + (pl.col("novelty_index") - eff["novelty_novel_species_min"]) * 1.5).clip(15.0, 30.0)
-                + pl.col("alignment_quality") * 0.3
-                + (pl.col("identity_confidence") + pl.col("placement_confidence")) / 2.0 * 0.3
-            )
-            .when(pl.col("taxonomic_call") == "Novel Genus")
-            .then(
-                # Novelty component (30-40 pts) + quality (0-30) + confidence (0-30)
-                (30.0 + (pl.col("novelty_index") - eff["novelty_novel_genus_min"]) * 2.0).clip(30.0, 40.0)
-                + pl.col("alignment_quality") * 0.3
-                + (pl.col("identity_confidence") + pl.col("placement_confidence")) / 2.0 * 0.3
-            )
-            .otherwise(pl.lit(None))
-            .round(1).alias("discovery_score"),
-        ])
-
         # Select and rename final columns
-        # Note: num_competing_genera removed (redundant with ambiguity_scope)
         base_columns = [
             pl.col("qseqid").alias("read_id"),
             pl.col("best_genome").alias("best_match_genome"),
@@ -964,19 +780,35 @@ class VectorizedClassifier:
             "identity_gap",
             "confidence_score",
             "taxonomic_call",
+            "legacy_call",
             "diversity_status",
             "is_novel",
             "low_confidence",
         ]
 
-        # Add enhanced scoring columns
-        base_columns.extend(["inferred_uncertainty", "uncertainty_type"])
+        # Add posterior columns
         base_columns.extend([
-            "alignment_quality",
-            "identity_confidence",
-            "placement_confidence",
-            "discovery_score",
+            "p_known_species",
+            "p_novel_species",
+            "p_novel_genus",
+            "p_species_boundary",
+            "p_ambiguous",
+            "p_unclassified",
+            "posterior_entropy",
         ])
+
+        # Add inferred uncertainty columns
+        base_columns.extend(["inferred_uncertainty", "uncertainty_type"])
+
+        # Optionally include legacy sub-scores
+        if self.config.include_legacy_scores:
+            result = self._compute_legacy_scores(result, eff)
+            base_columns.extend([
+                "alignment_quality",
+                "identity_confidence",
+                "placement_confidence",
+                "discovery_score",
+            ])
 
         classification_result = result.select(base_columns)
 
@@ -1014,33 +846,99 @@ class VectorizedClassifier:
 
         return classification_result
 
+    def _compute_legacy_scores(
+        self,
+        result: pl.DataFrame,
+        eff: dict,
+    ) -> pl.DataFrame:
+        """Compute legacy sub-scores (opt-in via include_legacy_scores)."""
+        result = result.with_columns([
+            (pl.col("alignment_fraction") * 50.0 + 25.0).clip(0.0, 100.0).round(1)
+            .alias("alignment_quality"),
+        ]).with_columns([
+            (
+                pl.when(pl.col("novelty_index") < 5).then(80.0)
+                .when(pl.col("novelty_index") < 15).then(60.0 - (pl.col("novelty_index") - 5))
+                .when(pl.col("novelty_index") < 25).then(50.0 - (pl.col("novelty_index") - 15) * 1.5)
+                .otherwise(30.0)
+                + pl.col("alignment_quality") * 0.2
+            ).clip(0.0, 100.0).round(1).alias("identity_confidence"),
+        ]).with_columns([
+            pl.when(pl.col("num_ambiguous_hits") <= 1)
+            .then(
+                pl.when(pl.col("inferred_uncertainty") < 2).then(65.0)
+                .when(pl.col("inferred_uncertainty") < 5).then(45.0)
+                .when(pl.col("inferred_uncertainty") < 10).then(25.0)
+                .when(pl.col("inferred_uncertainty") < 20).then(10.0)
+                .otherwise(0.0)
+            )
+            .otherwise(
+                pl.when(pl.col("placement_uncertainty") < 2).then(80.0)
+                .when(pl.col("placement_uncertainty") < 5).then(60.0)
+                .when(pl.col("placement_uncertainty") < 10).then(40.0)
+                .when(pl.col("placement_uncertainty") < 20).then(25.0)
+                .otherwise(10.0)
+                + pl.when((pl.col("identity_gap").is_not_null()) & (pl.col("identity_gap") >= 5)).then(20.0)
+                .when((pl.col("identity_gap").is_not_null()) & (pl.col("identity_gap") >= 2)).then(10.0)
+                .when((pl.col("identity_gap").is_not_null()) & (pl.col("identity_gap") >= 1)).then(5.0)
+                .otherwise(0.0)
+            )
+            .clip(0.0, 100.0).round(1).alias("placement_confidence"),
+        ]).with_columns([
+            pl.when(pl.col("taxonomic_call") == "Novel Species")
+            .then(
+                (15.0 + (pl.col("novelty_index") - eff["novelty_novel_species_min"]) * 1.5).clip(15.0, 30.0)
+                + pl.col("alignment_quality") * 0.3
+                + (pl.col("identity_confidence") + pl.col("placement_confidence")) / 2.0 * 0.3
+            )
+            .when(pl.col("taxonomic_call") == "Novel Genus")
+            .then(
+                (30.0 + (pl.col("novelty_index") - eff["novelty_novel_genus_min"]) * 2.0).clip(30.0, 40.0)
+                + pl.col("alignment_quality") * 0.3
+                + (pl.col("identity_confidence") + pl.col("placement_confidence")) / 2.0 * 0.3
+            )
+            .otherwise(pl.lit(None))
+            .round(1).alias("discovery_score"),
+        ])
+        return result
+
     def _empty_dataframe(self) -> pl.DataFrame:
         """Return empty DataFrame with correct schema."""
-        return pl.DataFrame(
-            schema={
-                "read_id": pl.Utf8,
-                "best_match_genome": pl.Utf8,
-                "top_hit_identity": pl.Float64,
-                "novelty_index": pl.Float64,
-                "placement_uncertainty": pl.Float64,
-                "genus_uncertainty": pl.Float64,
-                "ambiguity_scope": pl.Utf8,
-                "num_ambiguous_hits": pl.Int64,
-                "second_hit_identity": pl.Float64,
-                "identity_gap": pl.Float64,
-                "confidence_score": pl.Float64,
-                "taxonomic_call": pl.Utf8,
-                "diversity_status": pl.Utf8,
-                "is_novel": pl.Boolean,
-                "low_confidence": pl.Boolean,
-                "inferred_uncertainty": pl.Float64,
-                "uncertainty_type": pl.Utf8,
+        schema = {
+            "read_id": pl.Utf8,
+            "best_match_genome": pl.Utf8,
+            "top_hit_identity": pl.Float64,
+            "novelty_index": pl.Float64,
+            "placement_uncertainty": pl.Float64,
+            "genus_uncertainty": pl.Float64,
+            "ambiguity_scope": pl.Utf8,
+            "num_ambiguous_hits": pl.Int64,
+            "second_hit_identity": pl.Float64,
+            "identity_gap": pl.Float64,
+            "confidence_score": pl.Float64,
+            "taxonomic_call": pl.Utf8,
+            "legacy_call": pl.Utf8,
+            "diversity_status": pl.Utf8,
+            "is_novel": pl.Boolean,
+            "low_confidence": pl.Boolean,
+            "p_known_species": pl.Float64,
+            "p_novel_species": pl.Float64,
+            "p_novel_genus": pl.Float64,
+            "p_species_boundary": pl.Float64,
+            "p_ambiguous": pl.Float64,
+            "p_unclassified": pl.Float64,
+            "posterior_entropy": pl.Float64,
+            "inferred_uncertainty": pl.Float64,
+            "uncertainty_type": pl.Utf8,
+        }
+        if self.config.include_legacy_scores:
+            schema.update({
                 "alignment_quality": pl.Float64,
                 "identity_confidence": pl.Float64,
                 "placement_confidence": pl.Float64,
                 "discovery_score": pl.Float64,
-            }
-        )
+            })
+        return pl.DataFrame(schema=schema)
 
     def stream_to_file(
         self,

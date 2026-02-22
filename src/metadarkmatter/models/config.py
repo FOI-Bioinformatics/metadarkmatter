@@ -8,9 +8,68 @@ Configuration can be loaded from YAML files, environment variables, or CLI argum
 
 from __future__ import annotations
 
-from typing import Literal, Self
+import logging
+from pathlib import Path
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, Field, model_validator
+
+logger = logging.getLogger(__name__)
+
+
+# Default uniform priors over 6 Bayesian categories
+_DEFAULT_PRIORS: dict[str, float] = {
+    "known_species": 1.0 / 6,
+    "novel_species": 1.0 / 6,
+    "novel_genus": 1.0 / 6,
+    "species_boundary": 1.0 / 6,
+    "ambiguous": 1.0 / 6,
+    "unclassified": 1.0 / 6,
+}
+
+
+class BayesianConfig(BaseModel):
+    """Configuration for the Bayesian classification engine."""
+
+    priors: dict[str, float] = Field(
+        default_factory=lambda: dict(_DEFAULT_PRIORS),
+        description="Prior probabilities for 6 Bayesian categories (sum to 1.0).",
+    )
+    identity_gap_boost: float = Field(
+        default=2.0,
+        ge=1.0,
+        description=(
+            "Prior modulation factor for Ambiguous when identity_gap < threshold "
+            "and num_hits > 1."
+        ),
+    )
+    single_hit_boost: float = Field(
+        default=1.5,
+        ge=1.0,
+        description=(
+            "Prior modulation factor for Ambiguous when single-hit reads have "
+            "novelty in the novel-species range or higher."
+        ),
+    )
+    entropy_threshold: float = Field(
+        default=1.5,
+        ge=0.0,
+        description=(
+            "Posterior entropy threshold for low-confidence flagging. "
+            "Reads with entropy above this value are flagged as low confidence."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def validate_priors_sum(self) -> Self:
+        """Priors must sum to approximately 1.0."""
+        total = sum(self.priors.values())
+        if abs(total - 1.0) > 0.01:
+            msg = f"Bayesian priors must sum to 1.0, got {total:.4f}"
+            raise ValueError(msg)
+        return self
+
+    model_config = {"frozen": True}
 
 
 class ScoringConfig(BaseModel):
@@ -302,6 +361,22 @@ class ScoringConfig(BaseModel):
         ),
     )
 
+    # Bayesian classification configuration
+    bayesian: BayesianConfig = Field(
+        default_factory=BayesianConfig,
+        description="Configuration for the Bayesian classification engine.",
+    )
+
+    # Output control
+    include_legacy_scores: bool = Field(
+        default=False,
+        description=(
+            "Include legacy sub-scores (alignment_quality, identity_confidence, "
+            "placement_confidence, discovery_score) in output. These are replaced "
+            "by posterior entropy and confidence_score in the Bayesian-primary design."
+        ),
+    )
+
     @model_validator(mode="after")
     def validate_threshold_boundaries(self) -> Self:
         """
@@ -446,6 +521,58 @@ class ScoringConfig(BaseModel):
         """
         return cls(alignment_mode="protein")
 
+    @classmethod
+    def from_yaml(cls, path: Path) -> ScoringConfig:
+        """
+        Load scoring configuration from a YAML file.
+
+        The YAML file uses a nested structure that maps to ScoringConfig fields.
+        Unknown keys are ignored (forward compatibility). Nested sections
+        (thresholds, bayesian, filters, etc.) are flattened to match model fields.
+
+        Args:
+            path: Path to YAML configuration file.
+
+        Returns:
+            ScoringConfig populated from YAML values merged with defaults.
+
+        Raises:
+            FileNotFoundError: If YAML file does not exist.
+            ValueError: If YAML contains invalid threshold values.
+        """
+        import yaml
+
+        raw = yaml.safe_load(path.read_text())
+        if not isinstance(raw, dict):
+            msg = f"YAML config must be a mapping, got {type(raw).__name__}"
+            raise ValueError(msg)
+
+        flat = _flatten_yaml_config(raw)
+        return cls(**flat)
+
+    def to_yaml(self, path: Path) -> None:
+        """
+        Write scoring configuration to a YAML file.
+
+        Produces a structured YAML file matching the documented config format.
+
+        Args:
+            path: Output file path.
+        """
+        path.write_text(self.to_yaml_str())
+
+    def to_yaml_str(self) -> str:
+        """
+        Serialize scoring configuration to a YAML string.
+
+        Returns:
+            YAML-formatted string with nested structure.
+        """
+        import yaml
+
+        data = _build_yaml_structure(self)
+        return yaml.dump(data, default_flow_style=False, sort_keys=False)
+
     model_config = {"frozen": True}
 
 
@@ -499,5 +626,148 @@ class BlastConfig(BaseModel):
     )
 
     model_config = {"frozen": True}
+
+
+def _flatten_yaml_config(raw: dict[str, Any]) -> dict[str, Any]:
+    """
+    Flatten nested YAML config structure into ScoringConfig keyword arguments.
+
+    Maps the documented nested YAML structure:
+        thresholds.novelty.known_max -> novelty_known_max
+        bayesian.priors -> bayesian.priors (nested BayesianConfig)
+        filters.min_alignment_length -> min_alignment_length
+    """
+    flat: dict[str, Any] = {}
+
+    # Top-level scalars
+    if "alignment_mode" in raw:
+        flat["alignment_mode"] = raw["alignment_mode"]
+
+    # Threshold section
+    thresholds = raw.get("thresholds", {})
+    novelty = thresholds.get("novelty", {})
+    uncertainty = thresholds.get("uncertainty", {})
+    identity_gap_sec = thresholds.get("identity_gap", {})
+    genus_unc = thresholds.get("genus_uncertainty", {})
+
+    _map_if_present(novelty, "known_max", flat, "novelty_known_max")
+    _map_if_present(novelty, "novel_species_min", flat, "novelty_novel_species_min")
+    _map_if_present(novelty, "novel_species_max", flat, "novelty_novel_species_max")
+    _map_if_present(novelty, "novel_genus_min", flat, "novelty_novel_genus_min")
+    _map_if_present(novelty, "novel_genus_max", flat, "novelty_novel_genus_max")
+
+    _map_if_present(uncertainty, "known_max", flat, "uncertainty_known_max")
+    _map_if_present(uncertainty, "novel_species_max", flat, "uncertainty_novel_species_max")
+    _map_if_present(uncertainty, "novel_genus_max", flat, "uncertainty_novel_genus_max")
+    _map_if_present(uncertainty, "conserved_min", flat, "uncertainty_conserved_min")
+
+    _map_if_present(identity_gap_sec, "ambiguous_max", flat, "identity_gap_ambiguous_max")
+    _map_if_present(genus_unc, "ambiguous_min", flat, "genus_uncertainty_ambiguous_min")
+
+    # Bayesian section -> BayesianConfig
+    bayesian_raw = raw.get("bayesian", {})
+    if bayesian_raw:
+        bay_kwargs: dict[str, Any] = {}
+        if "priors" in bayesian_raw:
+            bay_kwargs["priors"] = bayesian_raw["priors"]
+        modulation = bayesian_raw.get("prior_modulation", {})
+        _map_if_present(modulation, "identity_gap_boost", bay_kwargs, "identity_gap_boost")
+        _map_if_present(modulation, "single_hit_boost", bay_kwargs, "single_hit_boost")
+        _map_if_present(bayesian_raw, "entropy_threshold", bay_kwargs, "entropy_threshold")
+        flat["bayesian"] = BayesianConfig(**bay_kwargs)
+
+    # Filters section
+    filters = raw.get("filters", {})
+    _map_if_present(filters, "min_alignment_length", flat, "min_alignment_length")
+    _map_if_present(filters, "min_alignment_fraction", flat, "min_alignment_fraction")
+    _map_if_present(filters, "bitscore_threshold_pct", flat, "bitscore_threshold_pct")
+
+    # Coverage weighting section
+    cw = raw.get("coverage_weighting", {})
+    _map_if_present(cw, "mode", flat, "coverage_weight_mode")
+    _map_if_present(cw, "strength", flat, "coverage_weight_strength")
+
+    # Uncertainty section
+    unc = raw.get("uncertainty", {})
+    _map_if_present(unc, "mode", flat, "uncertainty_mode")
+    _map_if_present(unc, "single_hit_threshold", flat, "single_hit_uncertainty_threshold")
+
+    # Family validation section
+    fv = raw.get("family_validation", {})
+    _map_if_present(fv, "target_family", flat, "target_family")
+    _map_if_present(fv, "ratio_threshold", flat, "family_ratio_threshold")
+
+    # Output section
+    output_sec = raw.get("output", {})
+    _map_if_present(output_sec, "include_legacy_scores", flat, "include_legacy_scores")
+
+    return flat
+
+
+def _map_if_present(
+    source: dict[str, Any],
+    source_key: str,
+    target: dict[str, Any],
+    target_key: str,
+) -> None:
+    """Copy value from source dict to target dict if key exists."""
+    if source_key in source and source[source_key] is not None:
+        target[target_key] = source[source_key]
+
+
+def _build_yaml_structure(config: "ScoringConfig") -> dict[str, Any]:
+    """Build nested YAML dict from a ScoringConfig instance."""
+    return {
+        "alignment_mode": config.alignment_mode,
+        "thresholds": {
+            "novelty": {
+                "known_max": config.novelty_known_max,
+                "novel_species_min": config.novelty_novel_species_min,
+                "novel_species_max": config.novelty_novel_species_max,
+                "novel_genus_min": config.novelty_novel_genus_min,
+                "novel_genus_max": config.novelty_novel_genus_max,
+            },
+            "uncertainty": {
+                "known_max": config.uncertainty_known_max,
+                "novel_species_max": config.uncertainty_novel_species_max,
+                "novel_genus_max": config.uncertainty_novel_genus_max,
+                "conserved_min": config.uncertainty_conserved_min,
+            },
+            "identity_gap": {
+                "ambiguous_max": config.identity_gap_ambiguous_max,
+            },
+            "genus_uncertainty": {
+                "ambiguous_min": config.genus_uncertainty_ambiguous_min,
+            },
+        },
+        "bayesian": {
+            "priors": dict(config.bayesian.priors),
+            "prior_modulation": {
+                "identity_gap_boost": config.bayesian.identity_gap_boost,
+                "single_hit_boost": config.bayesian.single_hit_boost,
+            },
+            "entropy_threshold": config.bayesian.entropy_threshold,
+        },
+        "filters": {
+            "min_alignment_length": config.min_alignment_length,
+            "min_alignment_fraction": config.min_alignment_fraction,
+            "bitscore_threshold_pct": config.bitscore_threshold_pct,
+        },
+        "coverage_weighting": {
+            "mode": config.coverage_weight_mode,
+            "strength": config.coverage_weight_strength,
+        },
+        "uncertainty": {
+            "mode": config.uncertainty_mode,
+            "single_hit_threshold": config.single_hit_uncertainty_threshold,
+        },
+        "family_validation": {
+            "target_family": config.target_family,
+            "ratio_threshold": config.family_ratio_threshold,
+        },
+        "output": {
+            "include_legacy_scores": config.include_legacy_scores,
+        },
+    }
 
 

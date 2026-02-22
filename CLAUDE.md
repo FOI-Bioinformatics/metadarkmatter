@@ -201,15 +201,15 @@ src/metadarkmatter/
 │   ├── constants.py          # Nucleotide thresholds (default mode)
 │   ├── protein_constants.py  # Protein thresholds (--alignment-mode protein)
 │   ├── classification/       # Classification pipeline
-│   │   ├── thresholds.py     # Threshold application (uses ScoringConfig.get_effective_thresholds())
+│   │   ├── bayesian.py       # Bayesian-primary classifier (6-cat 2D Gaussians + Stage 2)
+│   │   ├── thresholds.py     # Legacy threshold cascade + apply_legacy_thresholds()
 │   │   ├── qc.py             # Pre/post-classification QC metrics
 │   │   ├── sensitivity.py    # Threshold sensitivity analysis
 │   │   ├── adaptive.py       # GMM-based adaptive threshold detection
-│   │   ├── bayesian.py       # Bayesian posterior probabilities
 │   │   ├── ani_matrix.py     # ANIMatrix class
 │   │   └── classifiers/      # Classifier implementations
-│   │       ├── base.py       # ANIWeightedClassifier (programmatic API: classify_read())
-│   │       └── vectorized.py # VectorizedClassifier (sole CLI classifier, streaming + batch)
+│   │       ├── base.py       # ANIWeightedClassifier (programmatic API, Bayesian-primary)
+│   │       └── vectorized.py # VectorizedClassifier (sole CLI classifier, Bayesian-primary)
 │   ├── novel_diversity/      # Novel taxa clustering and models
 │   │   ├── clustering.py     # Cluster novel reads by genome proximity
 │   │   └── models.py         # NovelClusterResult, NovelReadInfo dataclasses
@@ -217,7 +217,7 @@ src/metadarkmatter/
 │       ├── tree_builder.py   # ANI-to-Newick conversion, user tree loading
 │       └── placement.py      # Novel cluster extraction and tree placement
 ├── external/         # External tool wrappers (BLAST, MMseqs2, Kraken2, etc.)
-├── models/           # Pydantic data models
+├── models/           # Pydantic data models (ScoringConfig with YAML from_yaml/to_yaml)
 ├── clients/          # API clients (GTDB with retry logic)
 └── visualization/    # Plotly charts and HTML report generation
     └── report/
@@ -278,12 +278,18 @@ Where `min = 1 - strength`, `max = 1 + strength`, `strength` defaults to 0.5.
 - Requires: `pip install metadarkmatter[adaptive]` (scikit-learn)
 - Key file: `core/classification/adaptive.py`
 
-### Bayesian Confidence (`--bayesian`)
-- Posterior probabilities P(category | novelty, uncertainty) via 2D Gaussian likelihoods
-- Shannon entropy as confidence metric (0 = confident, 2.0 = uniform)
-- Adds 6 columns: p_known_species, p_novel_species, p_novel_genus, p_ambiguous, bayesian_category, posterior_entropy
-- Vectorized numpy implementation (no Python loops)
-- Key file: `core/classification/bayesian.py`
+### Bayesian-Primary Classification (always on)
+- Primary classifier: 6-category 2D Gaussian posteriors in (novelty, uncertainty) space
+- Categories: Known Species, Novel Species, Novel Genus, Species Boundary, Ambiguous, Unclassified
+- Two-stage: Stage 1 (Bayesian MAP) + Stage 2 (discrete refinement for Conserved Region, Ambiguous Within Genus)
+- Prior modulation: identity_gap_boost (2.0x) and single_hit_boost (1.5x) for Ambiguous prior
+- Shannon entropy as confidence metric (0 = confident, 2.585 = uniform over 6 categories)
+- `confidence_score = (1 - entropy / log2(6)) * 100` (0-100 scale)
+- Output columns: taxonomic_call (Bayesian MAP), legacy_call (hard thresholds), 6 posterior columns, posterior_entropy, confidence_score
+- `--config` loads YAML config; `score export-config` generates editable YAML
+- `--include-legacy-scores` adds old sub-scores (alignment_quality, etc.)
+- `--bayesian` flag deprecated (always-on); numeric flags deprecated when `--config` used
+- Key files: `core/classification/bayesian.py`, `models/config.py` (YAML methods), `cli/score.py` (export-config)
 
 ### Family Validation (`--target-family`)
 - Detects off-target reads from broad-database alignments

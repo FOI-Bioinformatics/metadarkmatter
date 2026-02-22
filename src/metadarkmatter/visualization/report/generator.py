@@ -140,7 +140,7 @@ class TaxonomicSummary:
     off_target: int = 0
     has_family_validation: bool = False
     target_family: str = ""
-    # Bayesian posterior metrics (optional, only when --bayesian used)
+    # Bayesian posterior metrics (always present in Bayesian-primary workflow)
     has_bayesian: bool = False
     mean_posterior_entropy: float = 0.0
     high_confidence_count: int = 0  # entropy < 1.0
@@ -418,10 +418,13 @@ class ReportGenerator:
                 self.df.filter(pl.col("posterior_entropy") > 1.5)
             )
             boundary_pct = boundary_count / total_n * 100
-            if "bayesian_category" in self.df.columns:
+            # In the Bayesian-primary workflow, taxonomic_call IS the Bayesian
+            # MAP + Stage 2 result, so agreement with legacy_call shows how
+            # often the two classifiers concur.
+            if "legacy_call" in self.df.columns:
                 map_agreement_count = len(
                     self.df.filter(
-                        pl.col("bayesian_category") == pl.col("taxonomic_call")
+                        pl.col("legacy_call") == pl.col("taxonomic_call")
                     )
                 )
                 map_agreement_pct = map_agreement_count / total_n * 100
@@ -575,7 +578,7 @@ class ReportGenerator:
         if self.summary.has_enhanced_scoring or self.summary.has_inferred_uncertainty:
             content_sections.append(self._build_enhanced_scoring_section())
 
-        # Bayesian Confidence tab (only if posterior columns present)
+        # Bayesian Confidence tab (always present in Bayesian-primary workflow)
         if self.summary.has_bayesian:
             content_sections.append(self._build_bayesian_section())
 
@@ -647,7 +650,7 @@ class ReportGenerator:
         if self.summary.has_enhanced_scoring or self.summary.has_inferred_uncertainty:
             tabs.append(("enhanced-scoring", "Discovery Scores", False))
 
-        # Add Bayesian Confidence tab if posterior data available
+        # Bayesian Confidence tab (always present in Bayesian-primary workflow)
         if self.summary.has_bayesian:
             tabs.append(("bayesian", "Bayesian Confidence", False))
 
@@ -1197,7 +1200,7 @@ class ReportGenerator:
                 template="plotly_white",
                 height=400,
                 showlegend=False,
-                xaxis={"range": [0, 2.1]},
+                xaxis={"range": [0, 2.7]},  # log2(6) ~ 2.585
             )
             entropy_id = "plot-bayesian-entropy"
             self._register_plot(entropy_id, entropy_fig)
@@ -1215,29 +1218,37 @@ class ReportGenerator:
             ))
 
         # --- Stacked Posterior Bar by Category ---
-        if "bayesian_category" in self.df.columns:
+        if "taxonomic_call" in self.df.columns:
             category_colors = {
                 "Known Species": "#22c55e",
                 "Novel Species": "#f59e0b",
                 "Novel Genus": "#ef4444",
+                "Species Boundary": "#a855f7",
                 "Ambiguous": "#94a3b8",
+                "Unclassified": "#64748b",
             }
             posterior_cols = [
                 ("p_known_species", "Known Species"),
                 ("p_novel_species", "Novel Species"),
                 ("p_novel_genus", "Novel Genus"),
+                ("p_species_boundary", "Species Boundary"),
                 ("p_ambiguous", "Ambiguous"),
+                ("p_unclassified", "Unclassified"),
             ]
 
-            # Mean posteriors grouped by Bayesian MAP category
+            # Mean posteriors grouped by taxonomic call
             bar_fig = go.Figure()
+            all_map_cats = [
+                "Known Species", "Novel Species", "Novel Genus",
+                "Species Boundary", "Ambiguous", "Unclassified",
+            ]
             for col_name, cat_label in posterior_cols:
                 if col_name not in self.df.columns:
                     continue
                 means = []
                 cats = []
-                for map_cat in ["Known Species", "Novel Species", "Novel Genus", "Ambiguous"]:
-                    cat_df = self.df.filter(pl.col("bayesian_category") == map_cat)
+                for map_cat in all_map_cats:
+                    cat_df = self.df.filter(pl.col("taxonomic_call") == map_cat)
                     if len(cat_df) > 0:
                         cats.append(map_cat)
                         means.append(cat_df[col_name].mean() or 0.0)
@@ -1285,10 +1296,12 @@ class ReportGenerator:
                 "Known Species": "#22c55e",
                 "Novel Species": "#f59e0b",
                 "Novel Genus": "#ef4444",
+                "Species Boundary": "#a855f7",
                 "Ambiguous": "#94a3b8",
+                "Unclassified": "#64748b",
             }
             for call, color in category_colors_scatter.items():
-                call_df = plot_df.filter(pl.col("bayesian_category") == call)
+                call_df = plot_df.filter(pl.col("taxonomic_call") == call)
                 if len(call_df) > 0:
                     scatter_fig.add_trace(go.Scattergl(
                         x=call_df["novelty_index"].to_list(),
@@ -1310,7 +1323,7 @@ class ReportGenerator:
                 template="plotly_white",
                 height=500,
                 legend={"orientation": "h", "y": -0.15},
-                yaxis={"range": [0, 2.1]},
+                yaxis={"range": [0, 2.7]},  # log2(6) ~ 2.585
             )
             scatter_id = "plot-bayesian-landscape"
             self._register_plot(scatter_id, scatter_fig)

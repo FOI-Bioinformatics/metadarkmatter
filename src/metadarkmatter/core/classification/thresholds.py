@@ -158,3 +158,117 @@ def apply_classification_thresholds(
         result = pl.concat([result, off_target_rows], how="diagonal_relaxed")
 
     return result
+
+
+def apply_legacy_thresholds(
+    df: pl.DataFrame,
+    config: ScoringConfig,
+) -> pl.DataFrame:
+    """
+    Apply the hard-threshold cascade and write the result to a ``legacy_call`` column.
+
+    This preserves the original rule-based classification for side-by-side
+    comparison with the Bayesian-primary ``taxonomic_call``.  The logic is
+    identical to :func:`apply_classification_thresholds` but targets a
+    different output column and does not overwrite ``taxonomic_call``.
+
+    Required columns: same as :func:`apply_classification_thresholds`.
+
+    Args:
+        df: DataFrame with pre-computed classification metrics and a
+            ``taxonomic_call`` column (from the Bayesian classifier).
+        config: ScoringConfig with threshold values to apply.
+
+    Returns:
+        DataFrame with an additional ``legacy_call`` column.
+    """
+    eff = config.get_effective_thresholds()
+
+    # Inferred uncertainty breakpoints (continuous piecewise-linear)
+    inferred_known_break = 5.0 + eff["novelty_known_max"] * 0.5
+    inferred_species_break = (
+        inferred_known_break
+        + (eff["novelty_novel_species_max"] - eff["novelty_known_max"]) * 1.0
+    )
+
+    # Check which optional columns exist
+    has_genus = "genus_uncertainty" in df.columns
+    has_scope = "ambiguity_scope" in df.columns
+
+    # Build classification expression (same cascade as apply_classification_thresholds)
+    classification = (
+        # Rule 0: Identity gap check
+        pl.when(
+            (pl.col("identity_gap").is_not_null())
+            & (pl.col("num_ambiguous_hits") > 1)
+            & (pl.col("identity_gap") < config.identity_gap_ambiguous_max)
+        )
+        .then(pl.lit("Ambiguous"))
+    )
+
+    # Conserved Region and high uncertainty rules
+    if has_scope:
+        classification = classification.when(
+            (pl.col("placement_uncertainty") >= eff["uncertainty_conserved_min"])
+            & (pl.col("ambiguity_scope") == "across_genera")
+        ).then(pl.lit("Conserved Region"))
+
+    classification = (
+        classification
+        .when(pl.col("placement_uncertainty") >= eff["uncertainty_conserved_min"])
+        .then(pl.lit("Ambiguous"))
+        # Species boundary zone
+        .when(pl.col("placement_uncertainty") >= eff["uncertainty_novel_genus_max"])
+        .then(pl.lit("Species Boundary"))
+        # Known Species
+        .when(
+            (pl.col("novelty_index") < eff["novelty_known_max"])
+            & (pl.col("placement_uncertainty") < eff["uncertainty_known_max"])
+        )
+        .then(pl.lit("Known Species"))
+        # Rule 0b: Single-hit inferred uncertainty check
+        .when(
+            (pl.col("num_ambiguous_hits") <= 1)
+            & (pl.col("novelty_index") >= eff["novelty_novel_species_min"])
+            & (
+                pl.when(pl.col("novelty_index") < eff["novelty_known_max"])
+                .then(5.0 + pl.col("novelty_index") * 0.5)
+                .when(pl.col("novelty_index") < eff["novelty_novel_species_max"])
+                .then(inferred_known_break + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)
+                .when(pl.col("novelty_index") < eff["novelty_novel_genus_max"])
+                .then(inferred_species_break + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)
+                .otherwise(35.0)
+                >= pl.lit(config.single_hit_uncertainty_threshold)
+            )
+        )
+        .then(pl.lit("Ambiguous"))
+        # Novel Species
+        .when(
+            (pl.col("novelty_index") >= eff["novelty_novel_species_min"])
+            & (pl.col("novelty_index") < eff["novelty_novel_species_max"])
+            & (pl.col("placement_uncertainty") < eff["uncertainty_novel_species_max"])
+        )
+        .then(pl.lit("Novel Species"))
+    )
+
+    # Novel Genus with optional genus_uncertainty check
+    if has_genus:
+        classification = classification.when(
+            (pl.col("novelty_index") >= eff["novelty_novel_genus_min"])
+            & (pl.col("novelty_index") <= eff["novelty_novel_genus_max"])
+            & (pl.col("placement_uncertainty") < eff["uncertainty_novel_genus_max"])
+            & (
+                (pl.col("genus_uncertainty") < config.genus_uncertainty_ambiguous_min)
+                | (pl.col("num_secondary_genomes") <= 0)
+            )
+        ).then(pl.lit("Novel Genus"))
+    else:
+        classification = classification.when(
+            (pl.col("novelty_index") >= eff["novelty_novel_genus_min"])
+            & (pl.col("novelty_index") <= eff["novelty_novel_genus_max"])
+            & (pl.col("placement_uncertainty") < eff["uncertainty_novel_genus_max"])
+        ).then(pl.lit("Novel Genus"))
+
+    classification = classification.otherwise(pl.lit("Unclassified")).alias("legacy_call")
+
+    return df.with_columns([classification])

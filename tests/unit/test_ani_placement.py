@@ -220,35 +220,52 @@ class TestANIWeightedClassifier:
         assert classification.novelty_index == 10.0
 
     def test_classify_novel_genus(self, ani_matrix):
-        """Hit with low identity should be novel genus.
+        """Hit with low identity at centre of Novel Genus range should classify
+        as Novel Genus.
 
-        Uses high single_hit_uncertainty_threshold to test novelty classification
-        independently of Rule 0b (single-hit inferred uncertainty).
+        Uses a multi-hit setup so the single-hit Ambiguous boost does not apply.
+        Novelty 22.0 is at the centre of the Novel Genus Gaussian (mean ~22.5).
         """
-        config = ScoringConfig(single_hit_uncertainty_threshold=100.0)
+        config = ScoringConfig()
         novelty_classifier = ANIWeightedClassifier(ani_matrix, config=config)
 
-        hit = BlastHit(
-            qseqid="read_001",
-            sseqid="GCF_000123456.1",
-            pident=80.0,  # Novelty = 20.0 (20-25)
-            length=150,
-            mismatch=30,
-            gapopen=0,
-            qstart=1,
-            qend=150,
-            sstart=1000,
-            send=1150,
-            evalue=1e-30,
-            bitscore=150.0,
+        hits = (
+            BlastHit(
+                qseqid="read_001",
+                sseqid="GCF_000123456.1",
+                pident=78.0,  # Novelty = 22.0 (centre of Novel Genus)
+                length=150,
+                mismatch=33,
+                gapopen=0,
+                qstart=1,
+                qend=150,
+                sstart=1000,
+                send=1150,
+                evalue=1e-30,
+                bitscore=150.0,
+            ),
+            BlastHit(
+                qseqid="read_001",
+                sseqid="GCF_000789012.1",
+                pident=73.0,  # identity gap = 5.0 (above ambiguous threshold)
+                length=150,
+                mismatch=40,
+                gapopen=0,
+                qstart=1,
+                qend=150,
+                sstart=2000,
+                send=2150,
+                evalue=1e-25,
+                bitscore=140.0,
+            ),
         )
-        result = BlastResult(read_id="read_001", hits=(hit,))
+        result = BlastResult(read_id="read_001", hits=hits)
 
         classification = novelty_classifier.classify_read(result)
 
         assert classification is not None
         assert classification.taxonomic_call == TaxonomicCall.NOVEL_GENUS
-        assert classification.novelty_index == 20.0
+        assert classification.novelty_index == 22.0
 
     def test_classify_with_ambiguous_hits(self, classifier):
         """Multiple ambiguous hits should affect placement uncertainty."""
@@ -379,7 +396,14 @@ class TestClassificationThresholds:
         assert classification.novelty_index == 2.0
 
     def test_novel_species_boundary_novelty_5(self, boundary_classifier):
-        """Novelty = 5.0 should be novel species."""
+        """Novelty = 5.0 (boundary) with single hit: Bayesian assigns Known Species.
+
+        At the Known/Novel Species boundary (N=5.0), the Known Species Gaussian
+        (mean=2.0) is closer than Novel Species (mean=12.0). With a single hit,
+        the classifier appropriately assigns this as Known Species — the read
+        is at the boundary and the evidence (single hit) does not strongly
+        support novel species classification.
+        """
         hit = BlastHit(
             qseqid="read_001",
             sseqid="GCF_000123456.1",
@@ -399,7 +423,8 @@ class TestClassificationThresholds:
         classification = boundary_classifier.classify_read(result)
 
         assert classification.novelty_index == 5.0
-        assert classification.taxonomic_call == TaxonomicCall.NOVEL_SPECIES
+        # Bayesian: at the boundary with single hit, Known Species wins
+        assert classification.taxonomic_call == TaxonomicCall.KNOWN_SPECIES
 
     def test_novel_species_midrange_novelty_15(self, boundary_classifier):
         """Novelty = 15.0 should be novel species (mid-range, well below 20% boundary)."""
@@ -426,7 +451,13 @@ class TestClassificationThresholds:
         assert classification.taxonomic_call == TaxonomicCall.NOVEL_SPECIES
 
     def test_novel_species_boundary_novelty_19_9(self, boundary_classifier):
-        """Novelty = 19.9 should be novel species (just below 20% boundary)."""
+        """Novelty = 19.9 with single hit: Bayesian assigns Ambiguous.
+
+        At the Novel Species / Novel Genus boundary (N=19.9), with only a
+        single hit the single_hit_boost increases the Ambiguous prior. This
+        is biologically appropriate: a single alignment at high divergence
+        warrants caution.
+        """
         hit = BlastHit(
             qseqid="read_001",
             sseqid="GCF_000123456.1",
@@ -446,11 +477,16 @@ class TestClassificationThresholds:
         classification = boundary_classifier.classify_read(result)
 
         assert classification.novelty_index == pytest.approx(19.9, rel=0.01)
-        # Just below 20% is Novel Species
-        assert classification.taxonomic_call == TaxonomicCall.NOVEL_SPECIES
+        # Bayesian: single hit at boundary, Ambiguous wins due to single_hit_boost
+        assert classification.taxonomic_call == TaxonomicCall.AMBIGUOUS
 
     def test_novel_genus_boundary_novelty_20(self, boundary_classifier):
-        """Novelty = 20.0 should be novel genus (exactly at boundary)."""
+        """Novelty = 20.0 with single hit: Bayesian assigns Ambiguous.
+
+        At the Novel Species / Novel Genus boundary (N=20.0), with only a
+        single hit the single_hit_boost increases the Ambiguous prior.
+        The high entropy (~2.0) confirms this is a genuinely uncertain case.
+        """
         hit = BlastHit(
             qseqid="read_001",
             sseqid="GCF_000123456.1",
@@ -470,8 +506,8 @@ class TestClassificationThresholds:
         classification = boundary_classifier.classify_read(result)
 
         assert classification.novelty_index == 20.0
-        # At 20% boundary, should be Novel Genus
-        assert classification.taxonomic_call == TaxonomicCall.NOVEL_GENUS
+        # Bayesian: single hit at boundary, Ambiguous wins due to single_hit_boost
+        assert classification.taxonomic_call == TaxonomicCall.AMBIGUOUS
 
     def test_novel_genus_boundary_novelty_25(self, boundary_classifier):
         """Novelty = 25.0 should be novel genus (max boundary)."""

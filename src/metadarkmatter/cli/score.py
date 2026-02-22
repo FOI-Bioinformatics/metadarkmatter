@@ -41,9 +41,10 @@ from metadarkmatter.models.classification import TaxonomicSummary
 from metadarkmatter.models.config import ScoringConfig
 
 
-# GTDB-compatible threshold presets
-# Based on Parks et al. 2018, 2020 and GTDB methodology
+# Threshold presets for common use-cases.
+# Based on Parks et al. 2018, 2020 and GTDB methodology.
 THRESHOLD_PRESETS: dict[str, ScoringConfig] = {
+    "default": ScoringConfig(),  # built-in defaults (nucleotide mode)
     "gtdb-strict": ScoringConfig(
         # 95% species boundary (GTDB standard)
         novelty_known_max=5.0,
@@ -98,6 +99,12 @@ THRESHOLD_PRESETS: dict[str, ScoringConfig] = {
         novelty_novel_genus_min=15.0,
         novelty_novel_genus_max=25.0,
     ),
+    # Adaptive preset: intended for use with --adaptive-thresholds to auto-detect
+    # species boundary via GMM. Starts from conservative defaults.
+    "adaptive": ScoringConfig(
+        min_alignment_length=100,
+        min_alignment_fraction=0.3,
+    ),
 }
 
 
@@ -144,11 +151,12 @@ def validate_ani_genome_coverage(
     # Get ANI matrix genomes
     ani_genomes = set(ani_matrix.genomes)
 
-    # When representative mapping is active, map BLAST genomes to representatives
+    # When representative mapping is active, only check family genomes
+    # (those present in the mapping). Non-family genomes from broad databases
+    # are excluded to avoid inflating the denominator.
     if representative_mapping:
-        check_genomes = {
-            representative_mapping.get(g, g) for g in blast_genomes
-        }
+        family_blast_genomes = {g for g in blast_genomes if g in representative_mapping}
+        check_genomes = {representative_mapping[g] for g in family_blast_genomes}
     else:
         check_genomes = blast_genomes
 
@@ -319,10 +327,11 @@ def classify(
         None,
         "--preset",
         help=(
-            "Use predefined threshold preset: 'gtdb-strict' (95% ANI, AF>=50%), "
+            "Use predefined threshold preset: 'default', 'gtdb-strict' (95% ANI, AF>=50%), "
             "'gtdb-relaxed' (97% ANI), 'conservative' (narrower genus range), "
             "'literature-strict' (narrow genus, high confidence, AF>=50%), "
-            "'coverage-strict' (sigmoid coverage weighting)"
+            "'coverage-strict' (sigmoid coverage weighting), "
+            "'adaptive' (for use with --adaptive-thresholds)"
         ),
     ),
     alignment_mode: str = typer.Option(
@@ -456,6 +465,25 @@ def classify(
         ),
         min=0.0,
         max=1.0,
+    ),
+    config_file: Path | None = typer.Option(
+        None,
+        "--config",
+        help=(
+            "Path to YAML configuration file. Overrides default parameters. "
+            "Generate an editable template with: score export-config"
+        ),
+        exists=True,
+        dir_okay=False,
+    ),
+    include_legacy_scores: bool = typer.Option(
+        False,
+        "--include-legacy-scores",
+        help=(
+            "Include legacy sub-scores in output (alignment_quality, "
+            "identity_confidence, placement_confidence, discovery_score). "
+            "Off by default in the Bayesian-primary workflow."
+        ),
     ),
     quiet: bool = typer.Option(
         False,
@@ -645,8 +673,69 @@ def classify(
             "[bold]Uncertainty mode: max[/bold] - using maximum ANI to any competing genome"
         )
 
-    # Initialize configuration (preset or custom options)
-    if preset:
+    # Deprecation warnings for flags now superseded by --config YAML
+    _deprecated_flags = {
+        "bitscore_threshold": (bitscore_threshold, 95.0, "--bitscore-threshold"),
+        "min_alignment_length": (min_alignment_length, 100, "--min-alignment-length"),
+        "min_alignment_fraction": (min_alignment_fraction, 0.3, "--min-alignment-fraction"),
+        "coverage_weight_mode": (coverage_weight_mode, "linear", "--coverage-weight-mode"),
+        "coverage_weight_strength": (coverage_weight_strength, 0.5, "--coverage-weight-strength"),
+        "uncertainty_mode": (uncertainty_mode, "second", "--uncertainty-mode"),
+        "single_hit_uncertainty_threshold": (single_hit_uncertainty_threshold, 10.0, "--single-hit-threshold"),
+        "family_ratio_threshold": (family_ratio_threshold, 0.8, "--family-ratio-threshold"),
+    }
+    if config_file:
+        for key, (val, default, flag_name) in _deprecated_flags.items():
+            if val != default:
+                out.print(
+                    f"[yellow]Warning: {flag_name} is deprecated when using --config. "
+                    f"CLI flags override YAML values.[/yellow]"
+                )
+
+    # --bayesian is now always-on; warn if explicitly passed
+    if bayesian:
+        out.print(
+            "[yellow]Warning: --bayesian is deprecated. Bayesian posteriors are now "
+            "computed by default. Use --include-legacy-scores for the old sub-scores.[/yellow]"
+        )
+
+    # Initialize configuration: --config > CLI flags > preset > defaults
+    if config_file:
+        try:
+            config = ScoringConfig.from_yaml(config_file)
+            out.print(f"[dim]Loaded config from: {config_file}[/dim]")
+        except Exception as e:
+            console.print(f"[red]Error loading config file: {e}[/red]")
+            raise typer.Exit(code=1) from None
+
+        # CLI flags override YAML values
+        overrides: dict[str, Any] = {}
+        if alignment_mode_lower != "nucleotide":
+            overrides["alignment_mode"] = alignment_mode_lower
+        if bitscore_threshold != 95.0:
+            overrides["bitscore_threshold_pct"] = bitscore_threshold
+        if min_alignment_length != 100:
+            overrides["min_alignment_length"] = min_alignment_length
+        if min_alignment_fraction != 0.3:
+            overrides["min_alignment_fraction"] = min_alignment_fraction
+        if coverage_weight_mode != "linear":
+            overrides["coverage_weight_mode"] = coverage_weight_mode
+        if coverage_weight_strength != 0.5:
+            overrides["coverage_weight_strength"] = coverage_weight_strength
+        if uncertainty_mode_lower != "second":
+            overrides["uncertainty_mode"] = uncertainty_mode_lower
+        if single_hit_uncertainty_threshold != 10.0:
+            overrides["single_hit_uncertainty_threshold"] = single_hit_uncertainty_threshold
+        if target_family is not None:
+            overrides["target_family"] = target_family
+        if family_ratio_threshold != 0.8:
+            overrides["family_ratio_threshold"] = family_ratio_threshold
+        if include_legacy_scores:
+            overrides["include_legacy_scores"] = True
+        if overrides:
+            config = config.model_copy(update=overrides)
+
+    elif preset:
         preset_lower = preset.lower()
         if preset_lower not in THRESHOLD_PRESETS:
             console.print(
@@ -678,6 +767,7 @@ def classify(
                 single_hit_uncertainty_threshold=single_hit_uncertainty_threshold,
                 target_family=target_family,
                 family_ratio_threshold=family_ratio_threshold,
+                include_legacy_scores=include_legacy_scores,
             )
     else:
         config = ScoringConfig(
@@ -691,6 +781,7 @@ def classify(
             single_hit_uncertainty_threshold=single_hit_uncertainty_threshold,
             target_family=target_family,
             family_ratio_threshold=family_ratio_threshold,
+            include_legacy_scores=include_legacy_scores,
         )
 
     # Log alignment filter settings if non-default
@@ -1008,21 +1099,6 @@ def classify(
             console.print_exception()
         raise typer.Exit(code=1) from None
 
-    # Apply Bayesian posterior probabilities if requested
-    if bayesian and classification_df is not None:
-        from metadarkmatter.core.classification.bayesian import BayesianClassifier
-
-        bayesian_clf = BayesianClassifier(config)
-        classification_df = bayesian_clf.classify_dataframe(classification_df)
-        # Re-write output with Bayesian columns included
-        if num_classified > 0:
-            write_dataframe(classification_df, output, output_format)
-        out.print("[green]Bayesian posteriors added to output[/green]")
-    elif bayesian and classification_df is None:
-        out.print(
-            "[yellow]Warning: --bayesian not supported with --streaming mode[/yellow]"
-        )
-
     out.print(f"[green]Classified {num_classified:,} reads[/green]\n")
 
     # Generate summary if requested
@@ -1072,6 +1148,62 @@ def classify(
     if summary:
         out.print(f"[bold green]Summary written to:[/bold green] {summary}")
     out.print()
+
+
+@app.command(name="export-config")
+def export_config(
+    output: Path = typer.Option(
+        ...,
+        "--output",
+        "-o",
+        help="Output path for the YAML config file",
+    ),
+    preset: str | None = typer.Option(
+        None,
+        "--preset",
+        "-p",
+        help=(
+            "Base preset to export: "
+            + ", ".join(f"'{k}'" for k in THRESHOLD_PRESETS)
+            + ". Defaults to built-in defaults."
+        ),
+    ),
+) -> None:
+    """
+    Export an editable YAML configuration file.
+
+    Generates a YAML file from the specified preset (or built-in defaults)
+    that can be customized and passed to ``score classify --config``.
+
+    Example:
+
+        # Export default config
+        metadarkmatter score export-config --output my_config.yaml
+
+        # Export from a preset
+        metadarkmatter score export-config --preset gtdb-strict --output gtdb.yaml
+
+        # Edit and use
+        metadarkmatter score classify --config my_config.yaml ...
+    """
+    if preset:
+        preset_lower = preset.lower()
+        if preset_lower not in THRESHOLD_PRESETS:
+            console.print(
+                f"[red]Error: Unknown preset '{preset}'. "
+                f"Available: {', '.join(THRESHOLD_PRESETS.keys())}[/red]"
+            )
+            raise typer.Exit(code=1) from None
+        config = THRESHOLD_PRESETS[preset_lower]
+    else:
+        config = ScoringConfig()
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    config.to_yaml(output)
+
+    source = f"preset '{preset_lower}'" if preset else "built-in defaults"
+    console.print(f"[green]Config exported from {source} to:[/green] {output}")
+    console.print("[dim]Edit the file and use with: score classify --config <path>[/dim]")
 
 
 @app.command(name="batch")

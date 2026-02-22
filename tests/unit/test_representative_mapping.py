@@ -930,3 +930,391 @@ class TestSelectRepresentativesCLI:
         family_idx = cols.index("family")
         rep_idx = cols.index("representative")
         assert rep_idx == family_idx + 1
+
+
+# =============================================================================
+# 8. Family validation with representative_mapping (broad database scenario)
+# =============================================================================
+
+
+class TestFamilyValidationWithRepresentativeMapping:
+    """Tests for family validation when using representative_mapping.
+
+    Scenario: broad alignment database with GTDB representatives for all
+    bacteria plus all genomes within the focus family. The ANI matrix
+    contains only family representatives, but the representative_mapping
+    keys cover all family genomes. Non-family genomes (from the broad
+    database) should be treated as external, while non-representative
+    family genomes should be treated as in-family.
+    """
+
+    @pytest.fixture
+    def broad_db_setup(self) -> dict:
+        """Set up a broad-database scenario with family and non-family genomes.
+
+        Family genomes: GCF_F01 (rep), GCF_F02, GCF_F03 (rep), GCF_F04
+        Non-family genomes: GCF_EXT1, GCF_EXT2 (not in mapping)
+        ANI matrix: GCF_F01 and GCF_F03 only (representatives)
+        """
+        representative_mapping = {
+            "GCF_F01": "GCF_F01",  # rep for species A
+            "GCF_F02": "GCF_F01",  # non-rep, maps to GCF_F01
+            "GCF_F03": "GCF_F03",  # rep for species B
+            "GCF_F04": "GCF_F03",  # non-rep, maps to GCF_F03
+        }
+
+        ani_dict = {
+            "GCF_F01": {"GCF_F03": 82.0},
+            "GCF_F03": {"GCF_F01": 82.0},
+        }
+
+        # BLAST hits: reads hit both family and non-family genomes.
+        # Family genomes get higher bitscores so reads are not off-target.
+        blast_rows = []
+        for read_idx in range(3):
+            # Hits to family genomes (high bitscore)
+            for genome, bitscore, pident in [
+                ("GCF_F01", 300.0, 98.0),
+                ("GCF_F02", 295.0, 97.5),
+                ("GCF_F03", 280.0, 95.0),
+                ("GCF_F04", 275.0, 94.5),
+            ]:
+                blast_rows.append({
+                    "qseqid": f"read_{read_idx:03d}",
+                    "sseqid": f"{genome}|contig_1",
+                    "pident": pident,
+                    "length": 200,
+                    "mismatch": int(200 * (1 - pident / 100)),
+                    "gapopen": 0,
+                    "qstart": 1,
+                    "qend": 200,
+                    "sstart": 500,
+                    "send": 700,
+                    "evalue": 1e-40,
+                    "bitscore": bitscore,
+                    "genome_name": genome,
+                })
+            # Hits to non-family genomes (lower bitscore)
+            for genome, bitscore, pident in [
+                ("GCF_EXT1", 200.0, 85.0),
+                ("GCF_EXT2", 180.0, 82.0),
+            ]:
+                blast_rows.append({
+                    "qseqid": f"read_{read_idx:03d}",
+                    "sseqid": f"{genome}|contig_1",
+                    "pident": pident,
+                    "length": 200,
+                    "mismatch": int(200 * (1 - pident / 100)),
+                    "gapopen": 0,
+                    "qstart": 1,
+                    "qend": 200,
+                    "sstart": 500,
+                    "send": 700,
+                    "evalue": 1e-20,
+                    "bitscore": bitscore,
+                    "genome_name": genome,
+                })
+
+        blast_df = pl.DataFrame(blast_rows)
+
+        return {
+            "representative_mapping": representative_mapping,
+            "ani_dict": ani_dict,
+            "blast_df": blast_df,
+        }
+
+    def test_non_rep_family_genomes_treated_as_in_family(
+        self, broad_db_setup: dict
+    ) -> None:
+        """Non-representative family genomes should be in-family, not external.
+
+        When representative_mapping is provided, its keys define the set of
+        in-family genomes. GCF_F02 and GCF_F04 are in the mapping so they
+        should be treated as in-family even though they are not in the ANI
+        matrix directly.
+        """
+        from metadarkmatter.core.classification.classifiers.vectorized import (
+            VectorizedClassifier,
+        )
+        from metadarkmatter.models.config import ScoringConfig
+
+        ani_matrix = ANIMatrix(broad_db_setup["ani_dict"])
+        config = ScoringConfig(target_family="f__TestFamily")
+        classifier = VectorizedClassifier(
+            ani_matrix=ani_matrix,
+            config=config,
+            representative_mapping=broad_db_setup["representative_mapping"],
+        )
+
+        result = classifier.classify_file(broad_db_setup["blast_df"])
+
+        # No reads should be Off-target because all reads have stronger
+        # in-family hits than external hits
+        off_target = result.filter(pl.col("taxonomic_call") == "Off-target")
+        assert len(off_target) == 0, (
+            f"Expected no Off-target reads, got {len(off_target)}. "
+            "Non-rep family genomes may be incorrectly treated as external."
+        )
+
+    def test_non_family_genomes_treated_as_external(
+        self, broad_db_setup: dict
+    ) -> None:
+        """Non-family genomes (not in representative_mapping) should be external.
+
+        GCF_EXT1 and GCF_EXT2 are not keys in the representative_mapping,
+        so they should be treated as external hits for family validation.
+        """
+        from metadarkmatter.core.classification.classifiers.vectorized import (
+            VectorizedClassifier,
+        )
+        from metadarkmatter.models.config import ScoringConfig
+
+        ani_matrix = ANIMatrix(broad_db_setup["ani_dict"])
+        config = ScoringConfig(target_family="f__TestFamily")
+        classifier = VectorizedClassifier(
+            ani_matrix=ani_matrix,
+            config=config,
+            representative_mapping=broad_db_setup["representative_mapping"],
+        )
+
+        result = classifier.classify_file(broad_db_setup["blast_df"])
+
+        # Family validation columns should exist (family validation was active)
+        assert "family_bitscore_ratio" in result.columns
+        assert "in_family_hit_fraction" in result.columns
+
+        # in_family_hit_fraction should reflect 4 family hits out of 6 total
+        fractions = result["in_family_hit_fraction"].to_list()
+        expected_fraction = 4.0 / 6.0
+        for frac in fractions:
+            assert abs(frac - expected_fraction) < 0.01, (
+                f"Expected in_family_hit_fraction ~{expected_fraction:.3f}, got {frac}"
+            )
+
+    def test_fallback_to_ani_matrix_without_mapping(
+        self, broad_db_setup: dict
+    ) -> None:
+        """Without representative_mapping, in-family is defined by ANI matrix membership.
+
+        This tests backwards compatibility: when no representative_mapping is
+        provided, the original behavior (ANI matrix genomes = in-family) applies.
+        """
+        from metadarkmatter.core.classification.classifiers.vectorized import (
+            VectorizedClassifier,
+        )
+        from metadarkmatter.models.config import ScoringConfig
+
+        ani_matrix = ANIMatrix(broad_db_setup["ani_dict"])
+        config = ScoringConfig(target_family="f__TestFamily")
+        classifier = VectorizedClassifier(
+            ani_matrix=ani_matrix,
+            config=config,
+            representative_mapping=None,  # No mapping
+        )
+
+        result = classifier.classify_file(broad_db_setup["blast_df"])
+
+        # Without mapping, only GCF_F01 and GCF_F03 (ANI matrix genomes)
+        # are in-family. GCF_F02, GCF_F04, GCF_EXT1, GCF_EXT2 are all external.
+        # in_family_hit_fraction should be 2/6
+        fractions = result["in_family_hit_fraction"].to_list()
+        expected_fraction = 2.0 / 6.0
+        for frac in fractions:
+            assert abs(frac - expected_fraction) < 0.01, (
+                f"Without mapping, expected in_family_hit_fraction ~{expected_fraction:.3f}, got {frac}"
+            )
+
+    def test_off_target_when_external_hits_dominate(self) -> None:
+        """Reads with better external hits should be classified as Off-target.
+
+        Create a scenario where external genomes have higher bitscores
+        than family genomes, triggering the off-target threshold.
+        """
+        from metadarkmatter.core.classification.classifiers.vectorized import (
+            VectorizedClassifier,
+        )
+        from metadarkmatter.models.config import ScoringConfig
+
+        representative_mapping = {
+            "GCF_F01": "GCF_F01",
+        }
+        ani_dict = {
+            "GCF_F01": {"GCF_F01": 100.0},
+        }
+
+        # Read has a weak family hit and a strong external hit
+        blast_df = pl.DataFrame([
+            {
+                "qseqid": "read_001",
+                "sseqid": "GCF_F01|contig_1",
+                "pident": 80.0,
+                "length": 200,
+                "mismatch": 40,
+                "gapopen": 0,
+                "qstart": 1,
+                "qend": 200,
+                "sstart": 500,
+                "send": 700,
+                "evalue": 1e-20,
+                "bitscore": 100.0,
+                "genome_name": "GCF_F01",
+            },
+            {
+                "qseqid": "read_001",
+                "sseqid": "GCF_EXT1|contig_1",
+                "pident": 99.0,
+                "length": 200,
+                "mismatch": 2,
+                "gapopen": 0,
+                "qstart": 1,
+                "qend": 200,
+                "sstart": 500,
+                "send": 700,
+                "evalue": 1e-80,
+                "bitscore": 350.0,
+                "genome_name": "GCF_EXT1",
+            },
+        ])
+
+        ani_matrix = ANIMatrix(ani_dict)
+        config = ScoringConfig(target_family="f__TestFamily", family_ratio_threshold=0.8)
+        classifier = VectorizedClassifier(
+            ani_matrix=ani_matrix,
+            config=config,
+            representative_mapping=representative_mapping,
+        )
+
+        result = classifier.classify_file(blast_df)
+
+        # bitscore ratio = 100/350 = 0.286, well below 0.8 threshold
+        assert result["taxonomic_call"][0] == "Off-target"
+
+
+# =============================================================================
+# 9. validate_ani_genome_coverage with broad database
+# =============================================================================
+
+
+class TestValidateAniGenomeCoverageBroadDatabase:
+    """Tests for validate_ani_genome_coverage with broad databases.
+
+    When using a broad alignment database (all bacteria + focus family),
+    the BLAST file contains hits to both family and non-family genomes.
+    Only family genomes (those in representative_mapping) should be
+    checked against the ANI matrix.
+    """
+
+    def _write_blast_file(
+        self, path: Path, genomes: list[str]
+    ) -> None:
+        """Write a minimal BLAST file with hits to the given genomes."""
+        rows = []
+        for i, genome in enumerate(genomes):
+            rows.append({
+                "qseqid": f"read_{i:03d}",
+                "sseqid": f"{genome}|contig_1",
+                "pident": 98.0,
+                "length": 150,
+                "mismatch": 3,
+                "gapopen": 0,
+                "qstart": 1,
+                "qend": 150,
+                "sstart": 1000,
+                "send": 1150,
+                "evalue": 1e-50,
+                "bitscore": 250.0,
+            })
+        df = pl.DataFrame(rows)
+        df.write_csv(path, separator="\t", include_header=False)
+
+    def test_broad_db_excludes_non_family_genomes(self, tmp_path: Path) -> None:
+        """Non-family genomes should be excluded from coverage calculation.
+
+        When representative_mapping is provided, only genomes present as
+        keys in the mapping (family genomes) should be checked. External
+        genomes from the broad database should not inflate the denominator.
+        """
+        from metadarkmatter.cli.score import validate_ani_genome_coverage
+
+        ani_dict = {
+            "GCF_REP1": {"GCF_REP2": 90.0},
+            "GCF_REP2": {"GCF_REP1": 90.0},
+        }
+        ani_matrix = ANIMatrix(ani_dict)
+
+        # BLAST file: 2 family genomes + 3 non-family genomes
+        blast_path = tmp_path / "blast.tsv"
+        self._write_blast_file(
+            blast_path,
+            ["GCF_FAM1", "GCF_FAM2", "GCF_EXT1", "GCF_EXT2", "GCF_EXT3"],
+        )
+
+        # Only family genomes are in the mapping
+        rep_mapping = {
+            "GCF_FAM1": "GCF_REP1",
+            "GCF_FAM2": "GCF_REP2",
+        }
+
+        matched, total, pct, missing = validate_ani_genome_coverage(
+            blast_path, ani_matrix, representative_mapping=rep_mapping,
+        )
+
+        # Only 2 family genomes checked, both map to representatives in ANI
+        assert total == 2, f"Expected 2 family genomes, got {total}"
+        assert matched == 2
+        assert pct == 100.0
+        assert len(missing) == 0
+
+    def test_broad_db_without_mapping_includes_all(self, tmp_path: Path) -> None:
+        """Without mapping, all genomes are checked (backwards compatible).
+
+        This verifies that the fix does not break the no-mapping case.
+        """
+        from metadarkmatter.cli.score import validate_ani_genome_coverage
+
+        ani_dict = {
+            "GCF_REP1": {"GCF_REP2": 90.0},
+            "GCF_REP2": {"GCF_REP1": 90.0},
+        }
+        ani_matrix = ANIMatrix(ani_dict)
+
+        blast_path = tmp_path / "blast.tsv"
+        self._write_blast_file(
+            blast_path,
+            ["GCF_FAM1", "GCF_FAM2", "GCF_EXT1"],
+        )
+
+        matched, total, pct, missing = validate_ani_genome_coverage(
+            blast_path, ani_matrix, representative_mapping=None,
+        )
+
+        # All 3 genomes checked, none in ANI matrix
+        assert total == 3
+        assert matched == 0
+        assert pct == 0.0
+
+    def test_broad_db_empty_blast_genomes_in_mapping(self, tmp_path: Path) -> None:
+        """When no BLAST genomes are in the mapping, coverage should be 0/0."""
+        from metadarkmatter.cli.score import validate_ani_genome_coverage
+
+        ani_dict = {
+            "GCF_REP1": {"GCF_REP1": 100.0},
+        }
+        ani_matrix = ANIMatrix(ani_dict)
+
+        # BLAST file has only non-family genomes
+        blast_path = tmp_path / "blast.tsv"
+        self._write_blast_file(blast_path, ["GCF_EXT1", "GCF_EXT2"])
+
+        rep_mapping = {
+            "GCF_FAM1": "GCF_REP1",  # No BLAST hits to family genomes
+        }
+
+        matched, total, pct, missing = validate_ani_genome_coverage(
+            blast_path, ani_matrix, representative_mapping=rep_mapping,
+        )
+
+        # No family genomes in BLAST file
+        assert total == 0
+        assert matched == 0
+        assert pct == 0.0

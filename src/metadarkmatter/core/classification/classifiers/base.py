@@ -11,6 +11,11 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
+from metadarkmatter.core.classification.bayesian import (
+    BayesianClassifier,
+    apply_stage2_refinement,
+    entropy_to_confidence,
+)
 from metadarkmatter.core.constants import (
     calculate_alignment_quality,
     calculate_confidence_score,
@@ -25,6 +30,9 @@ from metadarkmatter.models.classification import (
     TaxonomicCall,
 )
 from metadarkmatter.models.config import ScoringConfig
+
+# Map from string category names to TaxonomicCall enum members
+_CATEGORY_TO_ENUM: dict[str, TaxonomicCall] = {tc.value: tc for tc in TaxonomicCall}
 
 if TYPE_CHECKING:
     from metadarkmatter.core.aai_matrix_builder import AAIMatrix
@@ -71,6 +79,9 @@ class ANIWeightedClassifier:
         # Store effective thresholds based on alignment mode
         # This allows protein mode to use wider novelty thresholds
         self._effective_thresholds = self.config.get_effective_thresholds()
+
+        # Bayesian classifier for primary classification
+        self._bayesian = BayesianClassifier(self.config)
 
     def classify_read(
         self,
@@ -175,40 +186,49 @@ class ANIWeightedClassifier:
             ]
             aai_uncertainty = self._calculate_aai_uncertainty(best_genome, competing_genomes)
 
-        # Determine taxonomic classification
-        taxonomic_call = self._classify_by_thresholds(
-            novelty_index,
-            placement_uncertainty,
-            num_ambiguous_hits=num_ambiguous_hits,
-            genus_uncertainty=genus_uncertainty,
-            num_genus_hits=num_genus_hits,
-            identity_gap=identity_gap,
-            aai_uncertainty=aai_uncertainty,
-        )
-
-        # Calculate confidence score using margin-based calculation
-        # Use effective thresholds to account for protein vs nucleotide mode
-        # Scaling parameters are also mode-specific for proper confidence calculation
-        eff = self._effective_thresholds
-        confidence_score = calculate_confidence_score(
+        # Primary classification via Bayesian posteriors
+        posterior = self._bayesian.compute_posteriors(
             novelty_index=novelty_index,
             placement_uncertainty=placement_uncertainty,
-            num_ambiguous_hits=num_ambiguous_hits,
+            num_hits=num_ambiguous_hits,
             identity_gap=identity_gap,
-            top_hit_identity=top_hit_identity,
-            taxonomic_call=taxonomic_call.value,
-            novelty_known_max=eff["novelty_known_max"],
-            novelty_novel_species_max=eff["novelty_novel_species_max"],
-            novelty_novel_genus_max=eff["novelty_novel_genus_max"],
-            uncertainty_confident_max=eff["uncertainty_known_max"],
-            # Mode-specific scaling parameters
-            margin_divisor_known=eff["margin_divisor_known"],
-            margin_divisor_novel_species=eff["margin_divisor_novel_species"],
-            margin_divisor_novel_genus=eff["margin_divisor_novel_genus"],
-            identity_gap_thresholds=eff["identity_gap_thresholds"],
-            identity_score_base=eff["identity_score_base"],
-            identity_score_range=eff["identity_score_range"],
         )
+
+        # Stage 2 discrete refinement (scalar version)
+        import numpy as np
+        refined_array = apply_stage2_refinement(
+            [posterior.map_category],
+            genus_uncertainty=np.array([genus_uncertainty or 0.0]),
+            num_secondary=(
+                np.array([num_genus_hits - 1]) if num_genus_hits is not None and num_genus_hits > 1
+                else np.array([0])
+            ),
+            genus_uncertainty_threshold=self.config.genus_uncertainty_ambiguous_min,
+        )
+        bayesian_call = str(refined_array[0])
+
+        # AAI-based override for genus-level classification
+        # AAI is more reliable than ANI at high divergence (>20% novelty)
+        eff = self._effective_thresholds
+        if (
+            aai_uncertainty is not None
+            and self.config.use_aai_for_genus
+            and eff["novelty_novel_genus_min"] <= novelty_index <= eff["novelty_novel_genus_max"]
+            and placement_uncertainty < eff["uncertainty_novel_genus_max"]
+        ):
+            aai_genus_uncertainty_low = 100.0 - self.config.aai_genus_boundary_high
+            aai_genus_uncertainty_high = 100.0 - self.config.aai_genus_boundary_low
+            if aai_uncertainty < aai_genus_uncertainty_low:
+                bayesian_call = "Novel Species"
+            elif aai_uncertainty <= aai_genus_uncertainty_high:
+                bayesian_call = "Ambiguous Within Genus"
+            else:
+                bayesian_call = "Novel Genus"
+
+        taxonomic_call = _CATEGORY_TO_ENUM[bayesian_call]
+
+        # Confidence score from posterior entropy
+        confidence_score = float(entropy_to_confidence(posterior.entropy))
 
         # Initialize enhanced scoring fields
         inferred_uncertainty: float | None = None
