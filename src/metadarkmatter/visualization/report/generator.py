@@ -104,6 +104,16 @@ except ImportError:
     __version__ = "0.1.0"
 
 
+def _safe_float(value: object) -> float | None:
+    """Convert a value to float, returning None for missing/unconvertible values."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
 @dataclass
 class TaxonomicSummary:
     """Summary statistics from classification results."""
@@ -2161,7 +2171,7 @@ class ReportGenerator:
 
             # Get additional columns from dataframe
             ambiguous_hits = row.get("num_ambiguous_hits", 0)
-            identity_gap = row.get("identity_gap")
+            identity_gap = _safe_float(row.get("identity_gap"))
             # Format identity_gap: use absolute value, show "-" if not available
             if identity_gap is None:
                 identity_gap_str = "-"
@@ -2174,14 +2184,16 @@ class ReportGenerator:
                 is_novel = call in ("Novel Species", "Novel Genus")
 
             # Enhanced scoring fields (with defaults for when not available)
+            # Values may be None, float, or string (when Polars infers
+            # mostly-empty columns as Utf8), so coerce before formatting.
             uncertainty_type = row.get("uncertainty_type", "-")
-            inferred_unc = row.get("inferred_uncertainty")
+            inferred_unc = _safe_float(row.get("inferred_uncertainty"))
             inferred_unc_str = "-" if inferred_unc is None else f"{inferred_unc:.1f}"
-            discovery = row.get("discovery_score")
+            discovery = _safe_float(row.get("discovery_score"))
             discovery_str = "-" if discovery is None else f"{discovery:.1f}"
-            id_conf = row.get("identity_confidence")
+            id_conf = _safe_float(row.get("identity_confidence"))
             id_conf_str = "-" if id_conf is None else f"{id_conf:.1f}"
-            pl_conf = row.get("placement_confidence")
+            pl_conf = _safe_float(row.get("placement_confidence"))
             pl_conf_str = "-" if pl_conf is None else f"{pl_conf:.1f}"
 
             rows_html += TABLE_ROW_TEMPLATE.format(
