@@ -364,7 +364,7 @@ class VectorizedClassifier:
             if not off_target_reads.is_empty():
                 off_target_read_ids = set(off_target_reads["qseqid"].to_list())
 
-                off_target_df = off_target_reads.select([
+                off_target_cols = [
                     pl.col("qseqid").alias("read_id"),
                     pl.col("external_best_genome").fill_null("unknown").alias("best_match_genome"),
                     pl.col("external_best_identity").alias("top_hit_identity"),
@@ -382,16 +382,24 @@ class VectorizedClassifier:
                     pl.lit(False).alias("low_confidence"),
                     pl.lit(None).cast(pl.Float64).alias("inferred_uncertainty"),
                     pl.lit("none").alias("uncertainty_type"),
-                    pl.lit(0.0).alias("alignment_quality"),
-                    pl.lit(0.0).alias("identity_confidence"),
-                    pl.lit(0.0).alias("placement_confidence"),
-                    pl.lit(None).cast(pl.Float64).alias("discovery_score"),
                     pl.col("family_bitscore_ratio"),
                     pl.col("family_identity_gap"),
                     pl.col("in_family_hit_fraction"),
                     pl.col("external_best_genome"),
                     pl.col("external_best_identity"),
-                ])
+                ]
+
+                # Only include legacy score columns when they are
+                # present in the classified reads (include_legacy_scores).
+                if self.config.include_legacy_scores:
+                    off_target_cols.extend([
+                        pl.lit(0.0).alias("alignment_quality"),
+                        pl.lit(0.0).alias("identity_confidence"),
+                        pl.lit(0.0).alias("placement_confidence"),
+                        pl.lit(None).cast(pl.Float64).alias("discovery_score"),
+                    ])
+
+                off_target_df = off_target_reads.select(off_target_cols)
 
                 # Keep only in-family hits for non-off-target reads
                 df = df.filter(

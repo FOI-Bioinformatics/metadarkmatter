@@ -365,8 +365,20 @@ class ReportGenerator:
             conserved_regions + unclassified + off_target
         )
 
-        # Check for enhanced scoring columns
-        has_enhanced_scoring = "alignment_quality" in self.df.columns
+        # Check for enhanced scoring columns.  The column must exist AND
+        # have non-null numeric data for classified (non-Off-target) reads;
+        # Off-target rows always carry placeholder zeros which should not
+        # trigger the "Discovery Scores" tab.
+        has_enhanced_scoring = False
+        if "alignment_quality" in self.df.columns:
+            classified_df = self.df.filter(pl.col("taxonomic_call") != "Off-target")
+            aq_col = classified_df["alignment_quality"]
+            # Cast to Float64 in case Polars inferred String from CSV
+            try:
+                aq_col = aq_col.cast(pl.Float64, strict=False)
+            except Exception:
+                pass
+            has_enhanced_scoring = aq_col.drop_nulls().len() > 0
         has_inferred_uncertainty = "inferred_uncertainty" in self.df.columns
 
         # Calculate single-hit statistics
