@@ -27,8 +27,12 @@ VALID_TAXONOMIC_CALLS = frozenset({
     "Known Species",
     "Novel Species",
     "Novel Genus",
-    "Conserved Region",
+    "Species Boundary",
     "Ambiguous",
+    "Ambiguous Within Genus",
+    "Conserved Region",
+    "Unclassified",
+    "Off-target",
 })
 
 REQUIRED_CLASSIFICATION_COLUMNS = frozenset({

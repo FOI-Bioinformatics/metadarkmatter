@@ -273,6 +273,13 @@ class BayesianClassifier:
         self._novelty_sigmas = np.array([p.novelty_sigma for p in params])
         self._uncertainty_sigmas = np.array([p.uncertainty_sigma for p in params])
 
+        # Log-normalization constants for proper 2D Gaussian PDFs.
+        # Without these, broad categories (large sigma) get artificially
+        # inflated likelihoods relative to narrow categories.
+        self._log_norms = -np.log(
+            2.0 * np.pi * self._novelty_sigmas * self._uncertainty_sigmas
+        )
+
         # Prior array from config
         bay = self.config.bayesian
         self._priors = np.array([
@@ -326,7 +333,9 @@ class BayesianClassifier:
         for i, params in enumerate(self._category_params):
             z_n = (novelty_index - params.novelty_mean) / params.novelty_sigma
             z_u = (placement_uncertainty - params.uncertainty_mean) / params.uncertainty_sigma
-            likelihoods[i] = np.exp(-0.5 * (z_n ** 2 + z_u ** 2))
+            likelihoods[i] = np.exp(
+                self._log_norms[i] - 0.5 * (z_n ** 2 + z_u ** 2)
+            )
 
         # Prior modulation (multiply into effective priors)
         priors = self._priors.copy()
@@ -534,7 +543,7 @@ class BayesianClassifier:
         z_n = (novelty[:, np.newaxis] - self._novelty_means[np.newaxis, :]) / self._novelty_sigmas[np.newaxis, :]
         z_u = (uncertainty[:, np.newaxis] - self._uncertainty_means[np.newaxis, :]) / self._uncertainty_sigmas[np.newaxis, :]
 
-        log_likes = -0.5 * (z_n ** 2 + z_u ** 2)
+        log_likes = self._log_norms[np.newaxis, :] - 0.5 * (z_n ** 2 + z_u ** 2)
         likelihoods = np.exp(log_likes)
 
         # --- Prior modulation ---
