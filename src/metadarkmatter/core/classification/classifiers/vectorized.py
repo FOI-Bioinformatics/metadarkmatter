@@ -22,6 +22,7 @@ from metadarkmatter.core.classification.bayesian import (
     entropy_to_confidence,
 )
 from metadarkmatter.core.constants import (
+    UNKNOWN_GENOME,
     calculate_confidence_score,
 )
 from metadarkmatter.core.io_utils import write_dataframe, write_dataframe_append
@@ -327,7 +328,20 @@ class VectorizedClassifier:
                     external_hits
                     .sort(["qseqid", "bitscore"], descending=[False, True])
                     .group_by("qseqid")
-                    .agg(pl.col("genome_name").first().alias("external_best_genome"))
+                    .agg([
+                        pl.col("genome_name").first().alias("external_best_genome"),
+                        pl.col("sseqid").first().alias("_ext_sseqid"),
+                    ])
+                    # Use raw sseqid as fallback when genome_name is "unknown"
+                    # (happens with external alignments where unmapped contigs
+                    # have no ID mapping entry)
+                    .with_columns(
+                        pl.when(pl.col("external_best_genome") == UNKNOWN_GENOME)
+                        .then(pl.col("_ext_sseqid"))
+                        .otherwise(pl.col("external_best_genome"))
+                        .alias("external_best_genome")
+                    )
+                    .drop("_ext_sseqid")
                 )
             else:
                 external_best_per_read = pl.DataFrame(

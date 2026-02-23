@@ -1974,6 +1974,71 @@ class ReportGenerator:
         off_target_pct = (off_target / total * 100) if total > 0 else 0.0
         validated_pct = 100.0 - off_target_pct
 
+        # Build external genomes breakdown table from off-target reads
+        external_families_table = ""
+        if (
+            "external_best_genome" in self.df.columns
+            and "taxonomic_call" in self.df.columns
+        ):
+            off_target_df = self.df.filter(
+                pl.col("taxonomic_call") == "Off-target"
+            )
+            if len(off_target_df) > 0:
+                ext_col = "external_best_genome"
+                ident_col = "external_best_identity"
+
+                # Group by external genome, count reads and mean identity
+                agg_cols = [pl.len().alias("read_count")]
+                has_identity = ident_col in off_target_df.columns
+                if has_identity:
+                    agg_cols.append(
+                        pl.col(ident_col).mean().alias("mean_identity")
+                    )
+
+                ext_summary = (
+                    off_target_df
+                    .with_columns(
+                        pl.col(ext_col).fill_null("unknown").alias(ext_col)
+                    )
+                    .group_by(ext_col)
+                    .agg(agg_cols)
+                    .sort("read_count", descending=True)
+                    .head(20)
+                )
+
+                if len(ext_summary) > 0:
+                    rows_html = ""
+                    for row in ext_summary.iter_rows(named=True):
+                        genome = row[ext_col]
+                        count = row["read_count"]
+                        pct = count / off_target * 100 if off_target > 0 else 0
+                        ident_str = (
+                            f"{row['mean_identity']:.1f}%"
+                            if has_identity and row.get("mean_identity")
+                            is not None
+                            else "-"
+                        )
+                        rows_html += (
+                            f"<tr><td>{genome}</td>"
+                            f"<td>{count:,}</td>"
+                            f"<td>{pct:.1f}%</td>"
+                            f"<td>{ident_str}</td></tr>\n"
+                        )
+
+                    external_families_table = (
+                        '<h3>Off-target Best External Matches</h3>\n'
+                        '<div style="overflow-x:auto;">\n'
+                        '<table class="data-table">\n'
+                        "<thead><tr>"
+                        "<th>External Genome</th>"
+                        "<th>Reads</th>"
+                        "<th>% of Off-target</th>"
+                        "<th>Mean Identity</th>"
+                        "</tr></thead>\n<tbody>\n"
+                        + rows_html
+                        + "</tbody></table></div>\n"
+                    )
+
         # Format summary stats
         content = FAMILY_VALIDATION_SECTION_TEMPLATE.format(
             validated_pct=validated_pct,
@@ -1982,15 +2047,20 @@ class ReportGenerator:
             target_family=(
                 self.summary.target_family or "Inferred from ANI matrix"
             ),
-            external_families_table="",
+            external_families_table=external_families_table,
         )
 
-        # Histogram of family_bitscore_ratio
+        # Histogram of family_bitscore_ratio -- exclude ratio=1.0 reads
+        # to avoid a dominant spike that obscures the off-target distribution
         if "family_bitscore_ratio" in self.df.columns:
-            ratios = self.df["family_bitscore_ratio"].drop_nulls().to_list()
-            if ratios:
+            all_ratios = self.df["family_bitscore_ratio"].drop_nulls()
+            n_total = len(all_ratios)
+            n_at_one = len(all_ratios.filter(all_ratios == 1.0))
+            sub_ratios = all_ratios.filter(all_ratios < 1.0).to_list()
+
+            if sub_ratios:
                 fig = go.Figure(data=[go.Histogram(
-                    x=ratios,
+                    x=sub_ratios,
                     nbinsx=50,
                     marker_color="#4a90d9",
                     name="Reads",
@@ -2006,6 +2076,43 @@ class ReportGenerator:
                     line_dash="dash",
                     line_color="red",
                     annotation_text="Threshold (0.8)",
+                )
+                if n_at_one > 0:
+                    fig.add_annotation(
+                        text=(
+                            f"{n_at_one:,} reads at ratio=1.0 "
+                            f"({n_at_one / n_total * 100:.0f}% "
+                            "of total, not shown)"
+                        ),
+                        xref="paper", yref="paper",
+                        x=0.98, y=0.98,
+                        showarrow=False,
+                        font=dict(size=11, color="#666"),
+                        align="right",
+                        bgcolor="rgba(255,255,255,0.8)",
+                        bordercolor="#ccc",
+                        borderwidth=1,
+                    )
+                self._register_plot("family-ratio-histogram", fig)
+            elif n_at_one > 0:
+                # All reads at 1.0 -- show a simple note instead of empty plot
+                fig = go.Figure()
+                fig.update_layout(
+                    template="plotly_white",
+                    height=200,
+                    annotations=[dict(
+                        text=(
+                            f"All {n_at_one:,} reads have "
+                            "family bitscore ratio = 1.0 "
+                            "(entirely in-family)"
+                        ),
+                        xref="paper", yref="paper",
+                        x=0.5, y=0.5,
+                        showarrow=False,
+                        font=dict(size=14),
+                    )],
+                    xaxis=dict(visible=False),
+                    yaxis=dict(visible=False),
                 )
                 self._register_plot("family-ratio-histogram", fig)
 
