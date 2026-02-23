@@ -1610,11 +1610,12 @@ PHYLOTREE_JS_TEMPLATE: str = '''
     // Configuration
     var config = {{
         width: 900,
-        height: 600,
-        margin: {{ top: 20, right: 120, bottom: 20, left: 120 }},
+        margin: {{ top: 20, right: 200, bottom: 20, left: 120 }},
         nodeRadius: 6,
         linkColor: '#ccc',
         novelLinkColor: '#f39c12',
+        leafHeight: 20,
+        minHeight: 400,
         colors: {{
             reference: '#2ecc71',
             novelSpecies: '#f39c12',
@@ -1630,10 +1631,11 @@ PHYLOTREE_JS_TEMPLATE: str = '''
     }}
 
     var tooltip = document.getElementById('phylogeny-tooltip');
-    var currentLayout = 'cluster';  // or 'radial'
+    var currentLayout = 'cluster';
 
-    // Get annotations from TREE_DATA (keyed by node name)
+    // Get annotations and genome labels from TREE_DATA
     var annotations = (TREE_DATA && TREE_DATA.annotations) || {{}};
+    var genomeLabels = (TREE_DATA && TREE_DATA.genome_labels) || {{}};
 
     // Helper function to look up annotation data for a node
     function getNodeAnnotation(nodeName) {{
@@ -1641,11 +1643,10 @@ PHYLOTREE_JS_TEMPLATE: str = '''
             return null;
         }}
         var ann = annotations[nodeName];
-        // Convert Python snake_case keys to JavaScript camelCase/expected format
         return {{
             isNovel: ann.is_novel || false,
-            nodeType: ann.type === 'Novel Species' ? 'novel_species' :
-                      ann.type === 'Novel Genus' ? 'novel_genus' : 'reference',
+            nodeType: ann.type === 'novel_species' ? 'novel_species' :
+                      ann.type === 'novel_genus' ? 'novel_genus' : 'reference',
             readCount: ann.read_count || 0,
             noveltyIndex: ann.mean_novelty || 0,
             confidence: typeof ann.confidence === 'string' ?
@@ -1683,7 +1684,6 @@ PHYLOTREE_JS_TEMPLATE: str = '''
                     current = stack.pop();
                     break;
                 case ':':
-                    break;
                 case ';':
                     break;
                 default:
@@ -1706,10 +1706,8 @@ PHYLOTREE_JS_TEMPLATE: str = '''
         if (node.name) {{
             var ann = getNodeAnnotation(node.name);
             if (ann) {{
-                // Merge annotation properties into the node
                 Object.assign(node, ann);
             }} else {{
-                // Reference genome (no annotation) - mark as reference
                 node.isNovel = false;
                 node.nodeType = 'reference';
             }}
@@ -1719,15 +1717,42 @@ PHYLOTREE_JS_TEMPLATE: str = '''
         }}
     }}
 
-    // Create SVG element
-    var svg = d3.select(container)
-        .append('svg')
-        .attr('width', config.width)
-        .attr('height', config.height)
-        .append('g')
-        .attr('transform', 'translate(' + config.margin.left + ',' + config.margin.top + ')');
+    // Get display label for a node (uses genome_labels from metadata)
+    function getDisplayLabel(name) {{
+        if (!name) return '';
+        var label = genomeLabels[name] || name;
+        if (label.length > 40) return label.substring(0, 37) + '...';
+        return label;
+    }}
 
-    // Parse tree data - TREE_DATA is an object with newick property
+    // Toggle collapse/expand of a node's children
+    function toggleNode(d) {{
+        if (d.children) {{
+            d._children = d.children;
+            d.children = null;
+        }} else if (d._children) {{
+            d.children = d._children;
+            d._children = null;
+        }}
+    }}
+
+    // Count visible leaves in the tree data
+    function countLeaves(node) {{
+        if (!node.children || node.children.length === 0) return 1;
+        var count = 0;
+        node.children.forEach(function(c) {{ count += countLeaves(c); }});
+        return count;
+    }}
+
+    // Count all descendants (including hidden) of a node
+    function countDescendants(node) {{
+        var count = 0;
+        var ch = node.children || node._children || [];
+        ch.forEach(function(c) {{ count += 1 + countDescendants(c); }});
+        return count;
+    }}
+
+    // Parse tree data
     var treeData;
     if (TREE_DATA.newick) {{
         treeData = parseNewick(TREE_DATA.newick);
@@ -1737,168 +1762,242 @@ PHYLOTREE_JS_TEMPLATE: str = '''
         treeData = TREE_DATA;
     }}
 
-    // Merge annotations into tree nodes after parsing
     mergeAnnotations(treeData);
 
-    // Create hierarchy
-    var root = d3.hierarchy(treeData);
+    // SVG setup with dynamic height
+    var dynamicHeight = Math.max(config.minHeight, countLeaves(treeData) * config.leafHeight);
+    var svgEl = d3.select(container)
+        .append('svg')
+        .attr('width', config.width)
+        .attr('height', dynamicHeight);
+    var svg = svgEl.append('g')
+        .attr('transform', 'translate(' + config.margin.left + ',' + config.margin.top + ')');
 
-    // Create tree layout
+    // Tree layout
     var treeLayout = d3.cluster()
-        .size([config.height - config.margin.top - config.margin.bottom,
+        .size([dynamicHeight - config.margin.top - config.margin.bottom,
                config.width - config.margin.left - config.margin.right]);
+    var root;
 
-    treeLayout(root);
+    // Curved link path generator
+    function linkPath(d) {{
+        return 'M' + d.source.y + ',' + d.source.x +
+               'C' + (d.source.y + d.target.y) / 2 + ',' + d.source.x +
+               ' ' + (d.source.y + d.target.y) / 2 + ',' + d.target.x +
+               ' ' + d.target.y + ',' + d.target.x;
+    }}
 
-    // Draw links
-    var link = svg.selectAll('.link')
-        .data(root.links())
-        .enter()
-        .append('path')
-        .attr('class', 'link')
-        .attr('d', function(d) {{
-            return 'M' + d.source.y + ',' + d.source.x +
-                   'C' + (d.source.y + d.target.y) / 2 + ',' + d.source.x +
-                   ' ' + (d.source.y + d.target.y) / 2 + ',' + d.target.x +
-                   ' ' + d.target.y + ',' + d.target.x;
-        }})
-        .style('fill', 'none')
-        .style('stroke', function(d) {{
-            // Check if this is a novel cluster link
-            var targetData = d.target.data;
-            if (targetData && targetData.isNovel) {{
-                return config.novelLinkColor;
-            }}
-            return config.linkColor;
-        }})
-        .style('stroke-width', function(d) {{
-            var targetData = d.target.data;
-            if (targetData && targetData.isNovel) {{
-                return '2px';
-            }}
-            return '1.5px';
-        }})
-        .style('stroke-dasharray', function(d) {{
-            var targetData = d.target.data;
-            if (targetData && targetData.isNovel) {{
-                return '5,3';
-            }}
-            return 'none';
-        }});
-
-    // Draw nodes
-    var node = svg.selectAll('.node')
-        .data(root.descendants())
-        .enter()
-        .append('g')
-        .attr('class', function(d) {{
-            var classes = 'node';
-            if (d.data.isNovel) classes += ' novel';
-            if (!d.children) classes += ' leaf';
-            return classes;
-        }})
-        .attr('transform', function(d) {{
-            return 'translate(' + d.y + ',' + d.x + ')';
-        }});
-
-    // Add circles for nodes
-    node.append('circle')
-        .attr('r', function(d) {{
-            // Size based on read count if available
-            var readCount = d.data.readCount || 0;
-            if (readCount > 100) return config.nodeRadius + 3;
-            if (readCount > 10) return config.nodeRadius + 1;
-            return config.nodeRadius;
-        }})
-        .style('fill', function(d) {{
-            if (!d.data) return config.colors.unknown;
-            if (d.data.nodeType === 'novel_genus') return config.colors.novelGenus;
-            if (d.data.nodeType === 'novel_species') return config.colors.novelSpecies;
-            if (d.data.nodeType === 'reference') return config.colors.reference;
-            return config.colors.unknown;
-        }})
-        .style('stroke', '#fff')
-        .style('stroke-width', '1.5px');
-
-    // Add labels for leaf nodes
-    node.filter(function(d) {{ return !d.children; }})
-        .append('text')
-        .attr('dy', '0.35em')
-        .attr('x', 10)
-        .style('font-size', '10px')
-        .style('font-family', 'sans-serif')
-        .text(function(d) {{
-            var name = d.data.name || '';
-            // Truncate long names
-            if (name.length > 30) {{
-                return name.substring(0, 27) + '...';
-            }}
-            return name;
-        }});
-
-    // Add confidence badges for novel nodes
-    node.filter(function(d) {{ return d.data && d.data.isNovel; }})
-        .append('text')
-        .attr('class', 'confidence-badge')
-        .attr('dy', '-12')
-        .attr('dx', '-5')
-        .style('font-size', '8px')
-        .style('fill', function(d) {{
-            var confidence = d.data.confidence || 0;
-            if (confidence >= 75) return '#2ecc71';
-            if (confidence >= 50) return '#f39c12';
-            return '#e74c3c';
-        }})
-        .text(function(d) {{
-            var confidence = d.data.confidence || 0;
-            if (confidence >= 75) return 'H';
-            if (confidence >= 50) return 'M';
-            return 'L';
-        }});
-
-    // Tooltip interactions
-    node.on('mouseover', function(event, d) {{
+    // Tooltip display
+    function showTooltip(event, d) {{
         if (!tooltip) return;
-
-        var content = '<strong>' + (d.data.name || 'Internal node') + '</strong>';
+        var name = d.data.name || 'Internal node';
+        var label = genomeLabels[name] || name;
+        var content = '<strong>' + label + '</strong>';
         if (d.data.readCount) {{
             content += '<br>Reads: ' + d.data.readCount;
         }}
-        if (d.data.noveltyIndex !== undefined) {{
+        if (d.data.noveltyIndex !== undefined && d.data.noveltyIndex > 0) {{
             content += '<br>Novelty: ' + d.data.noveltyIndex.toFixed(1) + '%';
         }}
-        if (d.data.confidence !== undefined) {{
+        if (d.data.confidence !== undefined && d.data.confidence > 0) {{
             content += '<br>Confidence: ' + d.data.confidence.toFixed(0);
         }}
-        if (d.data.nodeType) {{
-            content += '<br>Type: ' + d.data.nodeType.replace('_', ' ');
+        if (d.data.nodeType && d.data.nodeType !== 'reference') {{
+            content += '<br>Type: ' + d.data.nodeType.replace(/_/g, ' ');
         }}
-
+        if (d.data._children) {{
+            content += '<br><em>' + countDescendants(d.data) + ' nodes collapsed</em>';
+        }}
         tooltip.innerHTML = content;
         tooltip.style.display = 'block';
         tooltip.style.left = (event.pageX + 10) + 'px';
         tooltip.style.top = (event.pageY - 10) + 'px';
-    }})
-    .on('mouseout', function() {{
-        if (tooltip) {{
-            tooltip.style.display = 'none';
-        }}
-    }});
+    }}
 
-    // Global functions for button controls
+    function hideTooltip() {{
+        if (tooltip) tooltip.style.display = 'none';
+    }}
+
+    // Central update function: recomputes layout and redraws the tree
+    function updateTree() {{
+        dynamicHeight = Math.max(config.minHeight, countLeaves(treeData) * config.leafHeight);
+        svgEl.attr('height', dynamicHeight);
+        treeLayout.size([dynamicHeight - config.margin.top - config.margin.bottom,
+                         config.width - config.margin.left - config.margin.right]);
+
+        root = d3.hierarchy(treeData);
+        treeLayout(root);
+
+        // Clear and redraw
+        svg.selectAll('*').remove();
+
+        // Draw links
+        svg.selectAll('.link')
+            .data(root.links())
+            .enter()
+            .append('path')
+            .attr('class', 'link')
+            .attr('d', linkPath)
+            .style('fill', 'none')
+            .style('stroke', function(d) {{
+                return (d.target.data && d.target.data.isNovel) ? config.novelLinkColor : config.linkColor;
+            }})
+            .style('stroke-width', function(d) {{
+                return (d.target.data && d.target.data.isNovel) ? '2px' : '1.5px';
+            }})
+            .style('stroke-dasharray', function(d) {{
+                return (d.target.data && d.target.data.isNovel) ? '5,3' : 'none';
+            }});
+
+        // Draw nodes
+        var node = svg.selectAll('.node')
+            .data(root.descendants())
+            .enter()
+            .append('g')
+            .attr('class', function(d) {{
+                var cls = 'node';
+                if (d.data.isNovel) cls += ' novel';
+                if (!d.children && !d.data._children) cls += ' leaf';
+                else cls += ' internal';
+                return cls;
+            }})
+            .attr('transform', function(d) {{
+                return 'translate(' + d.y + ',' + d.x + ')';
+            }})
+            .style('cursor', function(d) {{
+                return (d.children || d.data._children) ? 'pointer' : 'default';
+            }})
+            .on('click', function(event, d) {{
+                if (d.children || d.data._children) {{
+                    toggleNode(d.data);
+                    updateTree();
+                }}
+            }})
+            .on('mouseover', showTooltip)
+            .on('mouseout', hideTooltip);
+
+        // Node circles
+        node.append('circle')
+            .attr('r', function(d) {{
+                var rc = d.data.readCount || 0;
+                if (rc > 100) return config.nodeRadius + 3;
+                if (rc > 10) return config.nodeRadius + 1;
+                return config.nodeRadius;
+            }})
+            .style('fill', function(d) {{
+                if (!d.data) return config.colors.unknown;
+                if (d.data.nodeType === 'novel_genus') return config.colors.novelGenus;
+                if (d.data.nodeType === 'novel_species') return config.colors.novelSpecies;
+                if (d.data.nodeType === 'reference') return config.colors.reference;
+                return config.colors.unknown;
+            }})
+            .style('stroke', '#fff')
+            .style('stroke-width', '1.5px');
+
+        // Leaf labels with species names from genome_labels
+        node.filter(function(d) {{ return !d.children && !d.data._children; }})
+            .append('text')
+            .attr('dy', '0.35em')
+            .attr('x', 10)
+            .style('font-size', '10px')
+            .style('font-family', 'sans-serif')
+            .text(function(d) {{ return getDisplayLabel(d.data.name); }});
+
+        // Collapsed node indicators
+        node.filter(function(d) {{ return d.data._children; }})
+            .append('text')
+            .attr('dy', '0.35em')
+            .attr('x', 10)
+            .style('font-size', '9px')
+            .style('font-style', 'italic')
+            .style('fill', '#999')
+            .text(function(d) {{
+                return '[' + countDescendants(d.data) + ' nodes]';
+            }});
+
+        // Confidence badges for novel nodes
+        node.filter(function(d) {{ return d.data && d.data.isNovel; }})
+            .append('text')
+            .attr('class', 'confidence-badge')
+            .attr('dy', '-12')
+            .attr('dx', '-5')
+            .style('font-size', '8px')
+            .style('fill', function(d) {{
+                var c = d.data.confidence || 0;
+                if (c >= 75) return '#2ecc71';
+                if (c >= 50) return '#f39c12';
+                return '#e74c3c';
+            }})
+            .text(function(d) {{
+                var c = d.data.confidence || 0;
+                if (c >= 75) return 'H';
+                if (c >= 50) return 'M';
+                return 'L';
+            }});
+    }}
+
+    // Initial render
+    updateTree();
+
+    // --- Button controls ---
+
+    // Toggle between cluster (dendrogram) and tree (cladogram) layouts
     window.toggleTreeLayout = function() {{
-        console.log('Toggle layout requested');
-        // Layout toggle implementation would go here
+        var iw = config.width - config.margin.left - config.margin.right;
+        var ih = dynamicHeight - config.margin.top - config.margin.bottom;
+        if (currentLayout === 'cluster') {{
+            treeLayout = d3.tree().size([ih, iw]);
+            currentLayout = 'tree';
+        }} else {{
+            treeLayout = d3.cluster().size([ih, iw]);
+            currentLayout = 'cluster';
+        }}
+        updateTree();
     }};
 
+    // Expand all collapsed subtrees
     window.expandAllNodes = function() {{
-        console.log('Expand all nodes requested');
-        // Expand implementation would go here
+        function expandAll(node) {{
+            if (node._children) {{
+                node.children = node._children;
+                node._children = null;
+            }}
+            if (node.children) node.children.forEach(expandAll);
+        }}
+        expandAll(treeData);
+        updateTree();
     }};
 
+    // Collapse internal subtrees that contain no novel nodes
     window.collapseToGenera = function() {{
-        console.log('Collapse to genera requested');
-        // Collapse implementation would go here
+        function hasNovelDescendant(node) {{
+            if (node.isNovel) return true;
+            var ch = node.children || node._children || [];
+            for (var i = 0; i < ch.length; i++) {{
+                if (hasNovelDescendant(ch[i])) return true;
+            }}
+            return false;
+        }}
+        function collapseIfSafe(node) {{
+            // Ensure children are visible for traversal
+            if (node._children) {{
+                node.children = node._children;
+                node._children = null;
+            }}
+            if (node.children) {{
+                node.children.forEach(collapseIfSafe);
+                // Collapse if no novel descendants and more than 2 total descendants
+                if (!hasNovelDescendant(node) && countDescendants(node) > 2) {{
+                    node._children = node.children;
+                    node.children = null;
+                }}
+            }}
+        }}
+        // Don't collapse root itself
+        if (treeData.children) {{
+            treeData.children.forEach(collapseIfSafe);
+        }}
+        updateTree();
     }};
 
 }})();

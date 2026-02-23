@@ -2351,10 +2351,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     "is_novel": True,
                 }
 
+            # Build genome labels for tree leaf display
+            genome_labels = {
+                acc: self._get_genome_label(acc, max_species_len=20)
+                for acc in ani_matrix_pd.columns
+            }
+
             # Build tree data JSON for D3.js visualization
             tree_data = {
                 "newick": final_newick,
                 "annotations": annotations,
+                "genome_labels": genome_labels,
                 "tip_count": len(ani_matrix_pd) + len(novel_clusters),
                 "novel_count": len(novel_clusters),
                 "source_note": tree_source_note,
