@@ -21,6 +21,7 @@ def extract_accession_from_filename(filename: str) -> str:
     - GCF_000005845.2_ASM584v2_genomic.fna -> GCF_000005845.2
     - GCA_000001405.15_GRCh38_genomic.fna -> GCA_000001405.15
     - GCF_000005845.2.fna -> GCF_000005845.2
+    - Francisellaceae_Genus_species_GCA_000710735.1.fasta -> GCA_000710735.1
 
     Args:
         filename: Genome filename (with or without extension)
@@ -36,7 +37,7 @@ def extract_accession_from_filename(filename: str) -> str:
             break
 
     # Match RefSeq/GenBank accession pattern
-    match = re.match(r"(GCF_\d+\.\d+|GCA_\d+\.\d+)", stem)
+    match = re.search(r"(GCF_\d+\.\d+|GCA_\d+\.\d+)", stem)
     if match:
         return match.group(1)
 
