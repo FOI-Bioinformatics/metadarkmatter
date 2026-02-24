@@ -79,6 +79,7 @@ from metadarkmatter.visualization.report.templates import (
     BAYESIAN_SUMMARY_TEMPLATE,
     BAYESIAN_INTERPRETATION_TEMPLATE,
     CONFIDENCE_SUMMARY_TEMPLATE,
+    BORDERLINE_ANALYSIS_TEMPLATE,
     FAMILY_VALIDATION_SECTION_TEMPLATE,
     get_cell_class,
 )
@@ -761,6 +762,11 @@ class ReportGenerator:
             enriched_df = None
 
         if enriched_df is not None and "species" in enriched_df.columns:
+            # Exclude off-target reads from top species computation
+            if "taxonomic_call" in enriched_df.columns:
+                enriched_df = enriched_df.filter(
+                    pl.col("taxonomic_call") != "Off-target"
+                )
             species_counts = (
                 enriched_df.group_by("species")
                 .len()
@@ -819,6 +825,19 @@ class ReportGenerator:
                 action_items.append(
                     f"{off_target_pct:.0f}% off-target reads detected"
                 )
+            # Count off-target reads with species/genus-level in-family divergence
+            if "in_family_novelty_index" in self.df.columns:
+                th = self.config.thresholds
+                off_target_novel = self.df.filter(
+                    (pl.col("taxonomic_call") == "Off-target")
+                    & (pl.col("in_family_novelty_index") >= th.novelty_novel_species_min)
+                    & (pl.col("in_family_novelty_index") <= th.novelty_novel_genus_max)
+                )
+                if len(off_target_novel) > 0:
+                    action_items.append(
+                        f"{len(off_target_novel)} off-target reads show "
+                        f"species/genus-level divergence from in-family references"
+                    )
 
         if action_items:
             link_html = ""
@@ -1256,9 +1275,19 @@ class ReportGenerator:
 
         # Create analyzer and cluster novel reads
         try:
+            from metadarkmatter.core.classification.ani_matrix import ANIMatrix
+
+            ani_matrix_obj = None
+            if self.ani_matrix is not None and len(self.ani_matrix) > 0:
+                try:
+                    ani_matrix_obj = ANIMatrix.from_dataframe(self.ani_matrix)
+                except Exception as e:
+                    logger.warning(f"Could not convert ANI matrix for clustering: {e}")
+
             analyzer = NovelDiversityAnalyzer(
                 classifications=self.df,
                 metadata=self.genome_metadata,
+                ani_matrix=ani_matrix_obj,
                 novelty_band_size=5.0,
                 min_cluster_size=3,
             )
@@ -1497,9 +1526,17 @@ class ReportGenerator:
             else:
                 enriched_df = self.df
 
+            # Only include in-family reads in species breakdown
+            if "taxonomic_call" in enriched_df.columns:
+                species_base_df = enriched_df.filter(
+                    pl.col("taxonomic_call") != "Off-target"
+                )
+            else:
+                species_base_df = enriched_df
+
             # Aggregate by species
             species_counts = (
-                enriched_df.group_by("species")
+                species_base_df.group_by("species")
                 .agg([
                     pl.len().alias("count"),
                     pl.col("novelty_index").mean().alias("mean_novelty"),
@@ -1603,6 +1640,91 @@ class ReportGenerator:
                         )
                     )
                 ))
+
+                # Stacked diversity bar chart per species
+                if "taxonomic_call" in species_base_df.columns:
+                    diversity_breakdown = (
+                        species_base_df
+                        .group_by(["species", "taxonomic_call"])
+                        .agg(pl.len().alias("count"))
+                    )
+
+                    if len(diversity_breakdown) > 0:
+                        # Use top 15 species by total reads
+                        top_species = (
+                            species_base_df.group_by("species")
+                            .len()
+                            .sort("len", descending=True)
+                            .head(15)["species"]
+                            .to_list()
+                        )
+                        div_filtered = diversity_breakdown.filter(
+                            pl.col("species").is_in(top_species)
+                        )
+
+                        # Order species by total count (reversed for horizontal bar)
+                        species_order = list(reversed(top_species))
+
+                        diversity_fig = go.Figure()
+                        # Add a trace per category
+                        category_order = [
+                            "Known Species", "Novel Species", "Novel Genus",
+                            "Species Boundary", "Ambiguous", "Unclassified",
+                        ]
+                        for cat in category_order:
+                            cat_data = div_filtered.filter(
+                                pl.col("taxonomic_call") == cat
+                            )
+                            if len(cat_data) == 0:
+                                continue
+                            # Build a dict for quick lookup
+                            cat_map = dict(zip(
+                                cat_data["species"].to_list(),
+                                cat_data["count"].to_list(),
+                            ))
+                            diversity_fig.add_trace(go.Bar(
+                                y=species_order,
+                                x=[cat_map.get(sp, 0) for sp in species_order],
+                                name=cat,
+                                orientation="h",
+                                marker_color=BAYESIAN_CATEGORY_COLORS.get(
+                                    cat, "#94a3b8"
+                                ),
+                                hovertemplate=(
+                                    "<b>%{y}</b><br>"
+                                    f"{cat}: " + "%{x:,}<extra></extra>"
+                                ),
+                            ))
+
+                        diversity_fig.update_layout(
+                            barmode="stack",
+                            title="Diversity Status by Species",
+                            xaxis_title="Number of Reads",
+                            yaxis_title="",
+                            template="plotly_white",
+                            height=max(400, 30 * len(species_order)),
+                            margin={"l": 300, "r": 40, "t": 60, "b": 60},
+                            legend=dict(
+                                orientation="h",
+                                yanchor="bottom",
+                                y=-0.15,
+                                xanchor="center",
+                                x=0.5,
+                            ),
+                        )
+                        diversity_bar_id = "plot-species-diversity"
+                        self._register_plot(diversity_bar_id, diversity_fig)
+
+                        content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
+                            extra_class="",
+                            title="Diversity Status by Species",
+                            description=(
+                                "Stacked bar chart showing the classification "
+                                "breakdown (Known Species, Novel Species, Novel "
+                                "Genus, etc.) for each reference species."
+                            ),
+                            plot_id=diversity_bar_id,
+                        ))
         else:
             content_parts.append(
                 '<div class="section-note">'
@@ -1611,8 +1733,13 @@ class ReportGenerator:
             )
 
         # --- Genome-Level Highlights section ---
+        genome_base_df = self.df
+        if "taxonomic_call" in self.df.columns:
+            genome_base_df = self.df.filter(
+                pl.col("taxonomic_call") != "Off-target"
+            )
         genome_counts = (
-            self.df.group_by("best_match_genome")
+            genome_base_df.group_by("best_match_genome")
             .agg([
                 pl.len().alias("count"),
                 pl.col("novelty_index").mean().alias("mean_novelty"),
@@ -1726,6 +1853,11 @@ class ReportGenerator:
                     agg_cols.append(
                         pl.col(ident_col).mean().alias("mean_identity")
                     )
+                has_if_ident = "in_family_identity" in off_target_df.columns
+                if has_if_ident:
+                    agg_cols.append(
+                        pl.col("in_family_identity").mean().alias("mean_in_family_identity")
+                    )
 
                 ext_summary = (
                     off_target_df
@@ -1739,6 +1871,9 @@ class ReportGenerator:
                 )
 
                 if len(ext_summary) > 0:
+                    if_ident_header = (
+                        "<th>In-Family Identity</th>" if has_if_ident else ""
+                    )
                     rows_html = ""
                     for row in ext_summary.iter_rows(named=True):
                         genome = row[ext_col]
@@ -1750,11 +1885,20 @@ class ReportGenerator:
                             is not None
                             else "-"
                         )
+                        if_ident_cell = ""
+                        if has_if_ident:
+                            if_val = row.get("mean_in_family_identity")
+                            if_ident_cell = (
+                                f"<td>{if_val:.1f}%</td>"
+                                if if_val is not None
+                                else "<td>-</td>"
+                            )
                         rows_html += (
                             f"<tr><td>{genome}</td>"
                             f"<td>{count:,}</td>"
                             f"<td>{pct:.1f}%</td>"
-                            f"<td>{ident_str}</td></tr>\n"
+                            f"<td>{ident_str}</td>"
+                            f"{if_ident_cell}</tr>\n"
                         )
 
                     external_families_table = (
@@ -1766,10 +1910,157 @@ class ReportGenerator:
                         "<th>Reads</th>"
                         "<th>% of Off-target</th>"
                         "<th>Mean Identity</th>"
+                        f"{if_ident_header}"
                         "</tr></thead>\n<tbody>\n"
                         + rows_html
                         + "</tbody></table></div>\n"
                     )
+
+        # Borderline analysis: classify off-target reads by in-family novelty
+        borderline_analysis = ""
+        if (
+            "in_family_novelty_index" in self.df.columns
+            and "taxonomic_call" in self.df.columns
+        ):
+            ot_with_novelty = self.df.filter(
+                pl.col("taxonomic_call") == "Off-target"
+            )
+            if len(ot_with_novelty) > 0:
+                th = self.config.thresholds
+                n_total_ot = len(ot_with_novelty)
+                ni = ot_with_novelty["in_family_novelty_index"]
+
+                known_count = len(ni.filter(ni < th.novelty_known_max))
+                novel_sp_count = len(ni.filter(
+                    (ni >= th.novelty_novel_species_min)
+                    & (ni < th.novelty_novel_species_max)
+                ))
+                novel_gen_count = len(ni.filter(
+                    (ni >= th.novelty_novel_genus_min)
+                    & (ni <= th.novelty_novel_genus_max)
+                ))
+                divergent_count = len(ni.filter(ni > th.novelty_novel_genus_max))
+
+                def _pct(c: int) -> float:
+                    return c / n_total_ot * 100 if n_total_ot > 0 else 0.0
+
+                borderline_analysis = BORDERLINE_ANALYSIS_TEMPLATE.format(
+                    known_count=known_count,
+                    known_pct=_pct(known_count),
+                    novel_sp_count=novel_sp_count,
+                    novel_sp_pct=_pct(novel_sp_count),
+                    novel_gen_count=novel_gen_count,
+                    novel_gen_pct=_pct(novel_gen_count),
+                    divergent_count=divergent_count,
+                    divergent_pct=_pct(divergent_count),
+                    novel_sp_highlight=(
+                        " highlight-amber" if novel_sp_count > 0 else ""
+                    ),
+                    novel_gen_highlight=(
+                        " highlight-red" if novel_gen_count > 0 else ""
+                    ),
+                    novelty_known_max=th.novelty_known_max,
+                    novelty_novel_sp_max=th.novelty_novel_species_max,
+                    novelty_novel_gen_max=th.novelty_novel_genus_max,
+                )
+
+                # Scatter plot: off-target reads in novelty-uncertainty space
+                novelty_vals = ot_with_novelty["in_family_novelty_index"].to_list()
+
+                # Compute inferred uncertainty using the same piecewise formula
+                # as VectorizedClassifier (lines 773-789)
+                known_break = 5.0 + th.novelty_known_max * 0.5
+                species_break = (
+                    known_break
+                    + (th.novelty_novel_species_max - th.novelty_known_max)
+                )
+                uncertainty_vals = []
+                for nv in novelty_vals:
+                    if nv < th.novelty_known_max:
+                        uncertainty_vals.append(5.0 + nv * 0.5)
+                    elif nv < th.novelty_novel_species_max:
+                        uncertainty_vals.append(
+                            known_break
+                            + (nv - th.novelty_known_max) * 1.0
+                        )
+                    elif nv < th.novelty_novel_genus_max:
+                        uncertainty_vals.append(
+                            species_break
+                            + (nv - th.novelty_novel_species_max) * 1.5
+                        )
+                    else:
+                        uncertainty_vals.append(35.0)
+
+                # Assign would-be categories for coloring
+                cat_colors = []
+                cat_labels = []
+                for nv in novelty_vals:
+                    if nv < th.novelty_known_max:
+                        cat_colors.append("#22c55e")
+                        cat_labels.append("Known Species")
+                    elif nv < th.novelty_novel_species_max:
+                        cat_colors.append("#f59e0b")
+                        cat_labels.append("Novel Species")
+                    elif nv <= th.novelty_novel_genus_max:
+                        cat_colors.append("#ef4444")
+                        cat_labels.append("Novel Genus")
+                    else:
+                        cat_colors.append("#64748b")
+                        cat_labels.append("Very Divergent")
+
+                scatter_fig = go.Figure()
+
+                # Background classification zones
+                zone_shapes = [
+                    dict(
+                        type="rect", x0=0, x1=th.novelty_known_max,
+                        y0=0, y1=th.uncertainty_known_max,
+                        fillcolor="rgba(34,197,94,0.08)",
+                        line=dict(width=0), layer="below",
+                    ),
+                    dict(
+                        type="rect",
+                        x0=th.novelty_novel_species_min,
+                        x1=th.novelty_novel_species_max,
+                        y0=0, y1=th.uncertainty_novel_species_max,
+                        fillcolor="rgba(245,158,11,0.08)",
+                        line=dict(width=0), layer="below",
+                    ),
+                    dict(
+                        type="rect",
+                        x0=th.novelty_novel_genus_min,
+                        x1=th.novelty_novel_genus_max,
+                        y0=0, y1=th.uncertainty_novel_genus_max,
+                        fillcolor="rgba(239,68,68,0.08)",
+                        line=dict(width=0), layer="below",
+                    ),
+                ]
+
+                scatter_fig.add_trace(go.Scatter(
+                    x=novelty_vals,
+                    y=uncertainty_vals,
+                    mode="markers",
+                    marker=dict(
+                        color=cat_colors,
+                        size=6,
+                        opacity=0.7,
+                    ),
+                    text=cat_labels,
+                    hovertemplate=(
+                        "In-Family Novelty: %{x:.1f}%<br>"
+                        "Inferred Uncertainty: %{y:.1f}<br>"
+                        "Would-Be: %{text}<extra></extra>"
+                    ),
+                ))
+                scatter_fig.update_layout(
+                    xaxis_title="In-Family Novelty Index (%)",
+                    yaxis_title="Inferred Uncertainty",
+                    template="plotly_white",
+                    height=450,
+                    shapes=zone_shapes,
+                    showlegend=False,
+                )
+                self._register_plot("family-novelty-scatter", scatter_fig)
 
         # Format summary stats
         content = FAMILY_VALIDATION_SECTION_TEMPLATE.format(
@@ -1779,6 +2070,7 @@ class ReportGenerator:
             target_family=(
                 self.summary.target_family or "Inferred from ANI matrix"
             ),
+            borderline_analysis=borderline_analysis,
             external_families_table=external_families_table,
         )
 

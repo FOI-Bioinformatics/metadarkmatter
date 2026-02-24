@@ -3799,6 +3799,59 @@ PHYLOGENY_STYLES: str = """
 """
 
 
+BORDERLINE_ANALYSIS_CSS: str = """
+.borderline-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+    margin: 1.5rem 0;
+}
+
+.borderline-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    text-align: center;
+}
+
+.borderline-card .card-count {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.2;
+}
+
+.borderline-card .card-pct {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.3rem;
+}
+
+.borderline-card .card-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 0.25rem;
+}
+
+.borderline-card .card-desc {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.borderline-card.highlight-amber {
+    border-color: var(--warning-color);
+    background: rgba(243, 156, 18, 0.06);
+}
+
+.borderline-card.highlight-red {
+    border-color: var(--danger-color);
+    background: rgba(231, 76, 60, 0.06);
+}
+"""
+
+
 def get_css_styles(theme: str = "light") -> str:
     """
     Get CSS styles for specified theme.
@@ -3810,4 +3863,4 @@ def get_css_styles(theme: str = "light") -> str:
         CSS stylesheet string
     """
     base_theme = DARK_THEME if theme.lower() == "dark" else LIGHT_THEME
-    return base_theme + NOVEL_SECTION_CSS + METHODS_SECTION_CSS + PHYLOGENY_STYLES
+    return base_theme + NOVEL_SECTION_CSS + METHODS_SECTION_CSS + PHYLOGENY_STYLES + BORDERLINE_ANALYSIS_CSS

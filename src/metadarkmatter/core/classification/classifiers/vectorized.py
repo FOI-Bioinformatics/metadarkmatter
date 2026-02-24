@@ -401,6 +401,8 @@ class VectorizedClassifier:
                     pl.col("in_family_hit_fraction"),
                     pl.col("external_best_genome"),
                     pl.col("external_best_identity"),
+                    pl.col("_best_if_ident").alias("in_family_identity"),
+                    (100.0 - pl.col("_best_if_ident")).alias("in_family_novelty_index"),
                 ]
 
                 # Only include legacy score columns when they are
@@ -843,12 +845,16 @@ class VectorizedClassifier:
                 "in_family_hit_fraction",
                 "external_best_genome",
                 "external_best_identity",
+                pl.col("_best_if_ident").alias("in_family_identity"),
             ])
             classification_result = classification_result.join(
                 family_cols,
                 left_on="read_id",
                 right_on="qseqid",
                 how="left",
+            )
+            classification_result = classification_result.with_columns(
+                (100.0 - pl.col("in_family_identity")).alias("in_family_novelty_index"),
             )
 
             if off_target_df is not None and not off_target_df.is_empty():

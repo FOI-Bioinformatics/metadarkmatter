@@ -2102,7 +2102,42 @@ FAMILY_VALIDATION_SECTION_TEMPLATE: str = '''
 <div class="plot-container" id="family-ratio-histogram"></div>
 <h3>In-Family vs Off-Target</h3>
 <div class="plot-container" id="family-pie-chart"></div>
+{borderline_analysis}
 {external_families_table}
+'''
+
+BORDERLINE_ANALYSIS_TEMPLATE: str = '''
+<h3>Off-Target Reads: Would-Be Classification</h3>
+<p>Shows where off-target reads would fall in the novelty-uncertainty classification
+space if they had been retained as in-family. Reads in the Novel Species or Novel Genus
+zones may represent within-family diversity incorrectly flagged as off-target.</p>
+<div class="borderline-cards">
+    <div class="borderline-card">
+        <div class="card-count">{known_count:,}</div>
+        <div class="card-pct">{known_pct:.1f}%</div>
+        <div class="card-label">Known Species</div>
+        <div class="card-desc">In-family novelty &lt; {novelty_known_max}%</div>
+    </div>
+    <div class="borderline-card{novel_sp_highlight}">
+        <div class="card-count">{novel_sp_count:,}</div>
+        <div class="card-pct">{novel_sp_pct:.1f}%</div>
+        <div class="card-label">Novel Species</div>
+        <div class="card-desc">{novelty_known_max}% - {novelty_novel_sp_max}% novelty</div>
+    </div>
+    <div class="borderline-card{novel_gen_highlight}">
+        <div class="card-count">{novel_gen_count:,}</div>
+        <div class="card-pct">{novel_gen_pct:.1f}%</div>
+        <div class="card-label">Novel Genus</div>
+        <div class="card-desc">{novelty_novel_sp_max}% - {novelty_novel_gen_max}% novelty</div>
+    </div>
+    <div class="borderline-card">
+        <div class="card-count">{divergent_count:,}</div>
+        <div class="card-pct">{divergent_pct:.1f}%</div>
+        <div class="card-label">Very Divergent</div>
+        <div class="card-desc">&gt; {novelty_novel_gen_max}% novelty</div>
+    </div>
+</div>
+<div class="plot-container" id="family-novelty-scatter"></div>
 '''
 
 BAYESIAN_INTERPRETATION_TEMPLATE: str = '''
