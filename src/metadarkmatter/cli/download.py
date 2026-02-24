@@ -421,13 +421,14 @@ def fetch_genomes(
             progress.update(task, completed=completed)
 
         try:
-            result = ncbi.download_genomes(
+            report = ncbi.download_genomes(
                 accessions=accessions_to_download,
                 output_dir=output_dir,
                 batch_size=batch_size,
                 decompress=decompress,
                 skip_if_exists=False,  # Already filtered above
                 include_protein=include_protein,
+                retry_versions=True,
                 progress_callback=update_progress,
             )
         except ToolNotFoundError as e:
@@ -452,12 +453,35 @@ def fetch_genomes(
     else:
         size_str = f"{total_size / 1024:.1f} KB"
 
-    # Summary
+    # Summary from structured report
+    n_succeeded = len(report.succeeded)
+    n_failed = len(report.failed)
+    n_recovered = len(report.recovered)
+
     out.print("\n[bold green]Download complete![/bold green]")
     out.print("\n[bold]Summary:[/bold]")
-    out.print(f"  Downloaded: {len(accessions_to_download):,} genomes")
+    out.print(f"  Requested: {len(accessions_to_download):,} genomes")
+    out.print(f"  Downloaded: {n_succeeded:,} genomes")
+    if n_recovered > 0:
+        out.print(
+            f"  [green]Recovered via version retry: {n_recovered:,} genomes[/green]"
+        )
+    out.print(f"  Genome files (.fna): {len(genome_files):,}")
+    if n_failed > 0:
+        out.print(
+            f"  [yellow]Unavailable from NCBI: {n_failed:,} "
+            f"(suppressed or removed assemblies)[/yellow]"
+        )
+
+    # Show version-recovered accessions
+    if n_recovered > 0 and verbose:
+        out.print("\n[dim]Recovered via alternative assembly versions:[/dim]")
+        for o in report.recovered[:15]:
+            out.print(f"[dim]  {o.accession} -> {o.resolved_version}[/dim]")
+        if n_recovered > 15:
+            out.print(f"[dim]  ... and {n_recovered - 15} more[/dim]")
+
     if include_protein:
-        out.print(f"  Genome files (.fna): {len(genome_files):,}")
         out.print(f"  Protein files (.faa): {len(protein_files):,}")
 
         # Warn if protein files are missing
@@ -475,7 +499,6 @@ def fetch_genomes(
             # Try to load metadata to show species information
             metadata_path = output_dir.parent / "genome_metadata.tsv"
             if not metadata_path.exists():
-                # Check if metadata is in the same directory
                 metadata_path = output_dir / "genome_metadata.tsv"
 
             if metadata_path.exists() and missing_accessions:
@@ -483,7 +506,6 @@ def fetch_genomes(
                     import polars as pl
                     metadata = pl.read_csv(metadata_path, separator="\t")
 
-                    # Filter to missing accessions
                     missing_info = metadata.filter(
                         pl.col("accession").is_in(missing_accessions)
                     ).select(["accession", "species"])
@@ -497,7 +519,6 @@ def fetch_genomes(
                         if len(missing_info) > 10:
                             out.print(f"[dim]  ... and {len(missing_info) - 10} more[/dim]")
                 except Exception:
-                    # Fall back to showing just accessions if metadata loading fails
                     if verbose and missing_accessions:
                         out.print("\n[dim]Missing protein files for:[/dim]")
                         for acc in missing_accessions[:10]:
@@ -505,7 +526,6 @@ def fetch_genomes(
                         if len(missing_accessions) > 10:
                             out.print(f"[dim]  ... and {len(missing_accessions) - 10} more[/dim]")
             elif verbose and missing_accessions:
-                # No metadata file, show accessions only
                 out.print("\n[dim]Missing protein files for:[/dim]")
                 for acc in missing_accessions[:10]:
                     out.print(f"[dim]  - {acc}[/dim]")
@@ -525,7 +545,13 @@ def fetch_genomes(
     out.print(f"  Output directory: [bold]{output_dir}[/bold]")
     out.print(f"  Total size: {size_str}")
 
+    # Write failure report
+    if n_failed > 0:
+        failures_path = output_dir / "download_failures.tsv"
+        report.write_failures_tsv(failures_path)
+        out.print(f"\n  Failed accessions written to: [bold]{failures_path}[/bold]")
+
     if verbose:
-        out.print(f"\n[dim]Elapsed time: {result.elapsed_seconds:.1f}s[/dim]")
+        out.print(f"\n[dim]Elapsed time: {report.elapsed_seconds:.1f}s[/dim]")
 
     out.print()

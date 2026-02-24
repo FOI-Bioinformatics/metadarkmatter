@@ -15,6 +15,7 @@ import pytest
 
 from metadarkmatter.cli.main import app
 from metadarkmatter.external.base import ToolExecutionError, ToolResult
+from metadarkmatter.external.ncbi_datasets import DownloadOutcome, DownloadReport
 
 
 # =============================================================================
@@ -37,6 +38,17 @@ def _make_tool_result(
         stderr=stderr,
         elapsed_seconds=elapsed_seconds,
     )
+
+
+def _make_download_report(
+    accessions: list[str] | None = None,
+    elapsed_seconds: float = 1.5,
+) -> DownloadReport:
+    """Create a DownloadReport for mocking download_genomes calls."""
+    outcomes = []
+    for acc in accessions or []:
+        outcomes.append(DownloadOutcome(accession=acc, success=True))
+    return DownloadReport(outcomes=outcomes, elapsed_seconds=elapsed_seconds)
 
 
 # =============================================================================
@@ -1435,10 +1447,6 @@ class TestDownloadGenomesFetchCommand:
         """Happy path: fetching genomes invokes download and reports summary."""
         mock_ncbi = MagicMock()
         mock_ncbi.check_available.return_value = True
-        mock_ncbi.download_genomes.return_value = _make_tool_result(
-            command=("datasets", "download", "genome", "accession"),
-            elapsed_seconds=5.0,
-        )
         mock_ncbi_cls.return_value = mock_ncbi
 
         acc_file = temp_dir / "acc.tsv"
@@ -1452,13 +1460,16 @@ class TestDownloadGenomesFetchCommand:
 
         output_dir = temp_dir / "genomes"
 
-        # Simulate the download creating genome files
+        # Simulate the download creating genome files and returning DownloadReport
         def _mock_download(**kwargs):
             od = kwargs.get("output_dir", output_dir)
             od.mkdir(parents=True, exist_ok=True)
             (od / "GCF_000001.1.fna").write_text(">c1\nACGTACGT\n")
             (od / "GCF_000002.1.fna").write_text(">c2\nTGCATGCA\n")
-            return _make_tool_result(elapsed_seconds=3.0)
+            return _make_download_report(
+                accessions=["GCF_000001.1", "GCF_000002.1"],
+                elapsed_seconds=3.0,
+            )
 
         mock_ncbi.download_genomes.side_effect = _mock_download
 
@@ -1535,7 +1546,9 @@ class TestDownloadGenomesFetchCommand:
         def _mock_download(**kwargs):
             od = kwargs.get("output_dir", output_dir)
             (od / "GCF_000002.1.fna").write_text(">c2\nTGCA\n")
-            return _make_tool_result()
+            return _make_download_report(
+                accessions=["GCF_000002.1"],
+            )
 
         mock_ncbi.download_genomes.side_effect = _mock_download
 

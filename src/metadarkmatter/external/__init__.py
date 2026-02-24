@@ -21,7 +21,11 @@ from metadarkmatter.external.kraken import (
     KrakenReport,
 )
 from metadarkmatter.external.mmseqs2 import MMseqs2
-from metadarkmatter.external.ncbi_datasets import NCBIDatasets
+from metadarkmatter.external.ncbi_datasets import (
+    DownloadOutcome,
+    DownloadReport,
+    NCBIDatasets,
+)
 from metadarkmatter.external.prodigal import Prodigal
 from metadarkmatter.external.samtools import Samtools
 from metadarkmatter.external.skani import Skani
@@ -29,6 +33,8 @@ from metadarkmatter.external.skani import Skani
 __all__ = [
     "BlastN",
     "Bowtie2",
+    "DownloadOutcome",
+    "DownloadReport",
     "Bowtie2Build",
     "ExternalTool",
     "ExtractKrakenReads",
