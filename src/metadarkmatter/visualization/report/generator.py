@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 from metadarkmatter.core.io_utils import read_dataframe
 from metadarkmatter.core.metadata import GenomeMetadata
 from metadarkmatter.visualization.plots.base import (
+    BAYESIAN_CATEGORY_COLORS,
     PlotConfig,
     ThresholdConfig,
     format_count,
@@ -57,16 +58,15 @@ from metadarkmatter.visualization.report.templates import (
     DISTRIBUTIONS_SUMMARY_TEMPLATE,
     DIVERSITY_SUMMARY_TEMPLATE,
     EMPTY_SECTION_TEMPLATE,
-    ENHANCED_SCORING_CONFIDENCE_TEMPLATE,
-    ENHANCED_SCORING_DISCOVERY_GUIDE_TEMPLATE,
     ENHANCED_SCORING_SUMMARY_TEMPLATE,
     ENHANCED_SCORING_UNCERTAINTY_TYPES_TEMPLATE,
     GENOME_HIGHLIGHTS_TEMPLATE,
     GENOME_INTERPRETATION_TEMPLATE,
-    GENOMES_SUMMARY_TEMPLATE,
     METRIC_CARD_TEMPLATE,
     METRIC_CARDS_CONTAINER,
     METHODS_SECTION_TEMPLATE,
+    OVERVIEW_FINDING_CARD_TEMPLATE,
+    OVERVIEW_KEY_FINDINGS_TEMPLATE,
     PLOT_CONTAINER_SIMPLE_TEMPLATE,
     PLOT_CONTAINER_TEMPLATE,
     PLOT_ROW_TEMPLATE,
@@ -78,6 +78,7 @@ from metadarkmatter.visualization.report.templates import (
     TABLE_ROW_TEMPLATE,
     BAYESIAN_SUMMARY_TEMPLATE,
     BAYESIAN_INTERPRETATION_TEMPLATE,
+    CONFIDENCE_SUMMARY_TEMPLATE,
     FAMILY_VALIDATION_SECTION_TEMPLATE,
     get_cell_class,
 )
@@ -556,11 +557,8 @@ class ReportGenerator:
         # Distributions tab
         content_sections.append(self._build_distributions_section())
 
-        # Species tab (if metadata provided)
-        content_sections.append(self._build_species_section())
-
-        # Genomes tab
-        content_sections.append(self._build_genomes_section())
+        # Species & Genomes tab (merged)
+        content_sections.append(self._build_species_genomes_section())
 
         # Novel Diversity tab (only if there are novel reads)
         if self.summary.diversity_novel > 0:
@@ -596,13 +594,9 @@ class ReportGenerator:
                     )
                 )
 
-        # Discovery Scores tab (only if enhanced scoring data available)
-        if self.summary.has_enhanced_scoring or self.summary.has_inferred_uncertainty:
-            content_sections.append(self._build_enhanced_scoring_section())
-
-        # Bayesian Confidence tab (always present in Bayesian-primary workflow)
-        if self.summary.has_bayesian:
-            content_sections.append(self._build_bayesian_section())
+        # Classification Confidence tab (merged Bayesian + Discovery Scores)
+        if self.summary.has_bayesian or self.summary.has_enhanced_scoring or self.summary.has_inferred_uncertainty:
+            content_sections.append(self._build_confidence_section())
 
         # Recruitment tab
         content_sections.append(self._build_recruitment_section())
@@ -646,8 +640,7 @@ class ReportGenerator:
         tabs = [
             ("overview", "Overview", True),
             ("distributions", "Distributions", False),
-            ("species", "Species", False),
-            ("genomes", "Genomes", False),
+            ("species-genomes", "Species & Genomes", False),
         ]
 
         # Add Novel Diversity tab if there are novel reads
@@ -668,13 +661,9 @@ class ReportGenerator:
         if hasattr(self, "_phylogeny_html") and self._phylogeny_html is not None:
             tabs.append(("phylogeny", "Phylogeny", False))
 
-        # Add Discovery Scores tab if data available (renamed from Enhanced Scoring)
-        if self.summary.has_enhanced_scoring or self.summary.has_inferred_uncertainty:
-            tabs.append(("enhanced-scoring", "Discovery Scores", False))
-
-        # Bayesian Confidence tab (always present in Bayesian-primary workflow)
-        if self.summary.has_bayesian:
-            tabs.append(("bayesian", "Bayesian Confidence", False))
+        # Classification Confidence tab (merged Bayesian + Discovery Scores)
+        if self.summary.has_bayesian or self.summary.has_enhanced_scoring or self.summary.has_inferred_uncertainty:
+            tabs.append(("confidence", "Classification Confidence", False))
 
         tabs.extend([
             ("recruitment", "Recruitment", False),
@@ -693,7 +682,7 @@ class ReportGenerator:
         return "\n".join(nav_items)
 
     def _build_overview_section(self) -> str:
-        """Build the overview tab section with hero diversity summary."""
+        """Build the overview tab section with hero diversity summary and key findings."""
         s = self.summary
 
         # Calculate percentages for all categories
@@ -708,6 +697,9 @@ class ReportGenerator:
             uncertain_pct=s.diversity_uncertain_pct,
             uncertain_count=s.diversity_uncertain,
         )
+
+        # Key findings cards
+        key_findings_html = self._build_key_findings()
 
         # Category breakdown with detailed counts
         category_html = CATEGORY_BREAKDOWN_TEMPLATE.format(
@@ -746,13 +738,108 @@ class ReportGenerator:
             )
         )
 
-        content = diversity_html + category_html + plots_row
+        content = diversity_html + key_findings_html + category_html + plots_row
 
         return TAB_SECTION_TEMPLATE.format(
             tab_id="overview",
             active_class="active",
             section_title="Overview",
             content=content,
+        )
+
+    def _build_key_findings(self) -> str:
+        """Build key findings cards for the overview tab."""
+        s = self.summary
+        cards = []
+
+        # Top species card (if metadata available)
+        if self.genome_metadata is not None and "species" not in self.df.columns:
+            enriched_df = self.genome_metadata.join_classifications(self.df)
+        elif "species" in self.df.columns:
+            enriched_df = self.df
+        else:
+            enriched_df = None
+
+        if enriched_df is not None and "species" in enriched_df.columns:
+            species_counts = (
+                enriched_df.group_by("species")
+                .len()
+                .sort("len", descending=True)
+            )
+            if len(species_counts) > 0:
+                top_sp = species_counts["species"][0]
+                top_count = species_counts["len"][0]
+                top_pct = top_count / s.total_reads * 100 if s.total_reads > 0 else 0
+                cards.append(OVERVIEW_FINDING_CARD_TEMPLATE.format(
+                    card_class="species",
+                    icon="S",
+                    headline=f"Dominant species: {top_sp}",
+                    detail=f"{top_pct:.0f}% of reads ({top_count:,})",
+                    link="",
+                ))
+
+        # Novel diversity headline
+        if s.diversity_novel > 0:
+            novel_detail = (
+                f"{s.novel_species:,} novel species + "
+                f"{s.novel_genus:,} novel genus reads detected"
+            )
+            link_html = (
+                '<a class="finding-link" onclick="showTab(\'novel-diversity\')">'
+                'See Novel Diversity tab</a>'
+            )
+            cards.append(OVERVIEW_FINDING_CARD_TEMPLATE.format(
+                card_class="novel",
+                icon="N",
+                headline=f"{s.diversity_novel:,} novel diversity reads ({s.diversity_novel_pct:.1f}%)",
+                detail=novel_detail,
+                link=link_html,
+            ))
+
+        # Classification confidence
+        if s.has_bayesian:
+            cards.append(OVERVIEW_FINDING_CARD_TEMPLATE.format(
+                card_class="confidence",
+                icon="Q",
+                headline=f"{s.high_confidence_pct:.0f}% high-confidence classifications",
+                detail=f"{s.high_confidence_count:,} reads with entropy < 1.0",
+                link="",
+            ))
+
+        # Conditional action items
+        action_items = []
+        if s.high_priority_discoveries > 0:
+            action_items.append(
+                f"{s.high_priority_discoveries} high-priority novel reads "
+                f"(discovery score >= 75) warrant experimental validation"
+            )
+        if s.has_family_validation and s.off_target > 0:
+            off_target_pct = s.off_target / s.total_reads * 100 if s.total_reads > 0 else 0
+            if off_target_pct > 5:
+                action_items.append(
+                    f"{off_target_pct:.0f}% off-target reads detected"
+                )
+
+        if action_items:
+            link_html = ""
+            if s.has_family_validation and s.off_target > 0:
+                link_html = (
+                    '<a class="finding-link" onclick="showTab(\'family-validation\')">'
+                    'Review Family Validation tab</a>'
+                )
+            cards.append(OVERVIEW_FINDING_CARD_TEMPLATE.format(
+                card_class="action",
+                icon="!",
+                headline="Action items",
+                detail="; ".join(action_items),
+                link=link_html,
+            ))
+
+        if not cards:
+            return ""
+
+        return OVERVIEW_KEY_FINDINGS_TEMPLATE.format(
+            findings_cards="\n".join(cards),
         )
 
     def _build_metric_cards(self) -> str:
@@ -958,274 +1045,60 @@ class ReportGenerator:
             content=content,
         )
 
-    def _build_enhanced_scoring_section(self) -> str:
-        """Build the enhanced scoring tab section with confidence metrics and discovery scores."""
+    def _build_confidence_section(self) -> str:
+        """Build the merged Classification Confidence tab (Bayesian + Discovery Scores)."""
         import plotly.graph_objects as go
 
         s = self.summary
         content_parts = []
 
-        # Summary section with key metrics
-        summary_html = ENHANCED_SCORING_SUMMARY_TEMPLATE.format(
-            single_hit_pct=s.single_hit_pct,
-            single_hit_count=s.single_hit_count,
-            total_reads=s.total_reads,
-            mean_inferred_uncertainty=s.mean_inferred_uncertainty or 0.0,
-            high_priority_count=s.high_priority_discoveries,
-            mean_discovery_score=s.mean_discovery_score or 0.0,
-            novel_count=s.novel_with_discovery_score,
-        )
-        content_parts.append(summary_html)
-
-        # Confidence dimensions section (only if enhanced scoring)
-        if s.has_enhanced_scoring:
-            confidence_html = ENHANCED_SCORING_CONFIDENCE_TEMPLATE.format(
-                mean_identity_confidence=s.mean_identity_confidence or 0.0,
-                mean_placement_confidence=s.mean_placement_confidence or 0.0,
-                mean_alignment_quality=s.mean_alignment_quality or 0.0,
-            )
-            content_parts.append(confidence_html)
-
-        # Uncertainty types breakdown
-        if s.has_inferred_uncertainty and "uncertainty_type" in self.df.columns:
-            measured_df = self.df.filter(pl.col("uncertainty_type") == "measured")
-            inferred_df = self.df.filter(pl.col("uncertainty_type") == "inferred")
-            measured_count = len(measured_df)
-            inferred_count = len(inferred_df)
-            total = s.total_reads if s.total_reads > 0 else 1
-
-            uncertainty_types_html = ENHANCED_SCORING_UNCERTAINTY_TYPES_TEMPLATE.format(
-                measured_count=measured_count,
-                measured_pct=measured_count / total * 100,
-                inferred_count=inferred_count,
-                inferred_pct=inferred_count / total * 100,
+        # --- Merged summary cards ---
+        if s.has_bayesian:
+            summary_html = CONFIDENCE_SUMMARY_TEMPLATE.format(
+                mean_entropy=s.mean_posterior_entropy,
+                high_confidence_pct=s.high_confidence_pct,
+                high_confidence_count=s.high_confidence_count,
+                map_agreement_pct=s.map_agreement_pct,
+                map_agreement_count=s.map_agreement_count,
+                total_reads=s.total_reads,
                 single_hit_pct=s.single_hit_pct,
+                single_hit_count=s.single_hit_count,
+                mean_discovery_score=s.mean_discovery_score or 0.0,
+                novel_count=s.novel_with_discovery_score,
+                boundary_pct=s.boundary_pct,
+                boundary_count=s.boundary_count,
             )
-            content_parts.append(uncertainty_types_html)
-
-        # Discovery score interpretation guide
-        if s.has_enhanced_scoring and s.novel_with_discovery_score > 0:
-            content_parts.append(ENHANCED_SCORING_DISCOVERY_GUIDE_TEMPLATE)
-
-        # Visualizations
-
-        # Discovery Score Distribution (histogram for novel reads)
-        if s.has_enhanced_scoring and "discovery_score" in self.df.columns:
-            discovery_df = self.df.filter(pl.col("discovery_score").is_not_null())
-            if len(discovery_df) > 0:
-                scores = discovery_df["discovery_score"].to_list()
-
-                discovery_fig = go.Figure()
-                discovery_fig.add_trace(go.Histogram(
-                    x=scores,
-                    nbinsx=25,
-                    marker_color="#667eea",
-                    hovertemplate="Score: %{x:.0f}<br>Count: %{y}<extra></extra>",
-                ))
-
-                # Add threshold lines
-                discovery_fig.add_vline(x=75, line_dash="dash", line_color="#22c55e",
-                                        annotation_text="High Priority (75+)")
-                discovery_fig.add_vline(x=50, line_dash="dot", line_color="#f59e0b",
-                                        annotation_text="Moderate (50+)")
-                discovery_fig.add_vline(x=25, line_dash="dot", line_color="#ef4444",
-                                        annotation_text="Low (25+)")
-
-                discovery_fig.update_layout(
-                    title="Discovery Score Distribution (Novel Reads)",
-                    xaxis_title="Discovery Score",
-                    yaxis_title="Number of Reads",
-                    template="plotly_white",
-                    height=400,
-                    showlegend=False,
-                )
-                discovery_hist_id = "plot-discovery-hist"
-                self._register_plot(discovery_hist_id, discovery_fig)
-
-                content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
-                    extra_class="full-width",
-                    title="Discovery Score Distribution",
-                    description=(
-                        "Distribution of discovery scores for novel reads. Higher scores indicate "
-                        "more reliable discoveries. Green line marks high-priority threshold (75+)."
-                    ),
-                    plot_id=discovery_hist_id,
-                ))
-
-        # Confidence Dimensions Scatter Plot
-        if s.has_enhanced_scoring and "identity_confidence" in self.df.columns:
-            # Sample for performance
-            plot_df = self.df
-            if len(plot_df) > self.config.max_scatter_points:
-                plot_df = plot_df.sample(n=self.config.max_scatter_points, seed=42)
-
-            conf_fig = go.Figure()
-
-            # Color by taxonomic call
-            for call, color in [
-                ("Known Species", "#22c55e"),
-                ("Novel Species", "#f59e0b"),
-                ("Novel Genus", "#ef4444"),
-                ("Ambiguous", "#94a3b8"),
-            ]:
-                call_df = plot_df.filter(pl.col("taxonomic_call") == call)
-                if len(call_df) > 0:
-                    conf_fig.add_trace(go.Scattergl(
-                        x=call_df["identity_confidence"].to_list(),
-                        y=call_df["placement_confidence"].to_list(),
-                        mode="markers",
-                        name=call,
-                        marker={"color": color, "size": 4, "opacity": 0.6},
-                        hovertemplate=(
-                            f"<b>{call}</b><br>"
-                            "Identity Conf: %{x:.1f}<br>"
-                            "Placement Conf: %{y:.1f}<extra></extra>"
-                        ),
-                    ))
-
-            conf_fig.update_layout(
-                title="Confidence Dimensions",
-                xaxis_title="Identity Confidence",
-                yaxis_title="Placement Confidence",
-                template="plotly_white",
-                height=500,
-                legend={"orientation": "h", "y": -0.15},
+            content_parts.append(summary_html)
+            content_parts.append(BAYESIAN_INTERPRETATION_TEMPLATE)
+        elif s.has_enhanced_scoring or s.has_inferred_uncertainty:
+            # Fallback: show discovery-only summary when no Bayesian data
+            summary_html = ENHANCED_SCORING_SUMMARY_TEMPLATE.format(
+                single_hit_pct=s.single_hit_pct,
+                single_hit_count=s.single_hit_count,
+                total_reads=s.total_reads,
+                mean_inferred_uncertainty=s.mean_inferred_uncertainty or 0.0,
+                high_priority_count=s.high_priority_discoveries,
+                mean_discovery_score=s.mean_discovery_score or 0.0,
+                novel_count=s.novel_with_discovery_score,
             )
-            conf_scatter_id = "plot-confidence-dimensions"
-            self._register_plot(conf_scatter_id, conf_fig)
-
-            content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
-                extra_class="full-width",
-                title="Confidence Dimensions Scatter",
-                description=(
-                    "Identity confidence (reliability of identity measurement) vs "
-                    "placement confidence (confidence in genome assignment). "
-                    "High values on both axes indicate reliable classifications."
-                ),
-                plot_id=conf_scatter_id,
-            ))
-
-        # Inferred vs Measured Uncertainty Comparison
-        if s.has_inferred_uncertainty and "inferred_uncertainty" in self.df.columns:
-            # Create comparison histogram
-            inferred_df = self.df.filter(pl.col("inferred_uncertainty").is_not_null())
-            measured_df = self.df.filter(
-                (pl.col("uncertainty_type") == "measured") &
-                (pl.col("placement_uncertainty").is_not_null())
-            )
-
-            unc_fig = go.Figure()
-
-            if len(inferred_df) > 0:
-                unc_fig.add_trace(go.Histogram(
-                    x=inferred_df["inferred_uncertainty"].to_list(),
-                    name="Inferred (single-hit)",
-                    marker_color="#f59e0b",
-                    opacity=0.7,
-                    nbinsx=30,
-                ))
-
-            if len(measured_df) > 0:
-                unc_fig.add_trace(go.Histogram(
-                    x=measured_df["placement_uncertainty"].to_list(),
-                    name="Measured (multi-hit)",
-                    marker_color="#22c55e",
-                    opacity=0.7,
-                    nbinsx=30,
-                ))
-
-            unc_fig.update_layout(
-                title="Uncertainty Distribution by Type",
-                xaxis_title="Uncertainty (%)",
-                yaxis_title="Number of Reads",
-                template="plotly_white",
-                height=400,
-                barmode="overlay",
-                legend={"orientation": "h", "y": -0.15},
-            )
-            unc_hist_id = "plot-uncertainty-comparison"
-            self._register_plot(unc_hist_id, unc_fig)
-
-            content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
-                extra_class="full-width",
-                title="Uncertainty by Type",
-                description=(
-                    "Comparison of measured uncertainty (from ANI between competing hits) "
-                    "vs inferred uncertainty (estimated from novelty for single-hit reads). "
-                    "Inferred uncertainty prevents false confidence in single-hit reads."
-                ),
-                plot_id=unc_hist_id,
-            ))
-
-        content = "\n".join(content_parts)
-
-        return TAB_SECTION_TEMPLATE.format(
-            tab_id="enhanced-scoring",
-            active_class="",
-            section_title="Discovery Scores",
-            content=content,
-        )
-
-    def _build_bayesian_section(self) -> str:
-        """Build the Bayesian confidence tab with posterior analysis and entropy."""
-        import plotly.graph_objects as go
-
-        s = self.summary
-        content_parts = []
-
-        # Summary cards
-        summary_html = BAYESIAN_SUMMARY_TEMPLATE.format(
-            mean_entropy=s.mean_posterior_entropy,
-            high_confidence_pct=s.high_confidence_pct,
-            high_confidence_count=s.high_confidence_count,
-            map_agreement_pct=s.map_agreement_pct,
-            map_agreement_count=s.map_agreement_count,
-            total_reads=s.total_reads,
-            boundary_pct=s.boundary_pct,
-            boundary_count=s.boundary_count,
-        )
-        content_parts.append(summary_html)
-
-        # Interpretation guide
-        content_parts.append(BAYESIAN_INTERPRETATION_TEMPLATE)
+            content_parts.append(summary_html)
 
         # --- Posterior Entropy Distribution ---
-        if "posterior_entropy" in self.df.columns:
-            entropy_vals = self.df["posterior_entropy"].to_list()
-
-            entropy_fig = go.Figure()
-            entropy_fig.add_trace(go.Histogram(
-                x=entropy_vals,
-                nbinsx=40,
-                marker_color="#667eea",
-                hovertemplate="Entropy: %{x:.2f}<br>Count: %{y}<extra></extra>",
-            ))
-
-            # Add threshold lines
-            entropy_fig.add_vline(
-                x=0.5, line_dash="dash", line_color="#22c55e",
-                annotation_text="Very confident",
-            )
-            entropy_fig.add_vline(
-                x=1.0, line_dash="dot", line_color="#f59e0b",
-                annotation_text="Confident",
-            )
-            entropy_fig.add_vline(
-                x=1.5, line_dash="dot", line_color="#ef4444",
-                annotation_text="Uncertain",
-            )
-
-            entropy_fig.update_layout(
-                title="Posterior Entropy Distribution",
-                xaxis_title="Shannon Entropy (bits)",
-                yaxis_title="Number of Reads",
-                template="plotly_white",
-                height=400,
-                showlegend=False,
-                xaxis={"range": [0, 2.7]},  # log2(6) ~ 2.585
-            )
+        if s.has_bayesian and "posterior_entropy" in self.df.columns:
             entropy_id = "plot-bayesian-entropy"
-            self._register_plot(entropy_id, entropy_fig)
+            self._build_histogram(
+                data=self.df["posterior_entropy"].to_list(),
+                plot_id=entropy_id,
+                title="Posterior Entropy Distribution",
+                x_label="Shannon Entropy (bits)",
+                nbins=40,
+                thresholds=[
+                    (0.5, "dash", "#22c55e", "Very confident"),
+                    (1.0, "dot", "#f59e0b", "Confident"),
+                    (1.5, "dot", "#ef4444", "Uncertain"),
+                ],
+                x_range=[0, 2.7],
+            )
 
             content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
                 extra_class="full-width",
@@ -1240,15 +1113,7 @@ class ReportGenerator:
             ))
 
         # --- Stacked Posterior Bar by Category ---
-        if "taxonomic_call" in self.df.columns:
-            category_colors = {
-                "Known Species": "#22c55e",
-                "Novel Species": "#f59e0b",
-                "Novel Genus": "#ef4444",
-                "Species Boundary": "#a855f7",
-                "Ambiguous": "#94a3b8",
-                "Unclassified": "#64748b",
-            }
+        if s.has_bayesian and "taxonomic_call" in self.df.columns:
             posterior_cols = [
                 ("p_known_species", "Known Species"),
                 ("p_novel_species", "Novel Species"),
@@ -1258,7 +1123,6 @@ class ReportGenerator:
                 ("p_unclassified", "Unclassified"),
             ]
 
-            # Mean posteriors grouped by taxonomic call
             bar_fig = go.Figure()
             all_map_cats = [
                 "Known Species", "Novel Species", "Novel Genus",
@@ -1279,7 +1143,7 @@ class ReportGenerator:
                         x=cats,
                         y=means,
                         name=cat_label,
-                        marker_color=category_colors.get(cat_label, "#94a3b8"),
+                        marker_color=BAYESIAN_CATEGORY_COLORS.get(cat_label, "#94a3b8"),
                     ))
 
             bar_fig.update_layout(
@@ -1306,49 +1170,63 @@ class ReportGenerator:
                 plot_id=bar_id,
             ))
 
-        # --- MAP Confidence vs Novelty Scatter ---
-        if "posterior_entropy" in self.df.columns and "novelty_index" in self.df.columns:
-            plot_df = self.df
-            if len(plot_df) > self.config.max_scatter_points:
-                plot_df = plot_df.sample(n=self.config.max_scatter_points, seed=42)
+        # --- Discovery Score Distribution (moved from Discovery Scores tab) ---
+        if s.has_enhanced_scoring and "discovery_score" in self.df.columns:
+            discovery_df = self.df.filter(pl.col("discovery_score").is_not_null())
+            if len(discovery_df) > 0:
+                discovery_hist_id = "plot-discovery-hist"
+                self._build_histogram(
+                    data=discovery_df["discovery_score"].to_list(),
+                    plot_id=discovery_hist_id,
+                    title="Discovery Score Distribution (Novel Reads)",
+                    x_label="Discovery Score",
+                    nbins=25,
+                    thresholds=[
+                        (75, "dash", "#22c55e", "High Priority (75+)"),
+                        (50, "dot", "#f59e0b", "Moderate (50+)"),
+                        (25, "dot", "#ef4444", "Low (25+)"),
+                    ],
+                )
 
-            scatter_fig = go.Figure()
+                content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
+                    extra_class="full-width",
+                    title="Discovery Score Distribution",
+                    description=(
+                        "Distribution of discovery scores for novel reads. Higher scores indicate "
+                        "more reliable discoveries. Green line marks high-priority threshold (75+)."
+                    ),
+                    plot_id=discovery_hist_id,
+                ))
 
-            category_colors_scatter = {
-                "Known Species": "#22c55e",
-                "Novel Species": "#f59e0b",
-                "Novel Genus": "#ef4444",
-                "Species Boundary": "#a855f7",
-                "Ambiguous": "#94a3b8",
-                "Unclassified": "#64748b",
-            }
-            for call, color in category_colors_scatter.items():
-                call_df = plot_df.filter(pl.col("taxonomic_call") == call)
-                if len(call_df) > 0:
-                    scatter_fig.add_trace(go.Scattergl(
-                        x=call_df["novelty_index"].to_list(),
-                        y=call_df["posterior_entropy"].to_list(),
-                        mode="markers",
-                        name=call,
-                        marker={"color": color, "size": 4, "opacity": 0.5},
-                        hovertemplate=(
-                            f"<b>{call}</b><br>"
-                            "Novelty: %{{x:.1f}}%<br>"
-                            "Entropy: %{{y:.2f}}<extra></extra>"
-                        ),
-                    ))
+        # --- Uncertainty types breakdown (moved from Discovery Scores tab) ---
+        if s.has_inferred_uncertainty and "uncertainty_type" in self.df.columns:
+            measured_df = self.df.filter(pl.col("uncertainty_type") == "measured")
+            inferred_df = self.df.filter(pl.col("uncertainty_type") == "inferred")
+            measured_count = len(measured_df)
+            inferred_count = len(inferred_df)
+            total = s.total_reads if s.total_reads > 0 else 1
 
-            scatter_fig.update_layout(
-                title="Classification Confidence Landscape",
-                xaxis_title="Novelty Index (%)",
-                yaxis_title="Posterior Entropy (bits)",
-                template="plotly_white",
-                height=500,
-                legend={"orientation": "h", "y": -0.15},
-                yaxis={"range": [0, 2.7]},  # log2(6) ~ 2.585
+            uncertainty_types_html = ENHANCED_SCORING_UNCERTAINTY_TYPES_TEMPLATE.format(
+                measured_count=measured_count,
+                measured_pct=measured_count / total * 100,
+                inferred_count=inferred_count,
+                inferred_pct=inferred_count / total * 100,
+                single_hit_pct=s.single_hit_pct,
             )
+            content_parts.append(uncertainty_types_html)
+
+        # --- Confidence Landscape Scatter ---
+        if s.has_bayesian and "posterior_entropy" in self.df.columns and "novelty_index" in self.df.columns:
             scatter_id = "plot-bayesian-landscape"
-            self._register_plot(scatter_id, scatter_fig)
+            self._build_category_scatter(
+                x_col="novelty_index",
+                y_col="posterior_entropy",
+                plot_id=scatter_id,
+                title="Classification Confidence Landscape",
+                x_label="Novelty Index (%)",
+                y_label="Posterior Entropy (bits)",
+                y_range=[0, 2.7],
+            )
 
             content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
                 extra_class="full-width",
@@ -1364,9 +1242,9 @@ class ReportGenerator:
         content = "\n".join(content_parts)
 
         return TAB_SECTION_TEMPLATE.format(
-            tab_id="bayesian",
+            tab_id="confidence",
             active_class="",
-            section_title="Bayesian Confidence",
+            section_title="Classification Confidence",
             content=content,
         )
 
@@ -1605,22 +1483,16 @@ class ReportGenerator:
             content=content,
         )
 
-    def _build_species_section(self) -> str:
-        """Build the species breakdown tab section."""
-        if self.genome_metadata is None:
-            content = EMPTY_SECTION_TEMPLATE.format(
-                message=(
-                    "Species breakdown not available. "
-                    "Use --metadata option with genome_metadata.tsv "
-                    "to enable species-level aggregation."
-                )
-            )
-        else:
+    def _build_species_genomes_section(self) -> str:
+        """Build the merged Species & Genomes tab section."""
+        content_parts = []
+
+        # Species section (if metadata provided)
+        if self.genome_metadata is not None:
             import plotly.graph_objects as go
 
             # Join metadata to get species information
             if "species" not in self.df.columns:
-                # Need to join species information
                 enriched_df = self.genome_metadata.join_classifications(self.df)
             else:
                 enriched_df = self.df
@@ -1638,11 +1510,7 @@ class ReportGenerator:
                 .head(20)
             )
 
-            if len(species_counts) == 0:
-                content = EMPTY_SECTION_TEMPLATE.format(
-                    message="No species data available."
-                )
-            else:
+            if len(species_counts) > 0:
                 # Horizontal bar chart of species read counts
                 bar_fig = go.Figure()
                 bar_fig.add_trace(
@@ -1702,10 +1570,9 @@ class ReportGenerator:
                 species_pie_id = "plot-species-pie"
                 self._register_plot(species_pie_id, pie_fig)
 
-                # Summary statistics
                 total_species = species_counts["species"].n_unique()
 
-                content = (
+                content_parts.append(
                     f'<div class="metric-cards">'
                     f'<div class="metric-card">'
                     f'<div class="metric-value">{total_species}</div>'
@@ -1718,35 +1585,32 @@ class ReportGenerator:
                     f'<div class="metric-subtext">In metadata database</div>'
                     f'</div>'
                     f'</div>'
-                    + PLOT_ROW_TEMPLATE.format(
-                        plots=(
-                            PLOT_CONTAINER_TEMPLATE.format(
-                                extra_class="half-width",
-                                title="Species Composition",
-                                description=(
-                                    "Pie chart showing the proportion of reads "
-                                    "assigned to each species."
-                                ),
-                                plot_id=species_pie_id,
-                            )
-                            + PLOT_CONTAINER_SIMPLE_TEMPLATE.format(
-                                extra_class="half-width",
-                                plot_id=species_bar_id,
-                            )
+                )
+                content_parts.append(PLOT_ROW_TEMPLATE.format(
+                    plots=(
+                        PLOT_CONTAINER_TEMPLATE.format(
+                            extra_class="half-width",
+                            title="Species Composition",
+                            description=(
+                                "Pie chart showing the proportion of reads "
+                                "assigned to each species."
+                            ),
+                            plot_id=species_pie_id,
+                        )
+                        + PLOT_CONTAINER_SIMPLE_TEMPLATE.format(
+                            extra_class="half-width",
+                            plot_id=species_bar_id,
                         )
                     )
-                )
+                ))
+        else:
+            content_parts.append(
+                '<div class="section-note">'
+                '<p>Species-level aggregation requires --metadata. '
+                'Genome-level breakdown is shown below.</p></div>'
+            )
 
-        return TAB_SECTION_TEMPLATE.format(
-            tab_id="species",
-            active_class="",
-            section_title="Species Breakdown",
-            content=content,
-        )
-
-    def _build_genomes_section(self) -> str:
-        """Build the genomes breakdown tab section with improved UX."""
-        # Per-genome read counts with statistics
+        # --- Genome-Level Highlights section ---
         genome_counts = (
             self.df.group_by("best_match_genome")
             .agg([
@@ -1757,56 +1621,13 @@ class ReportGenerator:
             .sort("count", descending=True)
         )
 
-        if len(genome_counts) == 0:
-            content = EMPTY_SECTION_TEMPLATE.format(
-                message="No genome data available."
-            )
-        else:
-            import plotly.graph_objects as go
-
-            # Calculate summary statistics
-            total_genomes = len(genome_counts)
-            ref_genomes = (
-                self.genome_metadata.genome_count
-                if self.genome_metadata else total_genomes
+        if len(genome_counts) > 0:
+            content_parts.append(
+                '<div class="section-divider">'
+                '<h3>Genome-Level Highlights</h3>'
+                '</div>'
             )
 
-            # Top genome stats
-            top_genome_acc = genome_counts["best_match_genome"][0]
-            top_genome_count = genome_counts["count"][0]
-            top_genome_pct = (
-                (top_genome_count / self.summary.total_reads * 100)
-                if self.summary.total_reads else 0
-            )
-            top_genome_name = self._get_genome_label(top_genome_acc, max_species_len=25)
-
-            # Top 3 genomes concentration
-            top3_count = genome_counts["count"].head(3).sum()
-            top3_pct = (
-                (top3_count / self.summary.total_reads * 100)
-                if self.summary.total_reads else 0
-            )
-            concentration_hint = (
-                "Concentrated" if top3_pct > 70 else
-                "Moderate spread" if top3_pct > 40 else
-                "Widely distributed"
-            )
-
-            # Median reads per genome
-            median_reads = int(genome_counts["count"].median() or 0)
-
-            # Build summary section
-            summary_html = GENOMES_SUMMARY_TEMPLATE.format(
-                total_genomes=total_genomes,
-                ref_genomes=ref_genomes,
-                top_genome_pct=top_genome_pct,
-                top_genome_name=top_genome_name[:30],
-                top3_pct=top3_pct,
-                concentration_hint=concentration_hint,
-                median_reads=median_reads,
-            )
-
-            # Find key genomes for highlights
             # Helper to get species name
             def get_species(acc: str) -> str:
                 if self.genome_metadata:
@@ -1815,7 +1636,9 @@ class ReportGenerator:
                         return species
                 return "Unknown species"
 
-            # Most abundant (already have it)
+            # Most abundant
+            top_genome_acc = genome_counts["best_match_genome"][0]
+            top_genome_count = genome_counts["count"][0]
             top_identity = genome_counts["mean_identity"][0]
             top_species = get_species(top_genome_acc)
 
@@ -1847,8 +1670,7 @@ class ReportGenerator:
                 confident_identity = top_identity
             confident_species = get_species(confident_genome_acc)
 
-            # Build highlights section
-            highlights_html = GENOME_HIGHLIGHTS_TEMPLATE.format(
+            content_parts.append(GENOME_HIGHLIGHTS_TEMPLATE.format(
                 top_species=top_species,
                 top_accession=top_genome_acc,
                 top_reads=top_genome_count,
@@ -1861,106 +1683,16 @@ class ReportGenerator:
                 confident_accession=confident_genome_acc,
                 confident_reads=confident_reads,
                 confident_identity=confident_identity,
-            )
+            ))
 
-            # Interpretation guide
-            interpretation_html = GENOME_INTERPRETATION_TEMPLATE
+            content_parts.append(GENOME_INTERPRETATION_TEMPLATE)
 
-            # Get top 20 genomes for plotting
-            genome_counts_top20 = genome_counts.head(20)
-            genome_accessions = genome_counts_top20["best_match_genome"].to_list()
-            genome_labels = [
-                self._get_genome_label(acc, max_species_len=30)
-                for acc in genome_accessions
-            ]
-
-            # Horizontal bar chart of genome read counts
-            bar_fig = go.Figure()
-            bar_fig.add_trace(
-                go.Bar(
-                    y=genome_labels[::-1],
-                    x=genome_counts_top20["count"].to_list()[::-1],
-                    orientation="h",
-                    marker_color="#667eea",
-                    text=[
-                        f"{c:,}"
-                        for c in genome_counts_top20["count"].to_list()[::-1]
-                    ],
-                    textposition="outside",
-                    hovertemplate=(
-                        "<b>%{y}</b><br>"
-                        "Reads: %{x:,}<extra></extra>"
-                    ),
-                )
-            )
-            bar_fig.update_layout(
-                title="Top 20 Reference Genomes by Read Count",
-                xaxis_title="Number of Reads",
-                yaxis_title="",
-                template="plotly_white",
-                height=max(400, 35 * len(genome_counts_top20)),
-                margin={"l": 350, "r": 40, "t": 60, "b": 60},
-            )
-            genome_bar_id = "plot-genome-bar"
-            self._register_plot(genome_bar_id, bar_fig)
-
-            # Box plot of identity distribution per genome
-            # Get identity data for top 10 genomes
-            top_genomes = genome_counts["best_match_genome"].head(10).to_list()
-            box_data = self.df.filter(pl.col("best_match_genome").is_in(top_genomes))
-
-            box_fig = go.Figure()
-            for genome in top_genomes:
-                gdata = box_data.filter(pl.col("best_match_genome") == genome)
-                # Use species-annotated label for box plot
-                label = self._get_genome_label(genome, max_species_len=20)
-                box_fig.add_trace(
-                    go.Box(
-                        y=gdata["top_hit_identity"].to_list(),
-                        name=label[:40] + ("..." if len(label) > 40 else ""),
-                        boxpoints=False,
-                        hoverinfo="y+name",
-                    )
-                )
-
-            box_fig.update_layout(
-                title="Identity Distribution by Genome (Top 10)",
-                yaxis_title="Percent Identity (%)",
-                template="plotly_white",
-                showlegend=False,
-                height=500,
-            )
-            genome_box_id = "plot-genome-box"
-            self._register_plot(genome_box_id, box_fig)
-
-            # Build content with new templates
-            plots_html = (
-                PLOT_CONTAINER_TEMPLATE.format(
-                    extra_class="full-width",
-                    title="Read Counts by Reference Genome",
-                    description=(
-                        "Bar chart showing the number of reads assigned "
-                        "to each reference genome."
-                    ),
-                    plot_id=genome_bar_id,
-                )
-                + PLOT_CONTAINER_TEMPLATE.format(
-                    extra_class="full-width",
-                    title="Identity Distribution by Genome",
-                    description=(
-                        "Box plots showing the distribution of alignment identity "
-                        "for top genomes."
-                    ),
-                    plot_id=genome_box_id,
-                )
-            )
-
-            content = summary_html + highlights_html + interpretation_html + plots_html
+        content = "\n".join(content_parts)
 
         return TAB_SECTION_TEMPLATE.format(
-            tab_id="genomes",
+            tab_id="species-genomes",
             active_class="",
-            section_title="Genome Breakdown",
+            section_title="Species & Genomes",
             content=content,
         )
 
@@ -2497,6 +2229,144 @@ document.addEventListener('DOMContentLoaded', function() {
             section_title="Methods",
             content=METHODS_SECTION_TEMPLATE,
         )
+
+    def _build_histogram(
+        self,
+        data: list[float],
+        plot_id: str,
+        title: str,
+        x_label: str,
+        y_label: str = "Number of Reads",
+        nbins: int = 30,
+        color: str = "#667eea",
+        thresholds: list[tuple[float, str, str, str]] | None = None,
+        height: int = 400,
+        x_range: list[float] | None = None,
+    ) -> str:
+        """Build a histogram plot and return PLOT_CONTAINER_TEMPLATE HTML.
+
+        Args:
+            data: Values to plot.
+            plot_id: Unique DOM id for the plot div.
+            title: Plot title.
+            x_label: X-axis label.
+            y_label: Y-axis label.
+            nbins: Number of histogram bins.
+            color: Bar fill color.
+            thresholds: Optional list of (x_value, line_dash, line_color, annotation_text).
+            height: Plot height in pixels.
+            x_range: Optional [min, max] for x-axis.
+
+        Returns:
+            HTML string (empty if data is empty).
+        """
+        import plotly.graph_objects as go
+
+        if not data:
+            return ""
+
+        fig = go.Figure()
+        fig.add_trace(go.Histogram(
+            x=data,
+            nbinsx=nbins,
+            marker_color=color,
+            hovertemplate=f"{x_label}: %{{x:.2f}}<br>Count: %{{y}}<extra></extra>",
+        ))
+
+        if thresholds:
+            for x_val, dash, lcolor, annotation in thresholds:
+                fig.add_vline(x=x_val, line_dash=dash, line_color=lcolor,
+                              annotation_text=annotation)
+
+        layout_kwargs: dict[str, Any] = {
+            "title": title,
+            "xaxis_title": x_label,
+            "yaxis_title": y_label,
+            "template": "plotly_white",
+            "height": height,
+            "showlegend": False,
+        }
+        if x_range is not None:
+            layout_kwargs["xaxis"] = {"range": x_range}
+        fig.update_layout(**layout_kwargs)
+
+        self._register_plot(plot_id, fig)
+        return ""
+
+    def _build_category_scatter(
+        self,
+        x_col: str,
+        y_col: str,
+        plot_id: str,
+        title: str,
+        x_label: str,
+        y_label: str,
+        categories: dict[str, str] | None = None,
+        height: int = 500,
+        max_points: int | None = None,
+        y_range: list[float] | None = None,
+    ) -> str:
+        """Build a per-category scatter plot and register it.
+
+        Args:
+            x_col: DataFrame column for x-axis values.
+            y_col: DataFrame column for y-axis values.
+            plot_id: Unique DOM id.
+            title: Plot title.
+            x_label: X-axis label.
+            y_label: Y-axis label.
+            categories: Dict mapping category name to color. Defaults to BAYESIAN_CATEGORY_COLORS.
+            height: Plot height in pixels.
+            max_points: If set, subsample the DataFrame.
+            y_range: Optional [min, max] for y-axis.
+
+        Returns:
+            Empty string (plot is registered internally).
+        """
+        import plotly.graph_objects as go
+
+        if x_col not in self.df.columns or y_col not in self.df.columns:
+            return ""
+
+        if categories is None:
+            categories = BAYESIAN_CATEGORY_COLORS
+
+        plot_df = self.df
+        effective_max = max_points or self.config.max_scatter_points
+        if len(plot_df) > effective_max:
+            plot_df = plot_df.sample(n=effective_max, seed=42)
+
+        fig = go.Figure()
+        for call, color in categories.items():
+            call_df = plot_df.filter(pl.col("taxonomic_call") == call)
+            if len(call_df) > 0:
+                fig.add_trace(go.Scattergl(
+                    x=call_df[x_col].to_list(),
+                    y=call_df[y_col].to_list(),
+                    mode="markers",
+                    name=call,
+                    marker={"color": color, "size": 4, "opacity": 0.5},
+                    hovertemplate=(
+                        f"<b>{call}</b><br>"
+                        f"{x_label}: %{{x:.1f}}<br>"
+                        f"{y_label}: %{{y:.2f}}<extra></extra>"
+                    ),
+                ))
+
+        layout_kwargs: dict[str, Any] = {
+            "title": title,
+            "xaxis_title": x_label,
+            "yaxis_title": y_label,
+            "template": "plotly_white",
+            "height": height,
+            "legend": {"orientation": "h", "y": -0.15},
+        }
+        if y_range is not None:
+            layout_kwargs["yaxis"] = {"range": y_range}
+        fig.update_layout(**layout_kwargs)
+
+        self._register_plot(plot_id, fig)
+        return ""
 
     def _register_plot(self, plot_id: str, fig: go.Figure) -> None:
         """Register a plot for later JS initialization."""

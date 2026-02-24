@@ -330,6 +330,70 @@ body {
 .legend-dot.novel { background: var(--danger-color); }
 .legend-dot.uncertain { background: var(--info-color); }
 
+/* Key Findings Cards */
+.key-findings {
+    background: var(--bg-primary);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border-light);
+}
+
+.findings-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    color: var(--text-primary);
+}
+
+.findings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1rem;
+}
+
+.finding-card {
+    display: flex;
+    gap: 0.75rem;
+    padding: 1rem;
+    border-radius: var(--radius-md);
+    background: var(--bg-secondary);
+    border-left: 3px solid var(--border-color);
+}
+
+.finding-card.species { border-left-color: var(--success-color); }
+.finding-card.novel { border-left-color: var(--danger-color); }
+.finding-card.confidence { border-left-color: var(--accent-color); }
+.finding-card.action { border-left-color: var(--warning-color); }
+
+.finding-icon {
+    font-size: 1.5rem;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.finding-headline {
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-bottom: 0.25rem;
+    color: var(--text-primary);
+}
+
+.finding-detail {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.finding-link {
+    font-size: 0.8rem;
+    color: var(--accent-color);
+    text-decoration: none;
+    margin-top: 0.25rem;
+    display: inline-block;
+}
+
 /* Category Breakdown */
 .category-breakdown {
     background: var(--bg-primary);

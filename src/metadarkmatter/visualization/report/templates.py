@@ -126,6 +126,26 @@ DIVERSITY_SUMMARY_TEMPLATE: str = '''
 </div>
 '''
 
+OVERVIEW_KEY_FINDINGS_TEMPLATE: str = '''
+<div class="key-findings">
+    <h3 class="findings-title">Key Findings</h3>
+    <div class="findings-grid">
+        {findings_cards}
+    </div>
+</div>
+'''
+
+OVERVIEW_FINDING_CARD_TEMPLATE: str = '''
+<div class="finding-card {card_class}">
+    <div class="finding-icon">{icon}</div>
+    <div class="finding-content">
+        <div class="finding-headline">{headline}</div>
+        <div class="finding-detail">{detail}</div>
+        {link}
+    </div>
+</div>
+'''
+
 CATEGORY_BREAKDOWN_TEMPLATE: str = '''
 <div class="category-breakdown">
     <h3 class="breakdown-title">Classification Details</h3>
@@ -2117,6 +2137,64 @@ BAYESIAN_INTERPRETATION_TEMPLATE: str = '''
                 <strong>High uncertainty.</strong> Posterior mass is spread across multiple categories.
                 Consider these reads as boundary cases requiring additional evidence.
             </div>
+        </div>
+    </div>
+</div>
+'''
+
+CONFIDENCE_SUMMARY_TEMPLATE: str = '''
+<div class="enhanced-scoring-summary">
+    <div class="summary-intro">
+        <h3>Classification Confidence Overview</h3>
+        <p class="intro-text">
+            Bayesian classification assigns posterior probabilities to each category.
+            Posterior entropy measures overall confidence: low entropy indicates a clear
+            assignment, high entropy indicates ambiguity. Discovery scores prioritize
+            novel reads by combining novelty, alignment quality, and confidence.
+        </p>
+    </div>
+
+    <div class="metric-grid">
+        <div class="metric-box">
+            <div class="metric-title">Mean Posterior Entropy</div>
+            <div class="metric-value">{mean_entropy:.2f}</div>
+            <div class="metric-detail">Range: 0 (certain) to 2.58 (uniform over 6 categories)</div>
+            <div class="metric-note">Lower values indicate more confident classifications</div>
+        </div>
+
+        <div class="metric-box highlight">
+            <div class="metric-title">High-Confidence Reads</div>
+            <div class="metric-value">{high_confidence_pct:.1f}%</div>
+            <div class="metric-detail">{high_confidence_count:,} reads with entropy &lt; 1.0</div>
+            <div class="metric-note">Reads where one category clearly dominates</div>
+        </div>
+
+        <div class="metric-box">
+            <div class="metric-title">Bayesian-Legacy Agreement</div>
+            <div class="metric-value">{map_agreement_pct:.1f}%</div>
+            <div class="metric-detail">{map_agreement_count:,} of {total_reads:,} reads</div>
+            <div class="metric-note">Bayesian primary call matches legacy threshold call</div>
+        </div>
+
+        <div class="metric-box">
+            <div class="metric-title">Single-Hit Reads</div>
+            <div class="metric-value">{single_hit_pct:.1f}%</div>
+            <div class="metric-detail">{single_hit_count:,} of {total_reads:,} reads</div>
+            <div class="metric-note">Uncertainty is inferred from novelty level</div>
+        </div>
+
+        <div class="metric-box">
+            <div class="metric-title">Mean Discovery Score</div>
+            <div class="metric-value">{mean_discovery_score:.1f}</div>
+            <div class="metric-detail">For {novel_count:,} novel reads</div>
+            <div class="metric-note">Combined novelty, alignment quality, and confidence</div>
+        </div>
+
+        <div class="metric-box">
+            <div class="metric-title">Boundary Reads</div>
+            <div class="metric-value">{boundary_pct:.1f}%</div>
+            <div class="metric-detail">{boundary_count:,} reads with entropy &gt; 1.5</div>
+            <div class="metric-note">Near boundaries where multiple categories are plausible</div>
         </div>
     </div>
 </div>

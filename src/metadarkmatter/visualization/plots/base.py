@@ -40,6 +40,16 @@ DIVERSITY_COLORS: dict[str, str] = {
     "Uncertain": "#95a5a6",   # Gray - uncertain classification
 }
 
+# Bayesian 6-category colors used in report generator charts
+BAYESIAN_CATEGORY_COLORS: dict[str, str] = {
+    "Known Species": "#22c55e",
+    "Novel Species": "#f59e0b",
+    "Novel Genus": "#ef4444",
+    "Species Boundary": "#a855f7",
+    "Ambiguous": "#94a3b8",
+    "Unclassified": "#64748b",
+}
+
 # Sequential palette for categorical data
 SEQUENTIAL_PALETTE: list[str] = [
     "#1f77b4",  # Blue
