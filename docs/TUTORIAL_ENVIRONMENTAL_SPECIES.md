@@ -331,6 +331,99 @@ metadarkmatter download genomes list "f__Pseudomonadaceae" \
 
 ---
 
+## Alternative Step 3: Using a Custom Genome Directory
+
+If you already have genome FASTA files (e.g., from dereplication, custom databases, or external downloads), you can generate the required metadata directly from filenames instead of querying GTDB.
+
+### Requirements
+
+Genome filenames must contain a GCF/GCA accession and ideally follow the structured pattern:
+
+```
+{Family}_{Genus}_{species}_{Accession}.{ext}
+```
+
+Examples:
+```
+Francisellaceae_Allofrancisella_frigidaquae_GCA_000710735.1.fasta
+Francisellaceae_Francisella_tularensis_GCF_000195955.2.fasta
+Francisellaceae_CAJXRW01_sp913060525_GCA_913060525.1.fasta
+```
+
+### 3a. Generate Genome Metadata
+
+```bash
+metadarkmatter util generate-metadata \
+  --genomes /path/to/your/genomes/ \
+  --pattern "*.fasta" \
+  --output genome_metadata.tsv
+```
+
+This parses each filename to extract family, genus, species, and accession. Representatives are assigned as the first accession per species (alphabetically).
+
+Verify the output:
+
+```bash
+head -5 genome_metadata.tsv
+```
+
+```
+accession	species	genus	family	representative	gtdb_taxonomy
+GCA_000710735.1	Allofrancisella frigidaquae	Allofrancisella	Francisellaceae	GCA_000710735.1
+GCF_012222825.1	Allofrancisella frigidaquae	Allofrancisella	Francisellaceae	GCA_000710735.1
+GCF_000815225.1	Allofrancisella guangzhouensis	Allofrancisella	Francisellaceae	GCF_000815225.1
+```
+
+**Options:**
+
+| Flag | Purpose |
+|------|---------|
+| `--pattern "*.fasta"` | Match your file extension (default: `*.fna`) |
+| `--family Francisellaceae` | Override family name instead of parsing from filename |
+| `--gtdb-metadata gtdb.tsv` | Cross-reference with GTDB metadata for representative assignment and taxonomy strings |
+
+### 3b. Generate ID Mapping (for external alignments)
+
+If you ran alignment externally (e.g., MMseqs2 or BLAST outside metadarkmatter), you also need an ID mapping file to translate contig IDs to genome accessions:
+
+```bash
+metadarkmatter util generate-mapping \
+  --genomes /path/to/your/genomes/ \
+  --pattern "*.fasta" \
+  --output id_mapping.tsv
+```
+
+### 3c. Using GTDB Metadata for Representative Assignment
+
+If you have a GTDB metadata file (e.g., from a previous `download genomes list --all-genomes` run), you can cross-reference it to assign proper GTDB species representatives:
+
+```bash
+metadarkmatter util generate-metadata \
+  --genomes /path/to/your/genomes/ \
+  --pattern "*.fasta" \
+  --gtdb-metadata gtdb_genomes.tsv \
+  --output genome_metadata.tsv
+```
+
+This assigns GTDB representatives and populates the `gtdb_taxonomy` column.
+
+### Continue with Step 4
+
+After generating metadata, the rest of the pipeline is the same. Use `--metadata genome_metadata.tsv` in the `ani compute` and `score classify` steps.
+
+If you are using external alignment results, add `--id-mapping id_mapping.tsv` to the classify step:
+
+```bash
+metadarkmatter score classify \
+  --alignment results.tsv.gz \
+  --ani ani_matrix.csv \
+  --metadata genome_metadata.tsv \
+  --id-mapping id_mapping.tsv \
+  --output classifications.csv
+```
+
+---
+
 ## Step 4: Build the ANI Matrix
 
 ANI (Average Nucleotide Identity) quantifies how similar two genomes are. The ANI matrix is essential for calculating placement uncertainty.
@@ -1219,6 +1312,131 @@ Run the script:
 chmod +x analyze_family.sh
 ./analyze_family.sh water_sample Francisellaceae 34064 /path/to/kraken2_db 16
 ```
+
+---
+
+## Complete Workflow Script: Custom Genomes with External Alignment
+
+This script covers the workflow when you have:
+- A local directory of genome FASTA files with structured filenames
+- External alignment results (from MMseqs2 or BLAST run outside metadarkmatter)
+
+Save this as `analyze_custom_genomes.sh`:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+# Usage: ./analyze_custom_genomes.sh <genome_dir> <alignment_file> [threads]
+# Example:
+#   ./analyze_custom_genomes.sh \
+#     /path/to/genomes_derep_representants \
+#     /path/to/mmseqs2_results.tsv.gz \
+#     16
+
+GENOME_DIR=$1
+ALIGNMENT=$2
+THREADS=${3:-16}
+PATTERN=${4:-"*.fasta"}
+
+echo "=== Metadarkmatter: Custom Genome Analysis ==="
+echo "Genomes:   $GENOME_DIR"
+echo "Alignment: $ALIGNMENT"
+echo "Pattern:   $PATTERN"
+echo "Threads:   $THREADS"
+echo ""
+
+# Create output directory
+mkdir -p results
+
+# Step 1: Generate genome metadata from structured filenames
+echo "Step 1: Generating genome metadata..."
+metadarkmatter util generate-metadata \
+  --genomes "$GENOME_DIR" \
+  --pattern "$PATTERN" \
+  --output genome_metadata.tsv
+
+echo ""
+echo "Metadata preview:"
+head -5 genome_metadata.tsv
+echo ""
+
+# Step 2: Generate ID mapping (contig IDs -> genome accessions)
+echo "Step 2: Generating ID mapping..."
+metadarkmatter util generate-mapping \
+  --genomes "$GENOME_DIR" \
+  --pattern "$PATTERN" \
+  --output id_mapping.tsv
+
+# Step 3: Validate ID mapping against alignment file
+echo "Step 3: Validating ID mapping..."
+metadarkmatter util validate-mapping id_mapping.tsv \
+  --blast "$ALIGNMENT"
+
+# Step 4: Compute ANI matrix
+echo "Step 4: Computing ANI matrix..."
+metadarkmatter ani compute \
+  --genomes "$GENOME_DIR" \
+  --output ani_matrix.csv \
+  --metadata genome_metadata.tsv \
+  --threads $THREADS
+
+# Step 5: Classify reads
+echo "Step 5: Classifying reads..."
+metadarkmatter score classify \
+  --alignment "$ALIGNMENT" \
+  --ani ani_matrix.csv \
+  --metadata genome_metadata.tsv \
+  --id-mapping id_mapping.tsv \
+  --output results/classifications.csv \
+  --summary results/summary.json
+
+# Step 6: Extract novel candidates
+echo "Step 6: Extracting novel candidates..."
+metadarkmatter score extract-novel \
+  --classifications results/classifications.csv \
+  --output results/novel_candidates.csv \
+  --read-ids results/novel_read_ids.txt
+
+# Step 7: Generate report
+echo "Step 7: Generating report..."
+metadarkmatter report generate \
+  --classifications results/classifications.csv \
+  --metadata genome_metadata.tsv \
+  --ani ani_matrix.csv \
+  --output results/report.html
+
+echo ""
+echo "=== Analysis Complete ==="
+echo "Results: results/"
+echo "Report:  results/report.html"
+echo ""
+echo "Summary:"
+cat results/summary.json | python -m json.tool
+```
+
+Run the script:
+
+```bash
+chmod +x analyze_custom_genomes.sh
+./analyze_custom_genomes.sh \
+  /path/to/genomes_derep_representants \
+  /path/to/mmseqs2_results.tsv.gz \
+  16 \
+  "*.fasta"
+```
+
+### Step-by-step breakdown
+
+| Step | Command | What it does |
+|------|---------|--------------|
+| 1 | `util generate-metadata` | Parses `{Family}_{Genus}_{species}_{Accession}.fasta` filenames into `genome_metadata.tsv` |
+| 2 | `util generate-mapping` | Maps contig IDs from FASTA headers to genome accessions |
+| 3 | `util validate-mapping` | Checks that mapping covers subject IDs in your alignment file |
+| 4 | `ani compute` | Computes pairwise ANI matrix for all genomes |
+| 5 | `score classify` | Classifies reads using ANI-weighted placement with ID mapping |
+| 6 | `score extract-novel` | Extracts reads classified as novel species or genus |
+| 7 | `report generate` | Produces interactive HTML report |
 
 ---
 
