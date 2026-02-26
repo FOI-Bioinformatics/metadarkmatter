@@ -411,10 +411,10 @@ class TestPhylogenySection:
         # Should include D3 library reference
         assert "d3" in section.lower()
 
-    def test_phylogeny_tab_in_generated_report(
+    def test_phylogeny_in_reference_tab(
         self, classifications_with_novel, sample_ani_matrix_large, tmp_path
     ):
-        """Full report includes phylogeny tab when ANI matrix provided."""
+        """Full report includes phylogeny in collapsible panel within Reference tab."""
         from metadarkmatter.visualization.report.generator import ReportGenerator
 
         generator = ReportGenerator(
@@ -428,9 +428,10 @@ class TestPhylogenySection:
         assert output_path.exists()
         content = output_path.read_text()
 
-        # Should have phylogeny tab in navigation
-        assert "Phylogeny" in content
-        # Should have phylogeny section content
+        # Should have Reference tab in navigation
+        assert "Reference" in content
+        # Should have phylogeny section content within a collapsible panel
+        assert "Phylogenetic Tree" in content
         assert "phylogeny" in content.lower()
 
 

@@ -48,8 +48,6 @@ from metadarkmatter.visualization.plots.scatter_2d import (
 )
 from metadarkmatter.visualization.report.styles import get_css_styles
 from metadarkmatter.visualization.report.templates import (
-    ANI_NOT_PROVIDED_MESSAGE,
-    CATEGORY_BREAKDOWN_TEMPLATE,
     CATEGORY_GRID_CELL,
     CATEGORY_GRID_TEMPLATE,
     COLLAPSIBLE_PANEL_TEMPLATE,
@@ -58,12 +56,9 @@ from metadarkmatter.visualization.report.templates import (
     DATA_SUMMARY_TEMPLATE,
     DATA_TABLE_JS,
     DATA_TABLE_TEMPLATE,
-    DIVERSITY_SUMMARY_TEMPLATE,
     EMPTY_SECTION_TEMPLATE,
     ENHANCED_SCORING_SUMMARY_TEMPLATE,
     ENHANCED_SCORING_UNCERTAINTY_TYPES_TEMPLATE,
-    GENOME_HIGHLIGHTS_TEMPLATE,
-    GENOME_INTERPRETATION_TEMPLATE,
     KPI_CARD_TEMPLATE,
     KPI_STRIP_TEMPLATE,
     METRIC_CARD_TEMPLATE,
@@ -74,7 +69,6 @@ from metadarkmatter.visualization.report.templates import (
     PLOT_CONTAINER_SIMPLE_TEMPLATE,
     PLOT_CONTAINER_TEMPLATE,
     PLOT_ROW_TEMPLATE,
-    RECRUITMENT_NOT_PROVIDED_MESSAGE,
     REPORT_BASE_TEMPLATE,
     TAB_NAVIGATION_JS,
     TAB_SECTION_TEMPLATE,
@@ -82,7 +76,6 @@ from metadarkmatter.visualization.report.templates import (
     TOP_SPECIES_ROW_TEMPLATE,
     TOP_SPECIES_TABLE_TEMPLATE,
     TWO_COLUMN_ROW_TEMPLATE,
-    BAYESIAN_SUMMARY_TEMPLATE,
     BAYESIAN_INTERPRETATION_TEMPLATE,
     CONFIDENCE_SUMMARY_TEMPLATE,
     BORDERLINE_ANALYSIS_TEMPLATE,
@@ -576,9 +569,6 @@ class ReportGenerator:
         # Classification tab (merged distributions + confidence)
         content_sections.append(self._build_classification_section())
 
-        # Species & Genomes tab (merged)
-        content_sections.append(self._build_species_genomes_section())
-
         # Novel Diversity tab (only if there are novel reads)
         if self.summary.diversity_novel > 0:
             content_sections.append(self._build_novel_diversity_section())
@@ -587,34 +577,8 @@ class ReportGenerator:
         if self.summary.has_family_validation:
             content_sections.append(self._build_family_validation_section())
 
-        # Reference ANI tab
-        content_sections.append(self._build_ani_section())
-
-        # Reference AAI tab
-        content_sections.append(self._build_aai_section())
-
-        # Phylogeny tab (only if ANI matrix provided with >= 3 genomes and not skipped)
-        self._phylogeny_html = None
-        if not self.config.skip_phylogeny and self.ani_matrix is not None and len(self.ani_matrix) >= 3:
-            ani_pd = self.ani_matrix.to_pandas()
-            if "genome" in ani_pd.columns:
-                ani_pd = ani_pd.set_index("genome")
-            self._phylogeny_html = self._build_phylogeny_section(
-                ani_pd,
-                user_tree_path=self.config.user_tree_path,
-            )
-            if self._phylogeny_html:
-                content_sections.append(
-                    TAB_SECTION_TEMPLATE.format(
-                        tab_id="phylogeny",
-                        active_class="",
-                        section_title="Phylogeny",
-                        content=self._phylogeny_html,
-                    )
-                )
-
-        # Recruitment tab
-        content_sections.append(self._build_recruitment_section())
+        # Reference tab (ANI/AAI heatmaps, phylogeny, recruitment)
+        content_sections.append(self._build_reference_section())
 
         # Data table tab
         content_sections.append(self._build_data_section())
@@ -651,11 +615,10 @@ class ReportGenerator:
 
     def _build_navigation(self) -> str:
         """Build dynamic navigation based on available data."""
-        # Tab order: General -> Specific -> Novel -> Reference -> Technical -> Data
+        # Tab order: General -> Specific -> Novel -> Reference -> Data -> Methods
         tabs = [
             ("summary", "Summary", True),
             ("classification", "Classification", False),
-            ("species-genomes", "Species & Genomes", False),
         ]
 
         # Add Novel Diversity tab if there are novel reads
@@ -666,18 +629,10 @@ class ReportGenerator:
         if self.summary.has_family_validation:
             tabs.append(("family-validation", "Family Validation", False))
 
-        # Reference matrices (renamed for clarity)
-        tabs.extend([
-            ("ani", "Reference ANI", False),
-            ("aai", "Reference AAI", False),
-        ])
-
-        # Add Phylogeny tab if phylogeny section was built
-        if hasattr(self, "_phylogeny_html") and self._phylogeny_html is not None:
-            tabs.append(("phylogeny", "Phylogeny", False))
+        # Unified Reference tab (ANI, AAI, phylogeny, recruitment)
+        tabs.append(("reference", "Reference", False))
 
         tabs.extend([
-            ("recruitment", "Recruitment", False),
             ("data", "Data", False),
             ("methods", "Methods", False),
         ])
@@ -1524,374 +1479,136 @@ class ReportGenerator:
             content=content,
         )
 
-    def _build_recruitment_section(self) -> str:
-        """Build the recruitment plots tab section."""
+    def _build_recruitment_content(self) -> str | None:
+        """Build recruitment plot HTML content without tab wrapper.
+
+        Returns:
+            HTML string with recruitment plots, or None if no recruitment
+            data is available.
+        """
         if self.recruitment_data is None or len(self.recruitment_data) == 0:
-            content = EMPTY_SECTION_TEMPLATE.format(
-                message=RECRUITMENT_NOT_PROVIDED_MESSAGE
-            )
-        else:
-            # Import here to avoid circular imports
-            from metadarkmatter.visualization.recruitment_plots import (
-                RecruitmentPlotGenerator,
-            )
+            return None
 
-            # Create recruitment plot
-            gen = RecruitmentPlotGenerator(self.recruitment_data)
-            fig = gen.create_figure(
-                max_points=self.config.max_scatter_points,
-                width=1100,
-                height=600,
-            )
-
-            recruit_id = "plot-recruitment"
-            self._register_plot(recruit_id, fig)
-
-            # Multi-genome view
-            multi_fig = gen.create_multi_genome_figure(
-                max_points_per_genome=20000,
-                width=1100,
-            )
-            multi_id = "plot-recruitment-multi"
-            self._register_plot(multi_id, multi_fig)
-
-            content = (
-                PLOT_CONTAINER_TEMPLATE.format(
-                    extra_class="full-width",
-                    title="Read Recruitment Overview",
-                    description=(
-                        "Scatter plot showing percent identity vs genome position "
-                        "for all mapped reads."
-                    ),
-                    plot_id=recruit_id,
-                )
-                + PLOT_CONTAINER_TEMPLATE.format(
-                    extra_class="full-width",
-                    title="Per-Genome Recruitment",
-                    description=(
-                        "Individual recruitment plots for top reference genomes "
-                        "by read count."
-                    ),
-                    plot_id=multi_id,
-                )
-            )
-
-        return TAB_SECTION_TEMPLATE.format(
-            tab_id="recruitment",
-            active_class="",
-            section_title="Recruitment Plots",
-            content=content,
+        # Import here to avoid circular imports
+        from metadarkmatter.visualization.recruitment_plots import (
+            RecruitmentPlotGenerator,
         )
 
-    def _build_species_genomes_section(self) -> str:
-        """Build the merged Species & Genomes tab section."""
-        content_parts = []
+        # Create recruitment plot
+        gen = RecruitmentPlotGenerator(self.recruitment_data)
+        fig = gen.create_figure(
+            max_points=self.config.max_scatter_points,
+            width=1100,
+            height=600,
+        )
 
-        # Species section (if metadata provided)
-        if self.genome_metadata is not None:
-            import plotly.graph_objects as go
+        recruit_id = "plot-recruitment"
+        self._register_plot(recruit_id, fig)
 
-            # Join metadata to get species information
-            if "species" not in self.df.columns:
-                enriched_df = self.genome_metadata.join_classifications(self.df)
-            else:
-                enriched_df = self.df
+        # Multi-genome view
+        multi_fig = gen.create_multi_genome_figure(
+            max_points_per_genome=20000,
+            width=1100,
+        )
+        multi_id = "plot-recruitment-multi"
+        self._register_plot(multi_id, multi_fig)
 
-            # Only include in-family reads in species breakdown
-            if "taxonomic_call" in enriched_df.columns:
-                species_base_df = enriched_df.filter(
-                    pl.col("taxonomic_call") != "Off-target"
-                )
-            else:
-                species_base_df = enriched_df
-
-            # Aggregate by species
-            species_counts = (
-                species_base_df.group_by("species")
-                .agg([
-                    pl.len().alias("count"),
-                    pl.col("novelty_index").mean().alias("mean_novelty"),
-                    pl.col("top_hit_identity").mean().alias("mean_identity"),
-                    pl.col("best_match_genome").n_unique().alias("genome_count"),
-                ])
-                .sort("count", descending=True)
-                .head(20)
+        return (
+            PLOT_CONTAINER_TEMPLATE.format(
+                extra_class="full-width",
+                title="Read Recruitment Overview",
+                description=(
+                    "Scatter plot showing percent identity vs genome position "
+                    "for all mapped reads."
+                ),
+                plot_id=recruit_id,
             )
+            + PLOT_CONTAINER_TEMPLATE.format(
+                extra_class="full-width",
+                title="Per-Genome Recruitment",
+                description=(
+                    "Individual recruitment plots for top reference genomes "
+                    "by read count."
+                ),
+                plot_id=multi_id,
+            )
+        )
 
-            if len(species_counts) > 0:
-                # Horizontal bar chart of species read counts
-                bar_fig = go.Figure()
-                bar_fig.add_trace(
-                    go.Bar(
-                        y=species_counts["species"].to_list()[::-1],
-                        x=species_counts["count"].to_list()[::-1],
-                        orientation="h",
-                        marker_color="#22c55e",
-                        text=[f"{c:,}" for c in species_counts["count"].to_list()[::-1]],
-                        textposition="outside",
-                        hovertemplate=(
-                            "<b>%{y}</b><br>"
-                            "Reads: %{x:,}<extra></extra>"
-                        ),
-                    )
-                )
-                bar_fig.update_layout(
-                    title="Top 20 Species by Read Count",
-                    xaxis_title="Number of Reads",
-                    yaxis_title="",
-                    template="plotly_white",
-                    height=max(400, 30 * len(species_counts)),
-                    margin={"l": 300, "r": 40, "t": 60, "b": 60},
-                )
-                species_bar_id = "plot-species-bar"
-                self._register_plot(species_bar_id, bar_fig)
+    def _build_species_bar_chart(self) -> str:
+        """Build a species bar chart for the Reference tab.
 
-                # Pie chart showing species proportion
-                pie_fig = go.Figure()
-                pie_fig.add_trace(
-                    go.Pie(
-                        labels=species_counts["species"].head(10).to_list(),
-                        values=species_counts["count"].head(10).to_list(),
-                        textinfo="percent+label",
-                        textposition="inside",
-                        hole=0.4,
-                        hovertemplate=(
-                            "<b>%{label}</b><br>"
-                            "Reads: %{value:,}<br>"
-                            "Proportion: %{percent}<extra></extra>"
-                        ),
-                    )
-                )
-                pie_fig.update_layout(
-                    title="Top 10 Species Composition",
-                    template="plotly_white",
-                    height=500,
-                    showlegend=True,
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=-0.3,
-                        xanchor="center",
-                        x=0.5,
-                    ),
-                )
-                species_pie_id = "plot-species-pie"
-                self._register_plot(species_pie_id, pie_fig)
+        Extracts only the horizontal bar chart of top species by read count.
+        Requires genome metadata to be available.
 
-                total_species = species_counts["species"].n_unique()
+        Returns:
+            HTML string with the species bar chart, or empty string if no
+            metadata is available.
+        """
+        if self.genome_metadata is None:
+            return ""
 
-                content_parts.append(
-                    f'<div class="metric-cards">'
-                    f'<div class="metric-card">'
-                    f'<div class="metric-value">{total_species}</div>'
-                    f'<div class="metric-label">Unique Species</div>'
-                    f'<div class="metric-subtext">Detected in sample</div>'
-                    f'</div>'
-                    f'<div class="metric-card">'
-                    f'<div class="metric-value">{self.genome_metadata.species_count}</div>'
-                    f'<div class="metric-label">Reference Species</div>'
-                    f'<div class="metric-subtext">In metadata database</div>'
-                    f'</div>'
-                    f'</div>'
-                )
-                content_parts.append(PLOT_ROW_TEMPLATE.format(
-                    plots=(
-                        PLOT_CONTAINER_TEMPLATE.format(
-                            extra_class="half-width",
-                            title="Species Composition",
-                            description=(
-                                "Pie chart showing the proportion of reads "
-                                "assigned to each species."
-                            ),
-                            plot_id=species_pie_id,
-                        )
-                        + PLOT_CONTAINER_SIMPLE_TEMPLATE.format(
-                            extra_class="half-width",
-                            plot_id=species_bar_id,
-                        )
-                    )
-                ))
+        import plotly.graph_objects as go
 
-                # Stacked diversity bar chart per species
-                if "taxonomic_call" in species_base_df.columns:
-                    diversity_breakdown = (
-                        species_base_df
-                        .group_by(["species", "taxonomic_call"])
-                        .agg(pl.len().alias("count"))
-                    )
-
-                    if len(diversity_breakdown) > 0:
-                        # Use top 15 species by total reads
-                        top_species = (
-                            species_base_df.group_by("species")
-                            .len()
-                            .sort("len", descending=True)
-                            .head(15)["species"]
-                            .to_list()
-                        )
-                        div_filtered = diversity_breakdown.filter(
-                            pl.col("species").is_in(top_species)
-                        )
-
-                        # Order species by total count (reversed for horizontal bar)
-                        species_order = list(reversed(top_species))
-
-                        diversity_fig = go.Figure()
-                        # Add a trace per category
-                        category_order = [
-                            "Known Species", "Novel Species", "Novel Genus",
-                            "Species Boundary", "Ambiguous", "Unclassified",
-                        ]
-                        for cat in category_order:
-                            cat_data = div_filtered.filter(
-                                pl.col("taxonomic_call") == cat
-                            )
-                            if len(cat_data) == 0:
-                                continue
-                            # Build a dict for quick lookup
-                            cat_map = dict(zip(
-                                cat_data["species"].to_list(),
-                                cat_data["count"].to_list(),
-                            ))
-                            diversity_fig.add_trace(go.Bar(
-                                y=species_order,
-                                x=[cat_map.get(sp, 0) for sp in species_order],
-                                name=cat,
-                                orientation="h",
-                                marker_color=BAYESIAN_CATEGORY_COLORS.get(
-                                    cat, "#94a3b8"
-                                ),
-                                hovertemplate=(
-                                    "<b>%{y}</b><br>"
-                                    f"{cat}: " + "%{x:,}<extra></extra>"
-                                ),
-                            ))
-
-                        diversity_fig.update_layout(
-                            barmode="stack",
-                            title="Diversity Status by Species",
-                            xaxis_title="Number of Reads",
-                            yaxis_title="",
-                            template="plotly_white",
-                            height=max(400, 30 * len(species_order)),
-                            margin={"l": 300, "r": 40, "t": 60, "b": 60},
-                            legend=dict(
-                                orientation="h",
-                                yanchor="bottom",
-                                y=-0.15,
-                                xanchor="center",
-                                x=0.5,
-                            ),
-                        )
-                        diversity_bar_id = "plot-species-diversity"
-                        self._register_plot(diversity_bar_id, diversity_fig)
-
-                        content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
-                            extra_class="",
-                            title="Diversity Status by Species",
-                            description=(
-                                "Stacked bar chart showing the classification "
-                                "breakdown (Known Species, Novel Species, Novel "
-                                "Genus, etc.) for each reference species."
-                            ),
-                            plot_id=diversity_bar_id,
-                        ))
+        # Join metadata to get species information
+        if "species" not in self.df.columns:
+            enriched_df = self.genome_metadata.join_classifications(self.df)
         else:
-            content_parts.append(
-                '<div class="section-note">'
-                '<p>Species-level aggregation requires --metadata. '
-                'Genome-level breakdown is shown below.</p></div>'
-            )
+            enriched_df = self.df
 
-        # --- Genome-Level Highlights section ---
-        genome_base_df = self.df
-        if "taxonomic_call" in self.df.columns:
-            genome_base_df = self.df.filter(
+        # Only include in-family reads in species breakdown
+        if "taxonomic_call" in enriched_df.columns:
+            species_base_df = enriched_df.filter(
                 pl.col("taxonomic_call") != "Off-target"
             )
-        genome_counts = (
-            genome_base_df.group_by("best_match_genome")
+        else:
+            species_base_df = enriched_df
+
+        # Aggregate by species
+        species_counts = (
+            species_base_df.group_by("species")
             .agg([
                 pl.len().alias("count"),
                 pl.col("novelty_index").mean().alias("mean_novelty"),
                 pl.col("top_hit_identity").mean().alias("mean_identity"),
+                pl.col("best_match_genome").n_unique().alias("genome_count"),
             ])
             .sort("count", descending=True)
+            .head(20)
         )
 
-        if len(genome_counts) > 0:
-            content_parts.append(
-                '<div class="section-divider">'
-                '<h3>Genome-Level Highlights</h3>'
-                '</div>'
+        if len(species_counts) == 0:
+            return ""
+
+        # Horizontal bar chart of species read counts
+        bar_fig = go.Figure()
+        bar_fig.add_trace(
+            go.Bar(
+                y=species_counts["species"].to_list()[::-1],
+                x=species_counts["count"].to_list()[::-1],
+                orientation="h",
+                marker_color="#22c55e",
+                text=[f"{c:,}" for c in species_counts["count"].to_list()[::-1]],
+                textposition="outside",
+                hovertemplate=(
+                    "<b>%{y}</b><br>"
+                    "Reads: %{x:,}<extra></extra>"
+                ),
             )
+        )
+        bar_fig.update_layout(
+            title="Top 20 Species by Read Count",
+            xaxis_title="Number of Reads",
+            yaxis_title="",
+            template="plotly_white",
+            height=max(400, 30 * len(species_counts)),
+            margin={"l": 300, "r": 40, "t": 60, "b": 60},
+        )
+        species_bar_id = "plot-species-bar"
+        self._register_plot(species_bar_id, bar_fig)
 
-            # Helper to get species name
-            def get_species(acc: str) -> str:
-                if self.genome_metadata:
-                    species = self.genome_metadata.get_species(acc)
-                    if species and species != "Unknown":
-                        return species
-                return "Unknown species"
-
-            # Most abundant
-            top_genome_acc = genome_counts["best_match_genome"][0]
-            top_genome_count = genome_counts["count"][0]
-            top_identity = genome_counts["mean_identity"][0]
-            top_species = get_species(top_genome_acc)
-
-            # Most novel (highest mean novelty with at least 5 reads)
-            novel_df = genome_counts.filter(pl.col("count") >= 5)
-            if len(novel_df) > 0:
-                most_novel_idx = novel_df["mean_novelty"].arg_max()
-                novel_genome_acc = novel_df["best_match_genome"][most_novel_idx]
-                novel_reads = novel_df["count"][most_novel_idx]
-                novel_novelty = novel_df["mean_novelty"][most_novel_idx]
-            else:
-                novel_genome_acc = top_genome_acc
-                novel_reads = top_genome_count
-                novel_novelty = genome_counts["mean_novelty"][0]
-            novel_species = get_species(novel_genome_acc)
-
-            # Most confident (highest mean identity with at least 5 reads)
-            confident_df = genome_counts.filter(pl.col("count") >= 5)
-            if len(confident_df) > 0:
-                most_confident_idx = confident_df["mean_identity"].arg_max()
-                confident_genome_acc = confident_df["best_match_genome"][
-                    most_confident_idx
-                ]
-                confident_reads = confident_df["count"][most_confident_idx]
-                confident_identity = confident_df["mean_identity"][most_confident_idx]
-            else:
-                confident_genome_acc = top_genome_acc
-                confident_reads = top_genome_count
-                confident_identity = top_identity
-            confident_species = get_species(confident_genome_acc)
-
-            content_parts.append(GENOME_HIGHLIGHTS_TEMPLATE.format(
-                top_species=top_species,
-                top_accession=top_genome_acc,
-                top_reads=top_genome_count,
-                top_identity=top_identity,
-                novel_species=novel_species,
-                novel_accession=novel_genome_acc,
-                novel_reads=novel_reads,
-                novel_novelty=novel_novelty,
-                confident_species=confident_species,
-                confident_accession=confident_genome_acc,
-                confident_reads=confident_reads,
-                confident_identity=confident_identity,
-            ))
-
-            content_parts.append(GENOME_INTERPRETATION_TEMPLATE)
-
-        content = "\n".join(content_parts)
-
-        return TAB_SECTION_TEMPLATE.format(
-            tab_id="species-genomes",
-            active_class="",
-            section_title="Species & Genomes",
-            content=content,
+        return PLOT_CONTAINER_SIMPLE_TEMPLATE.format(
+            extra_class="full-width",
+            plot_id=species_bar_id,
         )
 
     def _build_family_validation_section(self) -> str:
@@ -2336,169 +2053,248 @@ class ReportGenerator:
 
         return filtered
 
-    def _build_ani_section(self) -> str:
-        """Build the ANI matrix heatmap tab section."""
+    def _build_ani_content(self) -> str | None:
+        """Build ANI heatmap HTML content without tab wrapper.
+
+        Returns:
+            HTML string with ANI heatmap and statistics cards, or None if
+            no ANI matrix is available.
+        """
         if self.ani_matrix is None or len(self.ani_matrix) == 0:
-            content = EMPTY_SECTION_TEMPLATE.format(
-                message=ANI_NOT_PROVIDED_MESSAGE
-            )
+            return None
+
+        # Create genome labels map
+        matrix_cols = self.ani_matrix.columns
+        if "genome" in matrix_cols:
+            genome_accessions = self.ani_matrix["genome"].to_list()
         else:
-            # Create genome labels map
-            matrix_cols = self.ani_matrix.columns
-            if "genome" in matrix_cols:
-                genome_accessions = self.ani_matrix["genome"].to_list()
-            else:
-                genome_accessions = list(matrix_cols)
+            genome_accessions = list(matrix_cols)
 
-            genome_labels_map = self._get_genome_labels_map(genome_accessions)
+        genome_labels_map = self._get_genome_labels_map(genome_accessions)
 
-            # Build full heatmap
-            heatmap_fig, stats, clustering_succeeded = build_ani_heatmap(
-                self.ani_matrix,
-                genome_labels_map,
-            )
-
-            ani_id = "plot-ani-heatmap"
-            self._register_plot(ani_id, heatmap_fig)
-            stats_html = build_ani_stats_cards(stats)
-
-            # Check for representative genome toggle
-            rep_matrix = self._filter_matrix_to_representatives(self.ani_matrix)
-
-            if rep_matrix is not None:
-                # Build representative-only heatmap
-                rep_cols = rep_matrix.columns
-                if "genome" in rep_cols:
-                    rep_accessions = rep_matrix["genome"].to_list()
-                else:
-                    rep_accessions = list(rep_cols)
-                rep_labels = self._get_genome_labels_map(rep_accessions)
-                rep_fig, rep_stats, _ = build_ani_heatmap(rep_matrix, rep_labels)
-                rep_id = "plot-ani-heatmap-reps"
-                self._register_plot(rep_id, rep_fig)
-                rep_stats_html = build_ani_stats_cards(rep_stats)
-
-                n_all = len(genome_accessions)
-                n_reps = len(rep_accessions)
-
-                content = self._build_toggle_heatmap_content(
-                    metric="ani",
-                    title="Average Nucleotide Identity Matrix",
-                    description=(
-                        "Heatmap showing pairwise ANI values between reference genomes, "
-                        "hierarchically clustered by similarity. "
-                        "Red = high ANI (similar), blue = low ANI (distant). "
-                        "ANI ~95% indicates species boundary (Jain et al. 2018)."
-                    ),
-                    all_plot_id=ani_id,
-                    all_stats_html=stats_html,
-                    rep_plot_id=rep_id,
-                    rep_stats_html=rep_stats_html,
-                    n_all=n_all,
-                    n_reps=n_reps,
-                )
-            else:
-                content = stats_html + PLOT_CONTAINER_TEMPLATE.format(
-                    extra_class="full-width",
-                    title="Average Nucleotide Identity Matrix",
-                    description=(
-                        "Heatmap showing pairwise ANI values between reference genomes, "
-                        "hierarchically clustered by similarity. "
-                        "Red = high ANI (similar), blue = low ANI (distant). "
-                        "ANI ~95% indicates species boundary (Jain et al. 2018)."
-                    ),
-                    plot_id=ani_id,
-                )
-
-        return TAB_SECTION_TEMPLATE.format(
-            tab_id="ani",
-            active_class="",
-            section_title="Reference ANI",
-            content=content,
+        # Build full heatmap
+        heatmap_fig, stats, clustering_succeeded = build_ani_heatmap(
+            self.ani_matrix,
+            genome_labels_map,
         )
 
-    def _build_aai_section(self) -> str:
-        """Build the AAI matrix heatmap tab section for genus-level comparisons."""
+        ani_id = "plot-ani-heatmap"
+        self._register_plot(ani_id, heatmap_fig)
+        stats_html = build_ani_stats_cards(stats)
+
+        # Check for representative genome toggle
+        rep_matrix = self._filter_matrix_to_representatives(self.ani_matrix)
+
+        if rep_matrix is not None:
+            # Build representative-only heatmap
+            rep_cols = rep_matrix.columns
+            if "genome" in rep_cols:
+                rep_accessions = rep_matrix["genome"].to_list()
+            else:
+                rep_accessions = list(rep_cols)
+            rep_labels = self._get_genome_labels_map(rep_accessions)
+            rep_fig, rep_stats, _ = build_ani_heatmap(rep_matrix, rep_labels)
+            rep_id = "plot-ani-heatmap-reps"
+            self._register_plot(rep_id, rep_fig)
+            rep_stats_html = build_ani_stats_cards(rep_stats)
+
+            n_all = len(genome_accessions)
+            n_reps = len(rep_accessions)
+
+            return self._build_toggle_heatmap_content(
+                metric="ani",
+                title="Average Nucleotide Identity Matrix",
+                description=(
+                    "Heatmap showing pairwise ANI values between reference genomes, "
+                    "hierarchically clustered by similarity. "
+                    "Red = high ANI (similar), blue = low ANI (distant). "
+                    "ANI ~95% indicates species boundary (Jain et al. 2018)."
+                ),
+                all_plot_id=ani_id,
+                all_stats_html=stats_html,
+                rep_plot_id=rep_id,
+                rep_stats_html=rep_stats_html,
+                n_all=n_all,
+                n_reps=n_reps,
+            )
+
+        return stats_html + PLOT_CONTAINER_TEMPLATE.format(
+            extra_class="full-width",
+            title="Average Nucleotide Identity Matrix",
+            description=(
+                "Heatmap showing pairwise ANI values between reference genomes, "
+                "hierarchically clustered by similarity. "
+                "Red = high ANI (similar), blue = low ANI (distant). "
+                "ANI ~95% indicates species boundary (Jain et al. 2018)."
+            ),
+            plot_id=ani_id,
+        )
+
+    def _build_aai_content(self) -> str | None:
+        """Build AAI heatmap HTML content without tab wrapper.
+
+        Returns:
+            HTML string with AAI heatmap and statistics cards, or None if
+            no AAI matrix is available.
+        """
         if self.aai_matrix is None or len(self.aai_matrix) == 0:
-            content = EMPTY_SECTION_TEMPLATE.format(
-                message=(
-                    "AAI matrix not provided. "
-                    "Use --aai option with AAI matrix CSV to enable genus-level heatmap. "
-                    "Generate with: metadarkmatter aai compute"
-                )
-            )
+            return None
+
+        # Create genome labels map
+        matrix_cols = self.aai_matrix.columns
+        if "genome" in matrix_cols:
+            genome_accessions = self.aai_matrix["genome"].to_list()
         else:
-            # Create genome labels map
-            matrix_cols = self.aai_matrix.columns
-            if "genome" in matrix_cols:
-                genome_accessions = self.aai_matrix["genome"].to_list()
+            genome_accessions = list(matrix_cols)
+
+        genome_labels_map = self._get_genome_labels_map(genome_accessions)
+
+        # Build full heatmap
+        heatmap_fig, stats, clustering_succeeded = build_aai_heatmap(
+            self.aai_matrix,
+            genome_labels_map,
+        )
+
+        aai_id = "plot-aai-heatmap"
+        self._register_plot(aai_id, heatmap_fig)
+        stats_html = build_aai_stats_cards(stats)
+
+        # Check for representative genome toggle
+        rep_matrix = self._filter_matrix_to_representatives(self.aai_matrix)
+
+        if rep_matrix is not None:
+            rep_cols = rep_matrix.columns
+            if "genome" in rep_cols:
+                rep_accessions = rep_matrix["genome"].to_list()
             else:
-                genome_accessions = list(matrix_cols)
+                rep_accessions = list(rep_cols)
+            rep_labels = self._get_genome_labels_map(rep_accessions)
+            rep_fig, rep_stats, _ = build_aai_heatmap(rep_matrix, rep_labels)
+            rep_id = "plot-aai-heatmap-reps"
+            self._register_plot(rep_id, rep_fig)
+            rep_stats_html = build_aai_stats_cards(rep_stats)
 
-            genome_labels_map = self._get_genome_labels_map(genome_accessions)
+            n_all = len(genome_accessions)
+            n_reps = len(rep_accessions)
 
-            # Build full heatmap
-            heatmap_fig, stats, clustering_succeeded = build_aai_heatmap(
-                self.aai_matrix,
-                genome_labels_map,
+            return self._build_toggle_heatmap_content(
+                metric="aai",
+                title="Average Amino Acid Identity Matrix",
+                description=(
+                    "Heatmap showing pairwise AAI values between reference genomes, "
+                    "hierarchically clustered by similarity. "
+                    "Red = high AAI (similar), blue = low AAI (distant). "
+                    "AAI ~65% indicates genus boundary (Riesco & Trujillo 2024)."
+                ),
+                all_plot_id=aai_id,
+                all_stats_html=stats_html,
+                rep_plot_id=rep_id,
+                rep_stats_html=rep_stats_html,
+                n_all=n_all,
+                n_reps=n_reps,
             )
 
-            aai_id = "plot-aai-heatmap"
-            self._register_plot(aai_id, heatmap_fig)
-            stats_html = build_aai_stats_cards(stats)
+        return stats_html + PLOT_CONTAINER_TEMPLATE.format(
+            extra_class="full-width",
+            title="Average Amino Acid Identity Matrix",
+            description=(
+                "Heatmap showing pairwise AAI values between reference genomes, "
+                "hierarchically clustered by similarity. "
+                "Red = high AAI (similar), blue = low AAI (distant). "
+                "AAI ~65% indicates genus boundary (Riesco & Trujillo 2024)."
+            ),
+            plot_id=aai_id,
+        )
 
-            # Check for representative genome toggle
-            rep_matrix = self._filter_matrix_to_representatives(self.aai_matrix)
+    def _build_phylogeny_content(self) -> str | None:
+        """Build phylogeny HTML content without tab wrapper.
 
-            if rep_matrix is not None:
-                rep_cols = rep_matrix.columns
-                if "genome" in rep_cols:
-                    rep_accessions = rep_matrix["genome"].to_list()
-                else:
-                    rep_accessions = list(rep_cols)
-                rep_labels = self._get_genome_labels_map(rep_accessions)
-                rep_fig, rep_stats, _ = build_aai_heatmap(rep_matrix, rep_labels)
-                rep_id = "plot-aai-heatmap-reps"
-                self._register_plot(rep_id, rep_fig)
-                rep_stats_html = build_aai_stats_cards(rep_stats)
+        Generates an interactive phylogenetic tree from the ANI matrix (or
+        a user-provided tree) with novel cluster placement.
 
-                n_all = len(genome_accessions)
-                n_reps = len(rep_accessions)
+        Returns:
+            HTML string with phylogeny visualization, or None if the tree
+            cannot be built (e.g., skip requested, no ANI matrix, or fewer
+            than 3 genomes).
+        """
+        if self.config.skip_phylogeny:
+            return None
+        if self.ani_matrix is None or len(self.ani_matrix) < 3:
+            return None
 
-                content = self._build_toggle_heatmap_content(
-                    metric="aai",
-                    title="Average Amino Acid Identity Matrix",
-                    description=(
-                        "Heatmap showing pairwise AAI values between reference genomes, "
-                        "hierarchically clustered by similarity. "
-                        "Red = high AAI (similar), blue = low AAI (distant). "
-                        "AAI ~65% indicates genus boundary (Riesco & Trujillo 2024)."
-                    ),
-                    all_plot_id=aai_id,
-                    all_stats_html=stats_html,
-                    rep_plot_id=rep_id,
-                    rep_stats_html=rep_stats_html,
-                    n_all=n_all,
-                    n_reps=n_reps,
-                )
-            else:
-                content = stats_html + PLOT_CONTAINER_TEMPLATE.format(
-                    extra_class="full-width",
-                    title="Average Amino Acid Identity Matrix",
-                    description=(
-                        "Heatmap showing pairwise AAI values between reference genomes, "
-                        "hierarchically clustered by similarity. "
-                        "Red = high AAI (similar), blue = low AAI (distant). "
-                        "AAI ~65% indicates genus boundary (Riesco & Trujillo 2024)."
-                    ),
-                    plot_id=aai_id,
-                )
+        ani_pd = self.ani_matrix.to_pandas()
+        if "genome" in ani_pd.columns:
+            ani_pd = ani_pd.set_index("genome")
+
+        return self._build_phylogeny_section(
+            ani_pd,
+            user_tree_path=self.config.user_tree_path,
+        )
+
+    def _build_reference_section(self) -> str:
+        """Build the Reference tab with species bar, heatmaps, phylogeny, and recruitment.
+
+        Merges content from the former Species & Genomes, ANI, AAI,
+        Phylogeny, and Recruitment tabs into a single unified section.
+
+        Returns:
+            HTML string for the Reference tab section.
+        """
+        content_parts: list[str] = []
+
+        # 1. Species bar chart (compact, full-width)
+        species_bar = self._build_species_bar_chart()
+        if species_bar:
+            content_parts.append(species_bar)
+
+        # 2. ANI/AAI heatmaps
+        ani_content = self._build_ani_content()
+        aai_content = self._build_aai_content()
+
+        if ani_content and aai_content:
+            # Side-by-side layout
+            heatmap_row = TWO_COLUMN_ROW_TEMPLATE.format(
+                left_flex="1",
+                right_flex="1",
+                left_content=ani_content,
+                right_content=aai_content,
+            )
+            content_parts.append(heatmap_row)
+        elif ani_content:
+            content_parts.append(ani_content)
+        elif aai_content:
+            content_parts.append(aai_content)
+
+        # 3. Phylogenetic tree (collapsible, default collapsed)
+        phylo_html = self._build_phylogeny_content()
+        if phylo_html:
+            content_parts.append(COLLAPSIBLE_PANEL_TEMPLATE.format(
+                default_state="",
+                panel_id="phylogeny",
+                title="Phylogenetic Tree",
+                content=phylo_html,
+            ))
+
+        # 4. Recruitment plots (collapsible, default collapsed, only if data)
+        recruit_html = self._build_recruitment_content()
+        if recruit_html:
+            content_parts.append(COLLAPSIBLE_PANEL_TEMPLATE.format(
+                default_state="",
+                panel_id="recruitment",
+                title="Recruitment Plots",
+                content=recruit_html,
+            ))
+
+        if not content_parts:
+            content_parts.append(EMPTY_SECTION_TEMPLATE.format(
+                message="No reference data provided. Supply ANI matrix and/or genome metadata."
+            ))
 
         return TAB_SECTION_TEMPLATE.format(
-            tab_id="aai",
+            tab_id="reference",
             active_class="",
-            section_title="Reference AAI",
-            content=content,
+            section_title="Reference",
+            content="\n".join(content_parts),
         )
 
     def _build_data_section(self) -> str:
