@@ -1600,6 +1600,13 @@ body {
     overflow-x: auto;
 }
 
+/* Methods Footer Panel */
+.methods-footer {
+    max-width: 1400px;
+    margin: 1rem auto 0;
+    padding: 0 1.25rem 1.25rem;
+}
+
 /* Footer */
 .report-footer {
     text-align: center;
@@ -3369,6 +3376,13 @@ body {
 
 .table-wrapper {
     overflow-x: auto;
+}
+
+/* Methods Footer Panel */
+.methods-footer {
+    max-width: 1400px;
+    margin: 1rem auto 0;
+    padding: 0 1.25rem 1.25rem;
 }
 
 .report-footer {

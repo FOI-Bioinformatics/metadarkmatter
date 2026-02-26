@@ -435,8 +435,8 @@ class TestPhylogenySection:
         assert "phylogeny" in content.lower()
 
 
-class TestFamilyValidationSection:
-    """Test Family Validation tab in reports."""
+class TestFamilyValidationData:
+    """Test family validation data handling in reports."""
 
     def test_family_validation_template_exists(self):
         """Family validation template should exist."""
@@ -482,10 +482,10 @@ class TestFamilyValidationSection:
         assert generator.summary.off_target == 10
         assert generator.summary.has_family_validation is True
 
-    def test_family_validation_tab_in_report(
+    def test_off_target_shown_in_summary(
         self, classifications_with_family_validation, tmp_path
     ):
-        """Report includes Family Validation tab when family data present."""
+        """Report shows off-target data in Summary when family data present."""
         from metadarkmatter.visualization.report.generator import ReportGenerator
 
         output_path = tmp_path / "report_family.html"
@@ -495,12 +495,10 @@ class TestFamilyValidationSection:
         assert output_path.exists()
         content = output_path.read_text()
 
-        # Should have family validation tab in navigation
-        assert "Family Validation" in content
-        # Should have family validation section content
-        assert "family-validation" in content
-        # Should show off-target stats
+        # Off-target stats appear in the report (in Summary KPI / Data tab)
         assert "Off-target" in content
+        # Family Validation is no longer a standalone tab
+        assert "Family Validation" not in content
 
     def test_no_family_tab_without_family_data(self, sample_classifications, tmp_path):
         """Report excludes Family Validation tab when no family data."""

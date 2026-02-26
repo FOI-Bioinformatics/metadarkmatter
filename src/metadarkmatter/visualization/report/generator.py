@@ -560,36 +560,31 @@ class ReportGenerator:
 
     def _build_html(self) -> str:
         """Build the complete HTML report."""
-        # Generate all sections (order matches tab navigation)
         content_sections = []
 
-        # Summary tab (always visible first)
+        # Summary tab (always, active)
         content_sections.append(self._build_summary_section())
 
-        # Classification tab (merged distributions + confidence)
+        # Classification tab (always)
         content_sections.append(self._build_classification_section())
 
-        # Novel Diversity tab (only if there are novel reads)
+        # Novel Diversity tab (conditional)
         if self.summary.diversity_novel > 0:
             content_sections.append(self._build_novel_diversity_section())
 
-        # Family Validation tab (only if family validation was active)
-        if self.summary.has_family_validation:
-            content_sections.append(self._build_family_validation_section())
-
-        # Reference tab (ANI/AAI heatmaps, phylogeny, recruitment)
+        # Reference tab (always)
         content_sections.append(self._build_reference_section())
 
-        # Data table tab
+        # Data table tab (always)
         content_sections.append(self._build_data_section())
-
-        # Methods tab (always visible - comprehensive documentation)
-        content_sections.append(self._build_methods_section())
 
         content = "\n".join(content_sections)
 
         # Build dynamic navigation
         navigation = self._build_navigation()
+
+        # Methods footer (outside tab container)
+        methods_footer = self._build_methods_footer()
 
         # Collect all Plotly JS initialization code
         plotly_js = self._build_plotly_js()
@@ -609,32 +604,24 @@ class ReportGenerator:
             css_styles=get_css_styles(self.config.theme),
             navigation=navigation,
             content=content,
+            methods_footer=methods_footer,
             plotly_js=plotly_js,
             js_scripts=js_scripts,
         )
 
     def _build_navigation(self) -> str:
         """Build dynamic navigation based on available data."""
-        # Tab order: General -> Specific -> Novel -> Reference -> Data -> Methods
         tabs = [
             ("summary", "Summary", True),
             ("classification", "Classification", False),
         ]
 
-        # Add Novel Diversity tab if there are novel reads
         if self.summary.diversity_novel > 0:
             tabs.append(("novel-diversity", "Novel Diversity", False))
 
-        # Add Family Validation tab if family validation was active
-        if self.summary.has_family_validation:
-            tabs.append(("family-validation", "Family Validation", False))
-
-        # Unified Reference tab (ANI, AAI, phylogeny, recruitment)
-        tabs.append(("reference", "Reference", False))
-
         tabs.extend([
+            ("reference", "Reference", False),
             ("data", "Data", False),
-            ("methods", "Methods", False),
         ])
 
         nav_items = []
@@ -883,8 +870,8 @@ class ReportGenerator:
             link_html = ""
             if s.has_family_validation and s.off_target > 0:
                 link_html = (
-                    '<a class="finding-link" onclick="showTab(\'family-validation\')">'
-                    'Review Family Validation tab</a>'
+                    '<a class="finding-link" onclick="showTab(\'data\')">'
+                    "Review off-target reads in Data tab</a>"
                 )
             cards.append(OVERVIEW_FINDING_CARD_TEMPLATE.format(
                 card_class="action",
@@ -2550,13 +2537,17 @@ document.addEventListener('DOMContentLoaded', function() {
             logger.warning(f"Error building phylogeny section: {e}")
             return None
 
-    def _build_methods_section(self) -> str:
-        """Build the Methods tab with comprehensive documentation of calculations."""
-        return TAB_SECTION_TEMPLATE.format(
-            tab_id="methods",
-            active_class="",
-            section_title="Methods",
-            content=METHODS_SECTION_TEMPLATE,
+    def _build_methods_footer(self) -> str:
+        """Build Methods as a collapsible footer panel below all tabs."""
+        return (
+            '<div class="methods-footer">'
+            + COLLAPSIBLE_PANEL_TEMPLATE.format(
+                default_state="",
+                panel_id="methods",
+                title="Methods",
+                content=METHODS_SECTION_TEMPLATE,
+            )
+            + "</div>"
         )
 
     def _build_histogram(
