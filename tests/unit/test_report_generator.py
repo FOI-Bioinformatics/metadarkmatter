@@ -435,6 +435,171 @@ class TestPhylogenySection:
         assert "phylogeny" in content.lower()
 
 
+class TestFiveTabStructure:
+    """Test the 5-tab report structure after the UX redesign.
+
+    The report was restructured from 10 tabs to 5:
+    - Summary (tab_id="summary")
+    - Classification (tab_id="classification")
+    - Novel Diversity (tab_id="novel-diversity") -- conditional
+    - Reference (tab_id="reference")
+    - Data (tab_id="data")
+
+    Methods is now a collapsible footer panel, not a tab.
+    """
+
+    def test_report_has_four_tabs_without_novel(self, tmp_path):
+        """Report should have 4 tabs when no novel reads exist."""
+        from metadarkmatter.visualization.report.generator import ReportGenerator
+
+        known_only = pl.DataFrame({
+            "read_id": [f"read_{i}" for i in range(50)],
+            "best_match_genome": ["GCF_000001.1"] * 50,
+            "top_hit_identity": [99.5] * 50,
+            "novelty_index": [0.5] * 50,
+            "placement_uncertainty": [0.2] * 50,
+            "num_ambiguous_hits": [1] * 50,
+            "taxonomic_call": ["Known Species"] * 50,
+            "is_novel": [False] * 50,
+        })
+        output_path = tmp_path / "report_no_novel.html"
+        gen = ReportGenerator(known_only)
+        gen.generate(output_path)
+        html = output_path.read_text()
+
+        # Expected tabs present
+        assert 'id="summary"' in html
+        assert 'id="classification"' in html
+        assert 'id="reference"' in html
+        assert 'id="data"' in html
+        # Novel diversity tab should be absent
+        assert 'id="novel-diversity"' not in html
+        # Old tabs from the pre-redesign structure should not exist
+        assert 'id="overview"' not in html
+        assert 'id="distributions"' not in html
+        assert 'id="ani"' not in html
+        assert 'id="aai"' not in html
+        assert 'id="methods"' not in html
+
+    def test_report_has_five_tabs_with_novel(self, sample_classifications, tmp_path):
+        """Report should have 5 tabs when novel reads exist."""
+        from metadarkmatter.visualization.report.generator import ReportGenerator
+
+        output_path = tmp_path / "report_with_novel.html"
+        gen = ReportGenerator(sample_classifications)
+        gen.generate(output_path)
+        html = output_path.read_text()
+
+        assert 'id="summary"' in html
+        assert 'id="classification"' in html
+        assert 'id="novel-diversity"' in html
+        assert 'id="reference"' in html
+        assert 'id="data"' in html
+
+    def test_summary_has_kpi_strip(self, sample_classifications, tmp_path):
+        """Summary tab should contain a KPI strip with key metric cards."""
+        from metadarkmatter.visualization.report.generator import ReportGenerator
+
+        output_path = tmp_path / "report_kpi.html"
+        gen = ReportGenerator(sample_classifications)
+        gen.generate(output_path)
+        html = output_path.read_text()
+
+        assert 'class="kpi-strip"' in html
+        assert 'class="kpi-card ' in html
+
+    def test_summary_has_category_grid(self, sample_classifications, tmp_path):
+        """Summary tab should contain a compact category grid."""
+        from metadarkmatter.visualization.report.generator import ReportGenerator
+
+        output_path = tmp_path / "report_catgrid.html"
+        gen = ReportGenerator(sample_classifications)
+        gen.generate(output_path)
+        html = output_path.read_text()
+
+        assert 'class="category-grid"' in html
+        assert 'class="cat-grid-cell ' in html
+
+    def test_methods_is_footer_not_tab(self, sample_classifications, tmp_path):
+        """Methods should be a collapsible footer panel, not a tab."""
+        from metadarkmatter.visualization.report.generator import ReportGenerator
+
+        output_path = tmp_path / "report_methods.html"
+        gen = ReportGenerator(sample_classifications)
+        gen.generate(output_path)
+        html = output_path.read_text()
+
+        # Methods footer panel present
+        assert 'class="methods-footer"' in html
+        assert 'class="collapsible-panel ' in html or 'class="collapsible-panel"' in html
+        # Methods should NOT appear as a tab button in the navigation
+        assert "showTab('methods')" not in html
+
+    def test_classification_has_collapsible_confidence(self, sample_classifications, tmp_path):
+        """Classification tab should have collapsible confidence panel when Bayesian data exists."""
+        from metadarkmatter.visualization.report.generator import ReportGenerator
+
+        # Add Bayesian posterior columns to trigger the confidence panel
+        bayesian_df = sample_classifications.with_columns([
+            pl.lit(0.5).alias("posterior_entropy"),
+            pl.lit(0.9).alias("posterior_known_species"),
+            pl.lit(0.05).alias("posterior_novel_species"),
+            pl.lit(0.02).alias("posterior_novel_genus"),
+            pl.lit(0.01).alias("posterior_species_boundary"),
+            pl.lit(0.01).alias("posterior_ambiguous"),
+            pl.lit(0.01).alias("posterior_unclassified"),
+            pl.lit(85.0).alias("confidence_score"),
+            pl.lit("Known Species").alias("legacy_call"),
+        ])
+        output_path = tmp_path / "report_confidence.html"
+        gen = ReportGenerator(bayesian_df)
+        gen.generate(output_path)
+        html = output_path.read_text()
+
+        assert "panel-confidence-analysis" in html
+
+    def test_sunburst_in_classification_tab(self, sample_classifications, tmp_path):
+        """Sunburst chart should be rendered within the Classification tab."""
+        from metadarkmatter.visualization.report.generator import ReportGenerator
+
+        output_path = tmp_path / "report_sunburst.html"
+        gen = ReportGenerator(sample_classifications)
+        gen.generate(output_path)
+        html = output_path.read_text()
+
+        # The diversity sunburst plot div should be present
+        assert "plot-diversity-sunburst" in html
+
+    def test_navigation_excludes_old_tab_names(self, sample_classifications, tmp_path):
+        """Tab navigation should not reference legacy tab names from the old layout."""
+        from metadarkmatter.visualization.report.generator import ReportGenerator
+
+        output_path = tmp_path / "report_nav.html"
+        gen = ReportGenerator(sample_classifications)
+        gen.generate(output_path)
+        html = output_path.read_text()
+
+        # These old standalone tabs should not appear in navigation buttons
+        assert "showTab('overview')" not in html
+        assert "showTab('distributions')" not in html
+        assert "showTab('ani')" not in html
+        assert "showTab('aai')" not in html
+        assert "showTab('species')" not in html
+        assert "showTab('methods')" not in html
+
+    def test_summary_is_active_tab(self, sample_classifications, tmp_path):
+        """Summary tab should be the default active tab on load."""
+        from metadarkmatter.visualization.report.generator import ReportGenerator
+
+        output_path = tmp_path / "report_active.html"
+        gen = ReportGenerator(sample_classifications)
+        gen.generate(output_path)
+        html = output_path.read_text()
+
+        # Summary section should have the active class
+        assert 'id="summary" class="tab-section active"' in html
+
+
 class TestFamilyValidationData:
     """Test family validation data handling in reports."""
 
