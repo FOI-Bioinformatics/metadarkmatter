@@ -130,7 +130,7 @@ class TestReportGenerator:
         # Check key elements are present
         assert "<!DOCTYPE html>" in content
         assert "Metadarkmatter" in content
-        assert "Overview" in content
+        assert "Summary" in content
         assert "Distributions" in content
 
     def test_generate_with_ani_matrix(self, sample_classifications, sample_ani_matrix, tmp_path):

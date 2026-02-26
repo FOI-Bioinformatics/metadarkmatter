@@ -50,6 +50,9 @@ from metadarkmatter.visualization.report.styles import get_css_styles
 from metadarkmatter.visualization.report.templates import (
     ANI_NOT_PROVIDED_MESSAGE,
     CATEGORY_BREAKDOWN_TEMPLATE,
+    CATEGORY_GRID_CELL,
+    CATEGORY_GRID_TEMPLATE,
+    COLLAPSIBLE_PANEL_TEMPLATE,
     DATA_COLUMN_GUIDE_TEMPLATE,
     DATA_QUICK_FILTERS_TEMPLATE,
     DATA_SUMMARY_TEMPLATE,
@@ -62,6 +65,8 @@ from metadarkmatter.visualization.report.templates import (
     ENHANCED_SCORING_UNCERTAINTY_TYPES_TEMPLATE,
     GENOME_HIGHLIGHTS_TEMPLATE,
     GENOME_INTERPRETATION_TEMPLATE,
+    KPI_CARD_TEMPLATE,
+    KPI_STRIP_TEMPLATE,
     METRIC_CARD_TEMPLATE,
     METRIC_CARDS_CONTAINER,
     METHODS_SECTION_TEMPLATE,
@@ -76,6 +81,9 @@ from metadarkmatter.visualization.report.templates import (
     TAB_NAVIGATION_JS,
     TAB_SECTION_TEMPLATE,
     TABLE_ROW_TEMPLATE,
+    TOP_SPECIES_ROW_TEMPLATE,
+    TOP_SPECIES_TABLE_TEMPLATE,
+    TWO_COLUMN_ROW_TEMPLATE,
     BAYESIAN_SUMMARY_TEMPLATE,
     BAYESIAN_INTERPRETATION_TEMPLATE,
     CONFIDENCE_SUMMARY_TEMPLATE,
@@ -564,8 +572,8 @@ class ReportGenerator:
         # Generate all sections (order matches tab navigation)
         content_sections = []
 
-        # Overview tab (always visible first)
-        content_sections.append(self._build_overview_section())
+        # Summary tab (always visible first)
+        content_sections.append(self._build_summary_section())
 
         # Distributions tab
         content_sections.append(self._build_distributions_section())
@@ -651,7 +659,7 @@ class ReportGenerator:
         """Build dynamic navigation based on available data."""
         # Tab order: General -> Specific -> Novel -> Reference -> Technical -> Data
         tabs = [
-            ("overview", "Overview", True),
+            ("summary", "Summary", True),
             ("distributions", "Distributions", False),
             ("species-genomes", "Species & Genomes", False),
         ]
@@ -694,25 +702,36 @@ class ReportGenerator:
 
         return "\n".join(nav_items)
 
-    def _build_overview_section(self) -> str:
-        """Build the overview tab section with hero diversity summary and key findings."""
+    def _build_summary_section(self) -> str:
+        """Build the Summary tab with KPI strip, diversity bar, findings, and category grid."""
         s = self.summary
+        total = s.total_reads if s.total_reads > 0 else 1
 
-        # Calculate percentages for all categories
-        total = s.total_reads if s.total_reads > 0 else 1  # Avoid division by zero
+        # 1. KPI Strip
+        kpi_cards = []
+        kpi_cards.append(KPI_CARD_TEMPLATE.format(
+            color_class="accent", value=format_count(s.total_reads), label="Total Reads"
+        ))
+        kpi_cards.append(KPI_CARD_TEMPLATE.format(
+            color_class="known", value=f"{s.diversity_known_pct:.1f}%", label="Known"
+        ))
+        kpi_cards.append(KPI_CARD_TEMPLATE.format(
+            color_class="novel", value=f"{s.diversity_novel_pct:.1f}%", label="Novel"
+        ))
+        kpi_cards.append(KPI_CARD_TEMPLATE.format(
+            color_class="uncertain", value=f"{s.diversity_uncertain_pct:.1f}%", label="Uncertain"
+        ))
+        if s.diversity_off_target > 0:
+            kpi_cards.append(KPI_CARD_TEMPLATE.format(
+                color_class="off-target",
+                value=f"{s.diversity_off_target_pct:.1f}%",
+                label="Off-target",
+            ))
+        kpi_html = KPI_STRIP_TEMPLATE.format(cards="\n".join(kpi_cards))
 
-        # Diversity summary - the hero section
-        # Build off-target card/bar/legend fragments (empty when no off-target reads)
+        # 2. Diversity Bar (prominent stacked bar with legend)
         if s.diversity_off_target > 0:
             ot_pct = s.diversity_off_target_pct
-            off_target_card = (
-                '        <div class="diversity-card off-target">\n'
-                f'            <div class="diversity-pct">{ot_pct:.1f}%</div>\n'
-                '            <div class="diversity-label">Off-target</div>\n'
-                f'            <div class="diversity-count">{s.diversity_off_target:,} reads</div>\n'
-                '            <div class="diversity-desc">Better match outside target family</div>\n'
-                '        </div>'
-            )
             off_target_bar = (
                 f'        <div class="bar-segment off-target" style="width: {ot_pct}%;" '
                 f'title="Off-target: {ot_pct:.1f}%"></div>'
@@ -722,70 +741,107 @@ class ReportGenerator:
                 '<span class="legend-dot off-target"></span> Off-target</span>'
             )
         else:
-            off_target_card = ""
             off_target_bar = ""
             off_target_legend = ""
 
-        diversity_html = DIVERSITY_SUMMARY_TEMPLATE.format(
-            known_pct=s.diversity_known_pct,
-            known_count=s.diversity_known,
-            novel_pct=s.diversity_novel_pct,
-            novel_count=s.diversity_novel,
-            uncertain_pct=s.diversity_uncertain_pct,
-            uncertain_count=s.diversity_uncertain,
-            off_target_card=off_target_card,
-            off_target_bar=off_target_bar,
-            off_target_legend=off_target_legend,
-        )
+        bar_html = f'''
+    <div class="diversity-bar">
+        <div class="bar-segment known" style="width: {s.diversity_known_pct}%;" title="Known: {s.diversity_known_pct:.1f}%"></div>
+        <div class="bar-segment novel" style="width: {s.diversity_novel_pct}%;" title="Novel: {s.diversity_novel_pct:.1f}%"></div>
+        <div class="bar-segment uncertain" style="width: {s.diversity_uncertain_pct}%;" title="Uncertain: {s.diversity_uncertain_pct:.1f}%"></div>
+{off_target_bar}
+    </div>
+    <div class="diversity-bar-legend">
+        <span class="legend-item"><span class="legend-dot known"></span> Known ({s.diversity_known_pct:.1f}%)</span>
+        <span class="legend-item"><span class="legend-dot novel"></span> Novel ({s.diversity_novel_pct:.1f}%)</span>
+        <span class="legend-item"><span class="legend-dot uncertain"></span> Uncertain ({s.diversity_uncertain_pct:.1f}%)</span>
+{off_target_legend}
+    </div>
+'''
 
-        # Key findings cards
+        # 3. Two-column: Key Findings + Top Species
         key_findings_html = self._build_key_findings()
+        top_species_html = self._build_top_species_table()
 
-        # Category breakdown with detailed counts
-        category_html = CATEGORY_BREAKDOWN_TEMPLATE.format(
-            known_species=s.known_species,
-            known_species_pct=s.known_species / total * 100,
-            novel_species=s.novel_species,
-            novel_species_pct=s.novel_species / total * 100,
-            novel_genus=s.novel_genus,
-            novel_genus_pct=s.novel_genus / total * 100,
-            species_boundary=s.species_boundary,
-            species_boundary_pct=s.species_boundary / total * 100,
-            ambiguous=s.ambiguous,
-            ambiguous_pct=s.ambiguous / total * 100,
-            conserved_regions=s.conserved_regions,
-            conserved_pct=s.conserved_regions / total * 100,
+        two_col_html = TWO_COLUMN_ROW_TEMPLATE.format(
+            left_flex="3",
+            right_flex="2",
+            left_content=key_findings_html,
+            right_content=top_species_html,
         )
 
-        # Sunburst chart for interactive exploration - larger size
-        sunburst = DiversitySunburstChart(
-            s.to_dict(),
-            config=PlotConfig(width=800, height=650),
-            title="Diversity Classification",
-        )
-        sunburst_id = "plot-diversity-sunburst"
-        self._register_plot(sunburst_id, sunburst.create_figure())
+        # 4. Category Grid (compact 2-row layout replacing verbose breakdown)
+        categories = [
+            ("Known Species", s.known_species, "known"),
+            ("Novel Species", s.novel_species, "novel-species"),
+            ("Novel Genus", s.novel_genus, "novel-genus"),
+            ("Species Boundary", s.species_boundary, "species-boundary"),
+            ("Ambiguous", s.ambiguous, "ambiguous"),
+            ("Conserved", s.conserved_regions, "conserved"),
+            ("Unclassified", s.unclassified, "unclassified"),
+        ]
+        if s.off_target > 0:
+            categories.append(("Off-target", s.off_target, "off-target"))
 
-        # Build plot row with sunburst chart
-        plots_row = PLOT_ROW_TEMPLATE.format(
-            plots=(
-                PLOT_CONTAINER_TEMPLATE.format(
-                    extra_class="full-width",
-                    title="Interactive Diversity Chart",
-                    description="Click segments to explore. Inner ring shows diversity status (Known/Novel/Uncertain), outer ring shows detailed categories.",
-                    plot_id=sunburst_id,
-                )
-            )
-        )
+        grid_cells = []
+        for name, count, color_class in categories:
+            grid_cells.append(CATEGORY_GRID_CELL.format(
+                color_class=color_class,
+                name=name,
+                count=count,
+                pct=count / total * 100,
+            ))
+        category_html = CATEGORY_GRID_TEMPLATE.format(cells="\n".join(grid_cells))
 
-        content = diversity_html + key_findings_html + category_html + plots_row
+        content = kpi_html + bar_html + two_col_html + category_html
 
         return TAB_SECTION_TEMPLATE.format(
-            tab_id="overview",
+            tab_id="summary",
             active_class="active",
-            section_title="Overview",
+            section_title="Summary",
             content=content,
         )
+
+    def _build_top_species_table(self) -> str:
+        """Build a compact top species mini-table for the summary tab."""
+        if self.genome_metadata is None:
+            return ""
+
+        # Enrich with species info
+        if "species" not in self.df.columns:
+            enriched_df = self.genome_metadata.join_classifications(self.df)
+        else:
+            enriched_df = self.df
+
+        # Exclude off-target reads
+        if "taxonomic_call" in enriched_df.columns:
+            base_df = enriched_df.filter(pl.col("taxonomic_call") != "Off-target")
+        else:
+            base_df = enriched_df
+
+        if "species" not in base_df.columns:
+            return ""
+
+        total = len(base_df) if len(base_df) > 0 else 1
+        species_counts = (
+            base_df.group_by("species")
+            .len()
+            .sort("len", descending=True)
+            .head(8)
+        )
+
+        if len(species_counts) == 0:
+            return ""
+
+        rows = []
+        for row in species_counts.iter_rows(named=True):
+            rows.append(TOP_SPECIES_ROW_TEMPLATE.format(
+                species=row["species"],
+                count=f'{row["len"]:,}',
+                pct=row["len"] / total * 100,
+            ))
+
+        return TOP_SPECIES_TABLE_TEMPLATE.format(rows="\n".join(rows))
 
     def _build_key_findings(self) -> str:
         """Build key findings cards for the overview tab."""
