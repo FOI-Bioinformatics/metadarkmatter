@@ -83,7 +83,6 @@ from metadarkmatter.visualization.report.templates import (
     get_cell_class,
 )
 from metadarkmatter.visualization.report.novel_section import (
-    NOVEL_CONFIDENCE_GUIDE_TEMPLATE,
     NOVEL_EMPTY_TEMPLATE,
     PHYLOGENETIC_HEATMAP_INTRO_TEMPLATE,
     PHYLOGENETIC_HEATMAP_LEGEND_TEMPLATE,
@@ -1327,11 +1326,31 @@ class ReportGenerator:
                 content=content,
             )
 
+        # Build KPI metric strip for novel diversity
+        novel_kpi_cards = []
+        cluster_count = len(clusters) if clusters else 0
+        novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
+            color_class="accent", value=str(cluster_count), label="Clusters",
+        ))
+        novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
+            color_class="novel", value=str(self.summary.novel_species), label="Novel Species",
+        ))
+        novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
+            color_class="novel", value=str(self.summary.novel_genus), label="Novel Genus",
+        ))
+        if self.summary.has_bayesian:
+            high_conf_novel = len(self.df.filter(
+                (pl.col("taxonomic_call").is_in(["Novel Species", "Novel Genus"])) &
+                (pl.col("posterior_entropy") < 1.0)
+            ))
+            novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
+                color_class="known", value=str(high_conf_novel), label="High Confidence",
+            ))
+        kpi_html = KPI_STRIP_TEMPLATE.format(cards="\n".join(novel_kpi_cards))
+        content_parts.append(kpi_html)
+
         # Build summary section
         content_parts.append(build_novel_summary_html(summary))
-
-        # Add confidence guide
-        content_parts.append(NOVEL_CONFIDENCE_GUIDE_TEMPLATE)
 
         # Build scatter plot of cluster quality
         scatter_fig = build_cluster_scatter_figure(clusters, width=1000, height=500)
@@ -1385,6 +1404,7 @@ class ReportGenerator:
             if self.aai_matrix is not None and len(self.aai_matrix) > 0:
                 heatmaps_to_build.append((self.aai_matrix, "AAI"))
 
+        heatmap_parts: list[str] = []
         for matrix, sim_type in heatmaps_to_build:
             try:
                 # Get genome accessions from matrix
@@ -1427,7 +1447,7 @@ class ReportGenerator:
                             "reference genomes. Best for visualizing Novel Species placement."
                         )
 
-                    content_parts.append(PHYLOGENETIC_HEATMAP_INTRO_TEMPLATE.format(
+                    heatmap_parts.append(PHYLOGENETIC_HEATMAP_INTRO_TEMPLATE.format(
                         n_references=phylo_metadata.get("n_references", 0),
                         n_clusters=n_clusters_shown,
                         clusters_note=clusters_note,
@@ -1437,7 +1457,7 @@ class ReportGenerator:
                     phylo_heatmap_id = f"plot-novel-phylo-heatmap-{sim_type.lower()}"
                     self._register_plot(phylo_heatmap_id, phylo_fig)
 
-                    content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
+                    heatmap_parts.append(PLOT_CONTAINER_TEMPLATE.format(
                         extra_class="full-width",
                         title=f"Phylogenetic Context Heatmap ({sim_type})",
                         description=(
@@ -1449,10 +1469,20 @@ class ReportGenerator:
 
                     # Add legend (only for first heatmap to avoid repetition)
                     if matrix is heatmaps_to_build[0][0]:
-                        content_parts.append(PHYLOGENETIC_HEATMAP_LEGEND_TEMPLATE)
+                        heatmap_parts.append(PHYLOGENETIC_HEATMAP_LEGEND_TEMPLATE)
 
             except Exception as e:
                 logger.warning(f"Could not build {sim_type} phylogenetic context heatmap: {e}")
+
+        # Wrap heatmaps in a collapsible panel if any were built
+        if heatmap_parts:
+            heatmap_html = "\n".join(heatmap_parts)
+            content_parts.append(COLLAPSIBLE_PANEL_TEMPLATE.format(
+                default_state="",
+                panel_id="novel-heatmap",
+                title="Phylogenetic Context Heatmap",
+                content=heatmap_html,
+            ))
 
         # Build cluster table (includes phylogenetic placement)
         content_parts.append(build_cluster_table_html(clusters))

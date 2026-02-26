@@ -304,35 +304,6 @@ DISTRIBUTIONS_SUMMARY_TEMPLATE: str = '''
 </div>
 '''
 
-SCATTER_INTERPRETATION_TEMPLATE: str = '''
-<div class="scatter-interpretation">
-    <h4>Reading the Scatter Plot</h4>
-    <div class="interpretation-grid">
-        <div class="interp-region known">
-            <div class="region-marker"></div>
-            <div class="region-text">
-                <strong>Bottom-Left: Known Species</strong>
-                <span>Low novelty + low uncertainty = confident match to known taxa</span>
-            </div>
-        </div>
-        <div class="interp-region novel">
-            <div class="region-marker"></div>
-            <div class="region-text">
-                <strong>Bottom-Right: Novel Diversity</strong>
-                <span>High novelty + low uncertainty = potential new species/genus</span>
-            </div>
-        </div>
-        <div class="interp-region uncertain">
-            <div class="region-marker"></div>
-            <div class="region-text">
-                <strong>Top Region: Uncertain</strong>
-                <span>High uncertainty = ambiguous placement or conserved genes</span>
-            </div>
-        </div>
-    </div>
-</div>
-'''
-
 # =============================================================================
 # Genomes Tab Templates
 # =============================================================================
@@ -364,70 +335,6 @@ GENOMES_SUMMARY_TEMPLATE: str = '''
             <div class="genome-metric-value">{median_reads}</div>
             <div class="genome-metric-label">Median Reads</div>
             <div class="genome-metric-hint">Per genome</div>
-        </div>
-    </div>
-</div>
-'''
-
-GENOME_HIGHLIGHTS_TEMPLATE: str = '''
-<div class="genome-highlights">
-    <h4>Key Genomes</h4>
-    <div class="highlights-grid">
-        <div class="highlight-card top">
-            <div class="highlight-icon">1</div>
-            <div class="highlight-content">
-                <div class="highlight-title">Most Abundant</div>
-                <div class="highlight-species">{top_species}</div>
-                <div class="highlight-accession">{top_accession}</div>
-                <div class="highlight-stats">
-                    <span class="stat">{top_reads:,} reads</span>
-                    <span class="stat">{top_identity:.1f}% identity</span>
-                </div>
-            </div>
-        </div>
-        <div class="highlight-card novel">
-            <div class="highlight-icon">N</div>
-            <div class="highlight-content">
-                <div class="highlight-title">Most Novel</div>
-                <div class="highlight-species">{novel_species}</div>
-                <div class="highlight-accession">{novel_accession}</div>
-                <div class="highlight-stats">
-                    <span class="stat">{novel_reads:,} reads</span>
-                    <span class="stat">{novel_novelty:.1f} novelty</span>
-                </div>
-            </div>
-        </div>
-        <div class="highlight-card confident">
-            <div class="highlight-icon">C</div>
-            <div class="highlight-content">
-                <div class="highlight-title">Most Confident</div>
-                <div class="highlight-species">{confident_species}</div>
-                <div class="highlight-accession">{confident_accession}</div>
-                <div class="highlight-stats">
-                    <span class="stat">{confident_reads:,} reads</span>
-                    <span class="stat">{confident_identity:.1f}% identity</span>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-'''
-
-GENOME_INTERPRETATION_TEMPLATE: str = '''
-<div class="genome-interpretation">
-    <h4>Understanding Genome Distribution</h4>
-    <div class="interp-items">
-        <div class="interp-item">
-            <span class="interp-label">Concentrated distribution</span>
-            <span class="interp-desc">Most reads hit few genomes - sample likely contains organisms closely related to specific references</span>
-        </div>
-        <div class="interp-item">
-            <span class="interp-label">Spread distribution</span>
-            <span class="interp-desc">Reads spread across many genomes - may indicate diverse community or novel organism equidistant from multiple references</span>
-        </div>
-        <div class="interp-item">
-            <span class="interp-label">Low identity hits</span>
-            <span class="interp-desc">Genomes with lower mean identity suggest reads from more divergent organisms</span>
         </div>
     </div>
 </div>

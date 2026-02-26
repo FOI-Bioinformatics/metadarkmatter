@@ -432,33 +432,6 @@ body {
     border: 1px solid var(--border-light);
 }
 
-.diversity-headline {
-    text-align: center;
-    margin-bottom: 2rem;
-}
-
-.headline-value {
-    font-size: 4rem;
-    font-weight: 800;
-    line-height: 1;
-    margin-bottom: 0.5rem;
-}
-
-.headline-value.novel { color: var(--danger-color); }
-.headline-value.known { color: var(--success-color); }
-
-.headline-label {
-    font-size: 1.5rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 0.25rem;
-}
-
-.headline-detail {
-    font-size: 0.95rem;
-    color: var(--text-secondary);
-}
-
 .diversity-cards {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -524,7 +497,7 @@ body {
 
 .diversity-bar {
     display: flex;
-    height: 24px;
+    height: 32px;
     border-radius: var(--radius-md);
     overflow: hidden;
     margin-bottom: 0.75rem;
@@ -538,14 +511,15 @@ body {
 .bar-segment.known { background: var(--success-color); }
 .bar-segment.novel { background: var(--danger-color); }
 .bar-segment.uncertain { background: var(--info-color); }
-.bar-segment.off-target { background: #3498db; }
+.bar-segment.off-target { background: var(--offtarget-color); }
 
 .diversity-bar-legend {
     display: flex;
     justify-content: center;
-    gap: 2rem;
-    font-size: 0.85rem;
+    gap: 1.5rem;
+    font-size: 0.75rem;
     color: var(--text-secondary);
+    margin-bottom: 1rem;
 }
 
 .legend-item {
@@ -563,7 +537,7 @@ body {
 .legend-dot.known { background: var(--success-color); }
 .legend-dot.novel { background: var(--danger-color); }
 .legend-dot.uncertain { background: var(--info-color); }
-.legend-dot.off-target { background: #3498db; }
+.legend-dot.off-target { background: var(--offtarget-color); }
 
 /* Key Findings Cards */
 .key-findings {
@@ -929,103 +903,6 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-}
-
-/* Genome Highlights */
-.genome-highlights {
-    background: var(--bg-primary);
-    border-radius: var(--radius-md);
-    padding: 1rem 1.25rem;
-    margin-bottom: 1.5rem;
-    border: 1px solid var(--border-light);
-}
-
-.genome-highlights h4 {
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 0.75rem;
-}
-
-.highlights-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 1rem;
-}
-
-.highlight-card {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
-    padding: 0.75rem;
-    border-radius: var(--radius-md);
-    background: var(--bg-secondary);
-}
-
-.highlight-icon {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 700;
-    font-size: 0.9rem;
-    flex-shrink: 0;
-}
-
-.highlight-card.top .highlight-icon {
-    background: var(--accent-color);
-    color: white;
-}
-
-.highlight-card.novel .highlight-icon {
-    background: var(--danger-color);
-    color: white;
-}
-
-.highlight-card.confident .highlight-icon {
-    background: var(--success-color);
-    color: white;
-}
-
-.highlight-content {
-    flex: 1;
-    min-width: 0;
-}
-
-.highlight-title {
-    font-size: 0.7rem;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-}
-
-.highlight-species {
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-top: 0.25rem;
-    font-style: italic;
-}
-
-.highlight-accession {
-    font-size: 0.75rem;
-    font-family: monospace;
-    color: var(--text-muted);
-    margin-top: 0.1rem;
-}
-
-.highlight-stats {
-    display: flex;
-    gap: 0.75rem;
-    margin-top: 0.35rem;
-}
-
-.highlight-stats .stat {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
 }
 
 /* Genome Interpretation */
@@ -1658,14 +1535,6 @@ body {
         padding: 1.25rem;
     }
 
-    .headline-value {
-        font-size: 2.5rem;
-    }
-
-    .headline-label {
-        font-size: 1.1rem;
-    }
-
     .diversity-cards {
         grid-template-columns: 1fr;
         gap: 1rem;
@@ -1695,10 +1564,6 @@ body {
 
     .genomes-metrics {
         grid-template-columns: repeat(2, 1fr);
-    }
-
-    .highlights-grid {
-        grid-template-columns: 1fr;
     }
 
     .interp-item {
@@ -2395,33 +2260,6 @@ body {
     border: 1px solid var(--border-color);
 }
 
-.diversity-headline {
-    text-align: center;
-    margin-bottom: 2rem;
-}
-
-.headline-value {
-    font-size: 4rem;
-    font-weight: 800;
-    line-height: 1;
-    margin-bottom: 0.5rem;
-}
-
-.headline-value.novel { color: var(--danger-color); }
-.headline-value.known { color: var(--success-color); }
-
-.headline-label {
-    font-size: 1.5rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 0.25rem;
-}
-
-.headline-detail {
-    font-size: 0.95rem;
-    color: var(--text-secondary);
-}
-
 .diversity-cards {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -2487,7 +2325,7 @@ body {
 
 .diversity-bar {
     display: flex;
-    height: 24px;
+    height: 32px;
     border-radius: var(--radius-md);
     overflow: hidden;
     margin-bottom: 0.75rem;
@@ -2501,14 +2339,15 @@ body {
 .bar-segment.known { background: var(--success-color); }
 .bar-segment.novel { background: var(--danger-color); }
 .bar-segment.uncertain { background: var(--info-color); }
-.bar-segment.off-target { background: #3498db; }
+.bar-segment.off-target { background: var(--offtarget-color); }
 
 .diversity-bar-legend {
     display: flex;
     justify-content: center;
-    gap: 2rem;
-    font-size: 0.85rem;
+    gap: 1.5rem;
+    font-size: 0.75rem;
     color: var(--text-secondary);
+    margin-bottom: 1rem;
 }
 
 .legend-item {
@@ -2526,7 +2365,7 @@ body {
 .legend-dot.known { background: var(--success-color); }
 .legend-dot.novel { background: var(--danger-color); }
 .legend-dot.uncertain { background: var(--info-color); }
-.legend-dot.off-target { background: #3498db; }
+.legend-dot.off-target { background: var(--offtarget-color); }
 
 /* Category Breakdown - Dark Theme */
 .category-breakdown {
@@ -2828,103 +2667,6 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-}
-
-/* Genome Highlights - Dark Theme */
-.genome-highlights {
-    background: var(--bg-primary);
-    border-radius: var(--radius-md);
-    padding: 1rem 1.25rem;
-    margin-bottom: 1.5rem;
-    border: 1px solid var(--border-color);
-}
-
-.genome-highlights h4 {
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 0.75rem;
-}
-
-.highlights-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 1rem;
-}
-
-.highlight-card {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.75rem;
-    padding: 0.75rem;
-    border-radius: var(--radius-md);
-    background: var(--bg-secondary);
-}
-
-.highlight-icon {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 700;
-    font-size: 0.9rem;
-    flex-shrink: 0;
-}
-
-.highlight-card.top .highlight-icon {
-    background: var(--accent-color);
-    color: white;
-}
-
-.highlight-card.novel .highlight-icon {
-    background: var(--danger-color);
-    color: white;
-}
-
-.highlight-card.confident .highlight-icon {
-    background: var(--success-color);
-    color: white;
-}
-
-.highlight-content {
-    flex: 1;
-    min-width: 0;
-}
-
-.highlight-title {
-    font-size: 0.7rem;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
-}
-
-.highlight-species {
-    font-size: 0.9rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-top: 0.25rem;
-    font-style: italic;
-}
-
-.highlight-accession {
-    font-size: 0.75rem;
-    font-family: monospace;
-    color: var(--text-muted);
-    margin-top: 0.1rem;
-}
-
-.highlight-stats {
-    display: flex;
-    gap: 0.75rem;
-    margin-top: 0.35rem;
-}
-
-.highlight-stats .stat {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
 }
 
 /* Genome Interpretation - Dark Theme */
@@ -3402,8 +3144,6 @@ body {
     .plot-row { grid-template-columns: 1fr; }
     .metric-cards { grid-template-columns: repeat(2, 1fr); }
     .diversity-summary { padding: 1.25rem; }
-    .headline-value { font-size: 2.5rem; }
-    .headline-label { font-size: 1.1rem; }
     .diversity-cards { grid-template-columns: 1fr; gap: 1rem; }
     .diversity-pct { font-size: 2rem; }
     .breakdown-grid { grid-template-columns: 1fr; gap: 1rem; }
