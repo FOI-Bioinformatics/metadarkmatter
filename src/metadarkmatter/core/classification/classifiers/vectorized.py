@@ -302,6 +302,47 @@ class VectorizedClassifier:
                     pl.col("_approx_af") >= self.config.min_alignment_fraction
                 ).drop("_approx_af")
 
+            # E-value filter
+            if self.config.max_evalue > 0:
+                df = df.filter(pl.col("evalue") <= self.config.max_evalue)
+
+            # Percent identity filter
+            if self.config.min_percent_identity > 0:
+                df = df.filter(pl.col("pident") >= self.config.min_percent_identity)
+
+            # Bitscore filter
+            if self.config.min_bitscore > 0:
+                df = df.filter(pl.col("bitscore") >= self.config.min_bitscore)
+
+            # Read length and query coverage filters
+            if self.config.min_read_length > 0 or self.config.min_query_coverage > 0:
+                if "qlen" in df.columns:
+                    df = df.with_columns(
+                        pl.when(pl.col("qlen").is_not_null())
+                        .then(pl.col("qlen"))
+                        .otherwise(pl.col("qend"))
+                        .alias("_read_length")
+                    )
+                else:
+                    df = df.with_columns(
+                        pl.col("qend").alias("_read_length")
+                    )
+
+                if self.config.min_read_length > 0:
+                    df = df.filter(pl.col("_read_length") >= self.config.min_read_length)
+
+                if self.config.min_query_coverage > 0:
+                    df = df.with_columns(
+                        ((pl.col("qend") - pl.col("qstart") + 1)
+                         / pl.col("_read_length") * 100.0)
+                        .clip(0.0, 100.0)
+                        .alias("_query_cov")
+                    ).filter(
+                        pl.col("_query_cov") >= self.config.min_query_coverage
+                    ).drop("_query_cov")
+
+                df = df.drop("_read_length")
+
             # Add genome_name column (extracts accession from standardized sseqid)
             df = df.with_columns([extract_genome_name_expr()])
 
@@ -391,7 +432,7 @@ class VectorizedClassifier:
                     pl.lit(None).cast(pl.Float64).alias("identity_gap"),
                     pl.lit(0.0).alias("confidence_score"),
                     pl.lit("Off-target").alias("taxonomic_call"),
-                    pl.lit("Uncertain").alias("diversity_status"),
+                    pl.lit("Off-target").alias("diversity_status"),
                     pl.lit(False).alias("is_novel"),
                     pl.lit(False).alias("low_confidence"),
                     pl.lit(None).cast(pl.Float64).alias("inferred_uncertainty"),
@@ -711,6 +752,8 @@ class VectorizedClassifier:
             # "second" mode: uses ANI to the second-best genome only
             pl.when(pl.col("num_ambiguous_hits") <= 1)
             .then(0.0)
+            .when(pl.col("num_secondary_genomes") == 0)
+            .then(0.0)  # All hits collapse to same representative = confident placement
             .when(pl.lit(cfg.uncertainty_mode == "second"))
             .then(
                 pl.when(pl.col("second_genome_ani") == 0.0)
@@ -770,9 +813,14 @@ class VectorizedClassifier:
             (pl.col("posterior_entropy") > bay_cfg.entropy_threshold).alias("low_confidence"),
         ])
 
-        # Inferred uncertainty for single-hit reads
+        # Inferred uncertainty for single-hit reads and representative-collapsed reads
+        # (where all ambiguous hits map to the same representative genome)
+        _needs_inferred = (
+            (pl.col("num_ambiguous_hits") <= 1)
+            | (pl.col("num_secondary_genomes") == 0)
+        )
         result = result.with_columns([
-            pl.when(pl.col("num_ambiguous_hits") <= 1)
+            pl.when(_needs_inferred)
             .then(
                 pl.when(pl.col("novelty_index") < eff["novelty_known_max"])
                 .then(5.0 + pl.col("novelty_index") * 0.5)
@@ -784,7 +832,7 @@ class VectorizedClassifier:
             )
             .otherwise(pl.lit(None))
             .alias("inferred_uncertainty"),
-            pl.when(pl.col("num_ambiguous_hits") <= 1)
+            pl.when(_needs_inferred)
             .then(pl.lit("inferred"))
             .otherwise(pl.lit("measured"))
             .alias("uncertainty_type"),

@@ -801,3 +801,448 @@ class TestSuggestedNames:
 
         assert len(clusters) == 1
         assert clusters[0].suggested_name.startswith("Unknown sp. MDM-")
+
+
+# =============================================================================
+# NovelCluster New Fields Tests
+# =============================================================================
+
+
+class TestNovelClusterNewFields:
+    """Tests for mean_bayesian_confidence and contributing_genomes fields."""
+
+    def test_new_fields_default_to_none_and_empty(self):
+        """New fields should default gracefully."""
+        cluster = NovelCluster(
+            cluster_id="NSP_001",
+            taxonomic_call="Novel Species",
+            nearest_genome="GCF_000123456.1",
+            nearest_species="Test species",
+            nearest_genus="Test",
+            nearest_family="Testaceae",
+            novelty_band=5,
+            read_count=10,
+            mean_novelty_index=7.0,
+            novelty_min=5.0,
+            novelty_max=9.0,
+            mean_placement_uncertainty=2.0,
+            suggested_name="Test sp. MDM-001",
+            confidence="High",
+            phylogenetic_context="Novel species within Test",
+        )
+        assert cluster.mean_bayesian_confidence is None
+        assert cluster.contributing_genomes == []
+
+    def test_new_fields_can_be_set(self):
+        """New fields should accept values."""
+        cluster = NovelCluster(
+            cluster_id="NSP_001",
+            taxonomic_call="Novel Species",
+            nearest_genome="GCF_000123456.1",
+            nearest_species="Test species",
+            nearest_genus="Test",
+            nearest_family="Testaceae",
+            novelty_band=5,
+            read_count=10,
+            mean_novelty_index=7.0,
+            novelty_min=5.0,
+            novelty_max=9.0,
+            mean_placement_uncertainty=2.0,
+            suggested_name="Test sp. MDM-001",
+            confidence="High",
+            phylogenetic_context="Novel species within Test",
+            mean_bayesian_confidence=72.5,
+            contributing_genomes=["GCF_A", "GCF_B"],
+        )
+        assert cluster.mean_bayesian_confidence == 72.5
+        assert cluster.contributing_genomes == ["GCF_A", "GCF_B"]
+
+    def test_to_summary_dict_includes_bayesian_confidence(self):
+        """to_summary_dict should include mean_bayesian_confidence when set."""
+        cluster = NovelCluster(
+            cluster_id="NSP_001",
+            taxonomic_call="Novel Species",
+            nearest_genome="GCF_000123456.1",
+            nearest_species="Test species",
+            nearest_genus="Test",
+            nearest_family="Testaceae",
+            novelty_band=5,
+            read_count=10,
+            mean_novelty_index=7.0,
+            novelty_min=5.0,
+            novelty_max=9.0,
+            mean_placement_uncertainty=2.0,
+            suggested_name="Test sp. MDM-001",
+            confidence="High",
+            phylogenetic_context="Novel species within Test",
+            mean_bayesian_confidence=72.5,
+            contributing_genomes=["GCF_A", "GCF_B"],
+        )
+        result = cluster.to_summary_dict()
+        assert result["mean_bayesian_confidence"] == 72.5
+        assert result["contributing_genomes_count"] == 2
+
+    def test_to_summary_dict_omits_unset_new_fields(self):
+        """to_summary_dict should omit new fields when not set."""
+        cluster = NovelCluster(
+            cluster_id="NSP_001",
+            taxonomic_call="Novel Species",
+            nearest_genome="GCF_000123456.1",
+            nearest_species="Test species",
+            nearest_genus="Test",
+            nearest_family="Testaceae",
+            novelty_band=5,
+            read_count=10,
+            mean_novelty_index=7.0,
+            novelty_min=5.0,
+            novelty_max=9.0,
+            mean_placement_uncertainty=2.0,
+            suggested_name="Test sp. MDM-001",
+            confidence="High",
+            phylogenetic_context="Novel species within Test",
+        )
+        result = cluster.to_summary_dict()
+        assert "mean_bayesian_confidence" not in result
+        assert "contributing_genomes_count" not in result
+
+
+# =============================================================================
+# Genome Neighborhood Merging Tests
+# =============================================================================
+
+
+class TestGenomeNeighborhoods:
+    """Tests for ANI-aware genome neighborhood merging."""
+
+    @pytest.fixture
+    def ani_matrix(self):
+        """ANI matrix with two neighborhoods."""
+        from metadarkmatter.core.classification.ani_matrix import ANIMatrix
+
+        ani_dict = {
+            "GCF_A": {"GCF_A": 100.0, "GCF_B": 87.0, "GCF_C": 72.0},
+            "GCF_B": {"GCF_A": 87.0, "GCF_B": 100.0, "GCF_C": 73.0},
+            "GCF_C": {"GCF_A": 72.0, "GCF_B": 73.0, "GCF_C": 100.0},
+        }
+        return ANIMatrix(ani_dict)
+
+    def test_neighborhood_merging_reduces_clusters(self, ani_matrix):
+        """Genomes within ANI threshold should merge into one neighborhood."""
+        # GCF_A and GCF_B are at 87% ANI (above 80% threshold)
+        # So reads hitting either should cluster together
+        df = pl.DataFrame({
+            "read_id": [f"read_{i:03d}" for i in range(20)],
+            "best_match_genome": ["GCF_A"] * 10 + ["GCF_B"] * 10,
+            "novelty_index": [7.0] * 20,
+            "placement_uncertainty": [2.0] * 20,
+            "taxonomic_call": ["Novel Species"] * 20,
+        })
+
+        # Without ANI: 2 clusters (one per genome)
+        analyzer_no_ani = NovelDiversityAnalyzer(
+            df, min_cluster_size=3,
+        )
+        clusters_no_ani = analyzer_no_ani.cluster_novel_reads()
+
+        # With ANI: 1 cluster (merged neighborhood)
+        analyzer_with_ani = NovelDiversityAnalyzer(
+            df, ani_matrix=ani_matrix, min_cluster_size=3,
+        )
+        clusters_with_ani = analyzer_with_ani.cluster_novel_reads()
+
+        assert len(clusters_no_ani) == 2
+        assert len(clusters_with_ani) == 1
+        assert clusters_with_ani[0].read_count == 20
+
+    def test_separate_neighborhoods_stay_separate(self, ani_matrix):
+        """Genomes below ANI threshold should remain in separate clusters."""
+        # GCF_A and GCF_C are at 72% ANI (below 80% threshold)
+        df = pl.DataFrame({
+            "read_id": [f"read_{i:03d}" for i in range(10)],
+            "best_match_genome": ["GCF_A"] * 5 + ["GCF_C"] * 5,
+            "novelty_index": [7.0] * 10,
+            "placement_uncertainty": [2.0] * 10,
+            "taxonomic_call": ["Novel Species"] * 10,
+        })
+
+        analyzer = NovelDiversityAnalyzer(
+            df, ani_matrix=ani_matrix, min_cluster_size=3,
+        )
+        clusters = analyzer.cluster_novel_reads()
+
+        assert len(clusters) == 2
+
+    def test_contributing_genomes_populated(self, ani_matrix):
+        """contributing_genomes should list all original genomes in merged cluster."""
+        df = pl.DataFrame({
+            "read_id": [f"read_{i:03d}" for i in range(20)],
+            "best_match_genome": ["GCF_A"] * 10 + ["GCF_B"] * 10,
+            "novelty_index": [7.0] * 20,
+            "placement_uncertainty": [2.0] * 20,
+            "taxonomic_call": ["Novel Species"] * 20,
+        })
+
+        analyzer = NovelDiversityAnalyzer(
+            df, ani_matrix=ani_matrix, min_cluster_size=3,
+        )
+        clusters = analyzer.cluster_novel_reads()
+
+        assert len(clusters) == 1
+        assert set(clusters[0].contributing_genomes) == {"GCF_A", "GCF_B"}
+
+    def test_no_ani_matrix_preserves_old_behavior(self):
+        """Without ANI matrix, clustering should work as before."""
+        df = pl.DataFrame({
+            "read_id": [f"read_{i:03d}" for i in range(10)],
+            "best_match_genome": ["GCF_A"] * 5 + ["GCF_B"] * 5,
+            "novelty_index": [7.0] * 10,
+            "placement_uncertainty": [2.0] * 10,
+            "taxonomic_call": ["Novel Species"] * 10,
+        })
+
+        analyzer = NovelDiversityAnalyzer(
+            df, min_cluster_size=3,
+        )
+        clusters = analyzer.cluster_novel_reads()
+
+        # Two genomes should produce two clusters without ANI merging
+        assert len(clusters) == 2
+
+
+# =============================================================================
+# Adjacent Band Merging Tests
+# =============================================================================
+
+
+class TestAdjacentBandMerging:
+    """Tests for adjacent novelty band merging."""
+
+    def test_adjacent_bands_merge(self):
+        """Reads at 9.9% and 10.1% novelty should merge into one cluster."""
+        df = pl.DataFrame({
+            "read_id": [f"read_{i:03d}" for i in range(20)],
+            "best_match_genome": ["GCF_A"] * 20,
+            "novelty_index": [9.0, 9.5, 9.8, 9.9, 9.9] * 2 + [10.1, 10.2, 10.5, 11.0, 11.5] * 2,
+            "placement_uncertainty": [2.0] * 20,
+            "taxonomic_call": ["Novel Species"] * 20,
+        })
+
+        analyzer = NovelDiversityAnalyzer(
+            df, min_cluster_size=3,
+        )
+        clusters = analyzer.cluster_novel_reads()
+
+        # Should merge into 1 cluster (bands 5 and 10 are adjacent, ranges overlap)
+        assert len(clusters) == 1
+        assert clusters[0].read_count == 20
+
+    def test_non_adjacent_bands_stay_separate(self):
+        """Reads in bands 5 and 15 should not merge (not adjacent)."""
+        df = pl.DataFrame({
+            "read_id": [f"read_{i:03d}" for i in range(20)],
+            "best_match_genome": ["GCF_A"] * 20,
+            "novelty_index": [6.0] * 10 + [16.0] * 10,
+            "placement_uncertainty": [2.0] * 20,
+            "taxonomic_call": ["Novel Species"] * 20,
+        })
+
+        analyzer = NovelDiversityAnalyzer(
+            df, min_cluster_size=3,
+        )
+        clusters = analyzer.cluster_novel_reads()
+
+        # Should remain 2 separate clusters (bands 5 and 15 are not adjacent)
+        assert len(clusters) == 2
+
+    def test_different_tax_calls_dont_merge(self):
+        """Adjacent bands with different taxonomic calls should not merge."""
+        df = pl.DataFrame({
+            "read_id": [f"read_{i:03d}" for i in range(10)],
+            "best_match_genome": ["GCF_A"] * 10,
+            "novelty_index": [9.0] * 5 + [10.5] * 5,
+            "placement_uncertainty": [2.0] * 10,
+            "taxonomic_call": ["Novel Species"] * 5 + ["Novel Genus"] * 5,
+        })
+
+        analyzer = NovelDiversityAnalyzer(
+            df, min_cluster_size=3,
+        )
+        clusters = analyzer.cluster_novel_reads()
+
+        # Different taxonomic calls: should not merge
+        assert len(clusters) == 2
+
+
+# =============================================================================
+# Bayesian Confidence Tests
+# =============================================================================
+
+
+class TestBayesianConfidence:
+    """Tests for Bayesian-informed confidence assignment."""
+
+    def test_high_bayesian_confidence(self):
+        """High Bayesian confidence (>=70) with >=10 reads should be High."""
+        df = pl.DataFrame({
+            "read_id": [f"read_{i:03d}" for i in range(15)],
+            "best_match_genome": ["GCF_A"] * 15,
+            "novelty_index": [7.0] * 15,
+            "placement_uncertainty": [2.0] * 15,
+            "taxonomic_call": ["Novel Species"] * 15,
+            "confidence_score": [75.0] * 15,
+        })
+        analyzer = NovelDiversityAnalyzer(df, min_cluster_size=10)
+        clusters = analyzer.cluster_novel_reads()
+
+        assert len(clusters) == 1
+        assert clusters[0].confidence == "High"
+        assert clusters[0].mean_bayesian_confidence == pytest.approx(75.0, rel=0.1)
+
+    def test_medium_bayesian_confidence(self):
+        """Bayesian confidence 50-70 with >=5 reads should be Medium."""
+        df = pl.DataFrame({
+            "read_id": [f"read_{i:03d}" for i in range(7)],
+            "best_match_genome": ["GCF_A"] * 7,
+            "novelty_index": [7.0] * 7,
+            "placement_uncertainty": [2.0] * 7,
+            "taxonomic_call": ["Novel Species"] * 7,
+            "confidence_score": [55.0] * 7,
+        })
+        analyzer = NovelDiversityAnalyzer(df, min_cluster_size=5)
+        clusters = analyzer.cluster_novel_reads()
+
+        assert len(clusters) == 1
+        assert clusters[0].confidence == "Medium"
+
+    def test_low_bayesian_confidence(self):
+        """Low Bayesian confidence (<50) should be Low regardless of reads."""
+        df = pl.DataFrame({
+            "read_id": [f"read_{i:03d}" for i in range(20)],
+            "best_match_genome": ["GCF_A"] * 20,
+            "novelty_index": [7.0] * 20,
+            "placement_uncertainty": [2.0] * 20,
+            "taxonomic_call": ["Novel Species"] * 20,
+            "confidence_score": [30.0] * 20,
+        })
+        analyzer = NovelDiversityAnalyzer(df, min_cluster_size=10)
+        clusters = analyzer.cluster_novel_reads()
+
+        assert len(clusters) == 1
+        assert clusters[0].confidence == "Low"
+
+    def test_bayesian_overrides_legacy(self):
+        """Bayesian confidence should override legacy discovery-based criteria."""
+        # Legacy criteria would give High (>=10 reads, uncertainty <5%, discovery >=75)
+        # But Bayesian confidence is 40 -> should be Low
+        df = pl.DataFrame({
+            "read_id": [f"read_{i:03d}" for i in range(15)],
+            "best_match_genome": ["GCF_A"] * 15,
+            "novelty_index": [7.0] * 15,
+            "placement_uncertainty": [2.0] * 15,
+            "taxonomic_call": ["Novel Species"] * 15,
+            "discovery_score": [80.0] * 15,
+            "confidence_score": [40.0] * 15,
+        })
+        analyzer = NovelDiversityAnalyzer(df, min_cluster_size=10)
+        clusters = analyzer.cluster_novel_reads()
+
+        assert len(clusters) == 1
+        assert clusters[0].confidence == "Low"
+
+    def test_fallback_without_confidence_score(self):
+        """Without confidence_score column, should use legacy criteria."""
+        df = pl.DataFrame({
+            "read_id": [f"read_{i:03d}" for i in range(15)],
+            "best_match_genome": ["GCF_A"] * 15,
+            "novelty_index": [7.0] * 15,
+            "placement_uncertainty": [2.0] * 15,
+            "taxonomic_call": ["Novel Species"] * 15,
+        })
+        analyzer = NovelDiversityAnalyzer(df, min_cluster_size=10)
+        clusters = analyzer.cluster_novel_reads()
+
+        assert len(clusters) == 1
+        # Legacy: >=10 reads, uncertainty < 5% -> High
+        assert clusters[0].confidence == "High"
+        assert clusters[0].mean_bayesian_confidence is None
+
+
+# =============================================================================
+# ANIMatrix.from_dataframe Tests
+# =============================================================================
+
+
+class TestANIMatrixFromDataframe:
+    """Tests for ANIMatrix.from_dataframe() classmethod."""
+
+    def test_from_dataframe_with_genome_column(self):
+        """Should construct from DataFrame with 'genome' column."""
+        import polars as pl
+        from metadarkmatter.core.classification.ani_matrix import ANIMatrix
+
+        df = pl.DataFrame({
+            "genome": ["GCF_A", "GCF_B", "GCF_C"],
+            "GCF_A": [100.0, 96.0, 82.0],
+            "GCF_B": [96.0, 100.0, 83.0],
+            "GCF_C": [82.0, 83.0, 100.0],
+        })
+
+        matrix = ANIMatrix.from_dataframe(df)
+
+        assert len(matrix) == 3
+        assert matrix.get_ani("GCF_A", "GCF_B") == pytest.approx(96.0)
+        assert matrix.get_ani("GCF_A", "GCF_C") == pytest.approx(82.0)
+        assert matrix.get_ani("GCF_A", "GCF_A") == 100.0
+
+    def test_from_dataframe_without_genome_column(self):
+        """Should construct from square DataFrame without 'genome' column."""
+        import polars as pl
+        from metadarkmatter.core.classification.ani_matrix import ANIMatrix
+
+        df = pl.DataFrame({
+            "GCF_A": [100.0, 96.0],
+            "GCF_B": [96.0, 100.0],
+        })
+
+        matrix = ANIMatrix.from_dataframe(df)
+
+        assert len(matrix) == 2
+        assert matrix.get_ani("GCF_A", "GCF_B") == pytest.approx(96.0)
+
+    def test_from_dataframe_empty(self):
+        """Should handle empty DataFrame."""
+        import polars as pl
+        from metadarkmatter.core.classification.ani_matrix import ANIMatrix
+
+        df = pl.DataFrame()
+
+        matrix = ANIMatrix.from_dataframe(df)
+
+        assert len(matrix) == 0
+
+    def test_from_dataframe_roundtrip(self):
+        """Values should survive dict -> ANIMatrix -> from_dataframe cycle."""
+        import polars as pl
+        from metadarkmatter.core.classification.ani_matrix import ANIMatrix
+
+        ani_dict = {
+            "GCF_A": {"GCF_A": 100.0, "GCF_B": 95.5, "GCF_C": 80.0},
+            "GCF_B": {"GCF_A": 95.5, "GCF_B": 100.0, "GCF_C": 81.0},
+            "GCF_C": {"GCF_A": 80.0, "GCF_B": 81.0, "GCF_C": 100.0},
+        }
+        original = ANIMatrix(ani_dict)
+
+        # Build a DataFrame matching the report generator's format
+        genomes = sorted(ani_dict.keys())
+        data = {"genome": genomes}
+        for col_genome in genomes:
+            data[col_genome] = [original.get_ani(row_g, col_genome) for row_g in genomes]
+        df = pl.DataFrame(data)
+
+        reconstructed = ANIMatrix.from_dataframe(df)
+
+        for g1 in genomes:
+            for g2 in genomes:
+                assert reconstructed.get_ani(g1, g2) == pytest.approx(
+                    original.get_ani(g1, g2), abs=0.1
+                )

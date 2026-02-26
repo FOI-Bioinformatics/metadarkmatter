@@ -109,13 +109,33 @@ class StreamingBlastParser:
     while maintaining low memory usage, suitable for HPC environments.
 
     Expected BLAST format (-outfmt 6):
-    qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore [qlen]
+    qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore [qlen] [qcov]
 
-    Note: qlen is optional for backward compatibility. Files with 12 columns (old format)
-    or 13 columns (new format with qlen) are both supported.
+    Supported column counts:
+    - 12 columns: standard BLAST outfmt 6
+    - 13 columns: outfmt 6 with qlen appended
+    - 14 columns: outfmt 6 with qlen and qcov (e.g. MMseqs2 convertalis with query coverage)
     """
 
-    # Schema for new 13-column format (with qlen)
+    # Schema for 14-column format (with qlen and qcov, e.g. MMseqs2 extended output)
+    BLAST_SCHEMA_EXTENDED: ClassVar[dict[str, pl.DataType]] = {
+        "qseqid": pl.Utf8,
+        "sseqid": pl.Utf8,
+        "pident": pl.Float64,
+        "length": pl.Int64,
+        "mismatch": pl.Int64,
+        "gapopen": pl.Int64,
+        "qstart": pl.Int64,
+        "qend": pl.Int64,
+        "sstart": pl.Int64,
+        "send": pl.Int64,
+        "evalue": pl.Float64,
+        "bitscore": pl.Float64,
+        "qlen": pl.Int64,
+        "qcov": pl.Float64,
+    }
+
+    # Schema for 13-column format (with qlen)
     BLAST_SCHEMA: ClassVar[dict[str, pl.DataType]] = {
         "qseqid": pl.Utf8,
         "sseqid": pl.Utf8,
@@ -132,7 +152,7 @@ class StreamingBlastParser:
         "qlen": pl.Int64,
     }
 
-    # Schema for old 12-column format (without qlen)
+    # Schema for 12-column format (without qlen)
     BLAST_SCHEMA_LEGACY: ClassVar[dict[str, pl.DataType]] = {
         "qseqid": pl.Utf8,
         "sseqid": pl.Utf8,
@@ -148,6 +168,7 @@ class StreamingBlastParser:
         "bitscore": pl.Float64,
     }
 
+    COLUMN_NAMES_EXTENDED: ClassVar[list[str]] = list(BLAST_SCHEMA_EXTENDED.keys())
     COLUMN_NAMES: ClassVar[list[str]] = list(BLAST_SCHEMA.keys())
     COLUMN_NAMES_LEGACY: ClassVar[list[str]] = list(BLAST_SCHEMA_LEGACY.keys())
 
@@ -186,7 +207,10 @@ class StreamingBlastParser:
 
         # Detect format and set appropriate schema
         num_cols = self._detect_column_count()
-        if num_cols == 13:
+        if num_cols == 14:
+            self.schema = self.BLAST_SCHEMA_EXTENDED
+            self.column_names = self.COLUMN_NAMES_EXTENDED
+        elif num_cols == 13:
             self.schema = self.BLAST_SCHEMA
             self.column_names = self.COLUMN_NAMES
         else:  # 12 columns (legacy format)
@@ -208,7 +232,7 @@ class StreamingBlastParser:
         Detect number of columns by reading first non-comment line.
 
         Returns:
-            Number of tab-separated columns (12 or 13)
+            Number of tab-separated columns (12, 13, or 14)
 
         Raises:
             ValueError: If file is empty or has unexpected column count
@@ -231,9 +255,9 @@ class StreamingBlastParser:
                 fields = line.strip().split("\t")
                 num_cols = len(fields)
 
-                if num_cols not in (12, 13):
+                if num_cols not in (12, 13, 14):
                     msg = (
-                        f"Unexpected BLAST format: expected 12 or 13 columns, "
+                        f"Unexpected BLAST format: expected 12, 13, or 14 columns, "
                         f"got {num_cols} in {self.blast_path}"
                     )
                     raise ValueError(msg)

@@ -1318,3 +1318,216 @@ class TestValidateAniGenomeCoverageBroadDatabase:
         assert total == 0
         assert matched == 0
         assert pct == 0.0
+
+
+# =============================================================================
+# 10. Representative collapse bug fix
+# =============================================================================
+
+
+class TestRepresentativeCollapsePlacementUncertainty:
+    """Tests for placement_uncertainty when all hits collapse to one representative.
+
+    Bug scenario: a read hits 10 strains of the same species, all mapping to
+    the same representative. Before the fix, num_secondary_genomes == 0 but
+    num_ambiguous_hits > 1, causing a left-join to produce ANI = 0 and
+    placement_uncertainty = 100%. After the fix, reads with
+    num_secondary_genomes == 0 should get placement_uncertainty = 0.
+    """
+
+    @pytest.fixture
+    def single_rep_setup(self) -> dict:
+        """Set up a scenario where all hits collapse to one representative.
+
+        4 genomes (strains), all mapping to one representative (GCF_REP1).
+        ANI matrix has only GCF_REP1. Reads hit all 4 strains with high identity.
+        """
+        representative_mapping = {
+            "GCF_S01": "GCF_REP1",
+            "GCF_S02": "GCF_REP1",
+            "GCF_S03": "GCF_REP1",
+            "GCF_S04": "GCF_REP1",
+        }
+
+        # ANI matrix with only the representative (single-genome matrix)
+        ani_dict = {
+            "GCF_REP1": {},
+        }
+
+        # BLAST hits: reads hit all 4 strains with very high identity
+        blast_rows = []
+        for read_idx in range(3):
+            for strain_idx, genome in enumerate(
+                ["GCF_S01", "GCF_S02", "GCF_S03", "GCF_S04"]
+            ):
+                blast_rows.append({
+                    "qseqid": f"read_{read_idx:03d}",
+                    "sseqid": f"{genome}|contig_1",
+                    "pident": 99.3 - strain_idx * 0.1,
+                    "length": 250,
+                    "mismatch": 2 + strain_idx,
+                    "gapopen": 0,
+                    "qstart": 1,
+                    "qend": 250,
+                    "sstart": 1000,
+                    "send": 1250,
+                    "evalue": 1e-80,
+                    "bitscore": 480.0 - strain_idx * 2.0,
+                    "genome_name": genome,
+                })
+
+        blast_df = pl.DataFrame(blast_rows)
+
+        return {
+            "representative_mapping": representative_mapping,
+            "ani_dict": ani_dict,
+            "blast_df": blast_df,
+        }
+
+    def test_collapsed_reads_get_zero_uncertainty(self, single_rep_setup: dict) -> None:
+        """Reads where all hits collapse to one representative should get 0% uncertainty."""
+        from metadarkmatter.core.classification.classifiers.vectorized import (
+            VectorizedClassifier,
+        )
+
+        ani_matrix = ANIMatrix(single_rep_setup["ani_dict"])
+        classifier = VectorizedClassifier(
+            ani_matrix=ani_matrix,
+            representative_mapping=single_rep_setup["representative_mapping"],
+        )
+
+        result = classifier.classify_file(single_rep_setup["blast_df"])
+
+        assert len(result) == 3
+        for u in result["placement_uncertainty"].to_list():
+            assert u == 0.0, (
+                f"Expected 0% uncertainty for collapsed reads, got {u}%"
+            )
+
+    def test_collapsed_reads_classified_as_known(self, single_rep_setup: dict) -> None:
+        """High-identity reads with collapsed representatives should be Known Species."""
+        from metadarkmatter.core.classification.classifiers.vectorized import (
+            VectorizedClassifier,
+        )
+
+        ani_matrix = ANIMatrix(single_rep_setup["ani_dict"])
+        classifier = VectorizedClassifier(
+            ani_matrix=ani_matrix,
+            representative_mapping=single_rep_setup["representative_mapping"],
+        )
+
+        result = classifier.classify_file(single_rep_setup["blast_df"])
+
+        for call in result["taxonomic_call"].to_list():
+            assert call == "Known Species", (
+                f"Expected Known Species for high-identity collapsed reads, got {call}"
+            )
+
+    def test_collapsed_reads_get_inferred_uncertainty(
+        self, single_rep_setup: dict
+    ) -> None:
+        """Collapsed reads should get inferred uncertainty (like single-hit reads)."""
+        from metadarkmatter.core.classification.classifiers.vectorized import (
+            VectorizedClassifier,
+        )
+
+        ani_matrix = ANIMatrix(single_rep_setup["ani_dict"])
+        classifier = VectorizedClassifier(
+            ani_matrix=ani_matrix,
+            representative_mapping=single_rep_setup["representative_mapping"],
+        )
+
+        result = classifier.classify_file(single_rep_setup["blast_df"])
+
+        for utype in result["uncertainty_type"].to_list():
+            assert utype == "inferred", (
+                f"Expected inferred uncertainty for collapsed reads, got {utype}"
+            )
+        # Inferred uncertainty should be non-null
+        for iu in result["inferred_uncertainty"].to_list():
+            assert iu is not None, "inferred_uncertainty should not be null"
+
+    def test_collapsed_reads_ambiguity_scope_unambiguous(
+        self, single_rep_setup: dict
+    ) -> None:
+        """Collapsed reads should have ambiguity_scope = 'unambiguous'."""
+        from metadarkmatter.core.classification.classifiers.vectorized import (
+            VectorizedClassifier,
+        )
+
+        ani_matrix = ANIMatrix(single_rep_setup["ani_dict"])
+        classifier = VectorizedClassifier(
+            ani_matrix=ani_matrix,
+            representative_mapping=single_rep_setup["representative_mapping"],
+        )
+
+        result = classifier.classify_file(single_rep_setup["blast_df"])
+
+        for scope in result["ambiguity_scope"].to_list():
+            assert scope == "unambiguous", (
+                f"Expected unambiguous scope for collapsed reads, got {scope}"
+            )
+
+
+class TestMultiRepresentativeStillWorks:
+    """Regression test: reads hitting multiple distinct representatives still get ANI-based uncertainty."""
+
+    def test_multi_rep_reads_use_ani_uncertainty(self) -> None:
+        """Reads hitting genomes from different species should still use ANI for uncertainty."""
+        from metadarkmatter.core.classification.classifiers.vectorized import (
+            VectorizedClassifier,
+        )
+
+        # Two species, each with strains
+        representative_mapping = {
+            "GCF_A1": "GCF_REP_A",
+            "GCF_A2": "GCF_REP_A",
+            "GCF_B1": "GCF_REP_B",
+            "GCF_B2": "GCF_REP_B",
+        }
+
+        ani_dict = {
+            "GCF_REP_A": {"GCF_REP_B": 85.0},
+            "GCF_REP_B": {"GCF_REP_A": 85.0},
+        }
+
+        blast_rows = []
+        for genome, pident, bitscore in [
+            ("GCF_A1", 98.0, 500),
+            ("GCF_A2", 97.5, 495),
+            ("GCF_B1", 96.0, 490),
+            ("GCF_B2", 95.5, 485),
+        ]:
+            blast_rows.append({
+                "qseqid": "read_001",
+                "sseqid": f"{genome}|contig_1",
+                "pident": pident,
+                "length": 250,
+                "mismatch": int(250 * (1 - pident / 100)),
+                "gapopen": 0,
+                "qstart": 1,
+                "qend": 250,
+                "sstart": 1000,
+                "send": 1250,
+                "evalue": 1e-80,
+                "bitscore": float(bitscore),
+                "genome_name": genome,
+            })
+
+        blast_df = pl.DataFrame(blast_rows)
+
+        ani_matrix = ANIMatrix(ani_dict)
+        classifier = VectorizedClassifier(
+            ani_matrix=ani_matrix,
+            representative_mapping=representative_mapping,
+        )
+
+        result = classifier.classify_file(blast_df)
+
+        assert len(result) == 1
+        u = result["placement_uncertainty"][0]
+        # ANI between reps is 85%, so uncertainty = 100 - 85 = 15%
+        assert u == pytest.approx(15.0, abs=1.0), (
+            f"Expected ~15% uncertainty for multi-rep reads, got {u}%"
+        )
+        assert result["uncertainty_type"][0] == "measured"

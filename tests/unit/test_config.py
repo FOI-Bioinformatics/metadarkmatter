@@ -205,6 +205,111 @@ class TestBlastConfig:
             config.num_threads = 8
 
 
+class TestHitLevelFilterDefaults:
+    """Tests for hit-level filter fields on ScoringConfig."""
+
+    def test_all_filters_default_off(self):
+        """All new filters should default to 0 (disabled)."""
+        config = ScoringConfig()
+        assert config.max_evalue == 0.0
+        assert config.min_percent_identity == 0.0
+        assert config.min_bitscore == 0.0
+        assert config.min_read_length == 0
+        assert config.min_query_coverage == 0.0
+
+    def test_max_evalue_accepts_valid(self):
+        """Should accept valid positive E-value."""
+        config = ScoringConfig(max_evalue=1e-10)
+        assert config.max_evalue == 1e-10
+
+    def test_max_evalue_rejects_negative(self):
+        """Negative E-value should be rejected."""
+        with pytest.raises(ValidationError):
+            ScoringConfig(max_evalue=-1.0)
+
+    def test_min_percent_identity_accepts_valid(self):
+        """Should accept valid percent identity (0-100)."""
+        config = ScoringConfig(min_percent_identity=80.0)
+        assert config.min_percent_identity == 80.0
+
+    def test_min_percent_identity_rejects_over_100(self):
+        """Percent identity > 100 should be rejected."""
+        with pytest.raises(ValidationError):
+            ScoringConfig(min_percent_identity=101.0)
+
+    def test_min_percent_identity_rejects_negative(self):
+        """Negative percent identity should be rejected."""
+        with pytest.raises(ValidationError):
+            ScoringConfig(min_percent_identity=-5.0)
+
+    def test_min_bitscore_accepts_valid(self):
+        """Should accept valid bitscore."""
+        config = ScoringConfig(min_bitscore=50.0)
+        assert config.min_bitscore == 50.0
+
+    def test_min_bitscore_rejects_negative(self):
+        """Negative bitscore should be rejected."""
+        with pytest.raises(ValidationError):
+            ScoringConfig(min_bitscore=-10.0)
+
+    def test_min_read_length_accepts_valid(self):
+        """Should accept valid read length."""
+        config = ScoringConfig(min_read_length=150)
+        assert config.min_read_length == 150
+
+    def test_min_read_length_rejects_negative(self):
+        """Negative read length should be rejected."""
+        with pytest.raises(ValidationError):
+            ScoringConfig(min_read_length=-1)
+
+    def test_min_query_coverage_accepts_valid(self):
+        """Should accept valid query coverage (0-100)."""
+        config = ScoringConfig(min_query_coverage=50.0)
+        assert config.min_query_coverage == 50.0
+
+    def test_min_query_coverage_rejects_over_100(self):
+        """Query coverage > 100 should be rejected."""
+        with pytest.raises(ValidationError):
+            ScoringConfig(min_query_coverage=101.0)
+
+    def test_min_query_coverage_rejects_negative(self):
+        """Negative query coverage should be rejected."""
+        with pytest.raises(ValidationError):
+            ScoringConfig(min_query_coverage=-1.0)
+
+    def test_yaml_roundtrip_preserves_filter_fields(self, tmp_path):
+        """YAML serialization should preserve all new filter fields."""
+        config = ScoringConfig(
+            max_evalue=1e-10,
+            min_percent_identity=80.0,
+            min_bitscore=50.0,
+            min_read_length=150,
+            min_query_coverage=60.0,
+        )
+        yaml_path = tmp_path / "test_config.yaml"
+        config.to_yaml(yaml_path)
+        loaded = ScoringConfig.from_yaml(yaml_path)
+
+        assert loaded.max_evalue == config.max_evalue
+        assert loaded.min_percent_identity == config.min_percent_identity
+        assert loaded.min_bitscore == config.min_bitscore
+        assert loaded.min_read_length == config.min_read_length
+        assert loaded.min_query_coverage == config.min_query_coverage
+
+    def test_yaml_roundtrip_preserves_defaults(self, tmp_path):
+        """YAML roundtrip of default config should keep filters at 0."""
+        config = ScoringConfig()
+        yaml_path = tmp_path / "default_config.yaml"
+        config.to_yaml(yaml_path)
+        loaded = ScoringConfig.from_yaml(yaml_path)
+
+        assert loaded.max_evalue == 0.0
+        assert loaded.min_percent_identity == 0.0
+        assert loaded.min_bitscore == 0.0
+        assert loaded.min_read_length == 0
+        assert loaded.min_query_coverage == 0.0
+
+
 class TestScoringConfigBoundaries:
     """Edge case tests for ScoringConfig threshold boundaries."""
 

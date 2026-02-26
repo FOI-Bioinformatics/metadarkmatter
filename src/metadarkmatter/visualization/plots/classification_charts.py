@@ -518,14 +518,20 @@ class DiversityDonutChart(BasePlot):
             self.summary.get("diversity_novel", 0),
             self.summary.get("diversity_uncertain", 0),
         ]
+        pull = [0, 0.03, 0]
+
+        # Include Off-target as a distinct category when present
+        off_target_count = self.summary.get("diversity_off_target", 0)
+        if off_target_count > 0:
+            categories.append("Off-target")
+            values.append(off_target_count)
+            pull.append(0)
+
         colors = [DIVERSITY_COLORS[cat] for cat in categories]
 
         total = sum(values)
 
         fig = go.Figure()
-
-        # Pull out novel category slightly for emphasis
-        pull = [0, 0.03, 0]
 
         fig.add_trace(
             go.Pie(
@@ -588,6 +594,7 @@ class DiversitySunburstChart(BasePlot):
             "Conserved Region",
             "Unclassified",
         ],
+        "Off-target": ["Off-target"],
     }
 
     # Map taxonomic categories to summary dict keys
@@ -597,6 +604,7 @@ class DiversitySunburstChart(BasePlot):
         "Novel Genus": "novel_genus",
         "Species Boundary": "species_boundary",
         "Ambiguous": "ambiguous",
+        "Off-target": "off_target",
         "Ambiguous Within Genus": "ambiguous_within_genus",
         "Conserved Region": "conserved_regions",
         "Unclassified": "unclassified",
@@ -635,7 +643,12 @@ class DiversitySunburstChart(BasePlot):
         # We don't add an explicit root - sunburst handles this
 
         # Add diversity status level (inner ring)
-        for diversity_status in ["Known", "Novel", "Uncertain"]:
+        # Include Off-target only when there are off-target reads
+        status_list = ["Known", "Novel", "Uncertain"]
+        off_target_count = self.summary.get("off_target", 0)
+        if off_target_count > 0:
+            status_list.append("Off-target")
+        for diversity_status in status_list:
             ids.append(diversity_status)
             labels.append(diversity_status)
             parents.append("")  # Top level has no parent

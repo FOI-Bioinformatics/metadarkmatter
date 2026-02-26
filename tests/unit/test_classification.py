@@ -49,9 +49,9 @@ class TestTaxonomicCall:
         assert TaxonomicCall.OFF_TARGET.value == "Off-target"
 
     def test_off_target_diversity_status(self):
-        """Off-target should map to Uncertain diversity status."""
+        """Off-target should map to Off-target diversity status."""
         from metadarkmatter.models.classification import TAXONOMIC_TO_DIVERSITY
-        assert TAXONOMIC_TO_DIVERSITY["Off-target"] == "Uncertain"
+        assert TAXONOMIC_TO_DIVERSITY["Off-target"] == "Off-target"
 
     def test_all_values_unique(self):
         """All enum values should be unique."""

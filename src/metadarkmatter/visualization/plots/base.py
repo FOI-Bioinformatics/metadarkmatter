@@ -38,6 +38,7 @@ DIVERSITY_COLORS: dict[str, str] = {
     "Known": "#2ecc71",       # Green - confident known diversity
     "Novel": "#e74c3c",       # Red - confident novel diversity
     "Uncertain": "#95a5a6",   # Gray - uncertain classification
+    "Off-target": "#3498db",  # Blue - reads outside target family
 }
 
 # Bayesian 6-category colors used in report generator charts

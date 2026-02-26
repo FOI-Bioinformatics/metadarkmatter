@@ -244,6 +244,51 @@ class TestBackwardCompatibility:
         assert "family_bitscore_ratio" in result_with.columns
 
 
+class TestOffTargetDiversityStatus:
+    """Off-target reads should get diversity_status='Off-target', not 'Uncertain'."""
+
+    def test_off_target_diversity_status_in_classifier(self, tmp_path):
+        """Off-target reads from the classifier should have diversity_status='Off-target'."""
+        genomes = ["GCF_001"]
+        ani = _make_ani_matrix(genomes)
+        config = ScoringConfig(target_family="f__TestFamily", family_ratio_threshold=0.8)
+
+        blast_file = tmp_path / "test.tsv"
+        blast_file.write_text(
+            "read1\tGCF_001|c1\t75.0\t150\t38\t0\t1\t150\t1\t150\t1e-10\t200\n"
+            "read1\tEXTERNAL_001|c1\t95.0\t150\t8\t0\t1\t150\t1\t150\t1e-50\t600\n"
+        )
+
+        classifier = VectorizedClassifier(ani, config=config)
+        result = classifier.classify_file(blast_file)
+
+        assert result["taxonomic_call"][0] == "Off-target"
+        assert result["diversity_status"][0] == "Off-target"
+
+    def test_off_target_not_grouped_as_uncertain(self, tmp_path):
+        """Off-target reads should not inflate the Uncertain count."""
+        from metadarkmatter.models.classification import TAXONOMIC_TO_DIVERSITY
+        assert TAXONOMIC_TO_DIVERSITY["Off-target"] == "Off-target"
+
+    def test_in_family_reads_still_get_correct_diversity_status(self, tmp_path):
+        """In-family reads should still get Known/Novel/Uncertain status normally."""
+        genomes = ["GCF_001", "GCF_002"]
+        ani = _make_ani_matrix(genomes)
+        config = ScoringConfig(target_family="f__TestFamily")
+
+        blast_file = tmp_path / "test.tsv"
+        blast_file.write_text(
+            "read1\tGCF_001|c1\t98.0\t150\t3\t0\t1\t150\t1\t150\t1e-50\t500\n"
+            "read1\tGCF_002|c1\t95.0\t150\t8\t0\t1\t150\t1\t150\t1e-40\t450\n"
+        )
+
+        classifier = VectorizedClassifier(ani, config=config)
+        result = classifier.classify_file(blast_file)
+
+        # In-family reads should not have diversity_status = "Off-target"
+        assert result["diversity_status"][0] != "Off-target"
+
+
 class TestFamilyValidationSummary:
     """Tests for family validation in summary JSON."""
 

@@ -112,16 +112,19 @@ DIVERSITY_SUMMARY_TEMPLATE: str = '''
             <div class="diversity-count">{uncertain_count:,} reads</div>
             <div class="diversity-desc">Ambiguous placement, needs review</div>
         </div>
+{off_target_card}
     </div>
     <div class="diversity-bar">
         <div class="bar-segment known" style="width: {known_pct}%;" title="Known: {known_pct:.1f}%"></div>
         <div class="bar-segment novel" style="width: {novel_pct}%;" title="Novel: {novel_pct:.1f}%"></div>
         <div class="bar-segment uncertain" style="width: {uncertain_pct}%;" title="Uncertain: {uncertain_pct:.1f}%"></div>
+{off_target_bar}
     </div>
     <div class="diversity-bar-legend">
         <span class="legend-item"><span class="legend-dot known"></span> Known</span>
         <span class="legend-item"><span class="legend-dot novel"></span> Novel</span>
         <span class="legend-item"><span class="legend-dot uncertain"></span> Uncertain</span>
+{off_target_legend}
     </div>
 </div>
 '''

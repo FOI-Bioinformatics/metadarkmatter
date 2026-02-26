@@ -18,18 +18,20 @@ class DiversityStatus(str, Enum):
     """
     High-level diversity classification for summarizing results.
 
-    Groups detailed taxonomic calls into three categories for easier
+    Groups detailed taxonomic calls into categories for easier
     interpretation and communication of results.
 
     Categories:
         KNOWN: Confident match to known diversity (Known Species)
         NOVEL: Confident novel diversity (Novel Species, Novel Genus)
         UNCERTAIN: Cannot confidently classify as known or novel
+        OFF_TARGET: Reads with better matches outside the target family
     """
 
     KNOWN = "Known"
     NOVEL = "Novel"
     UNCERTAIN = "Uncertain"
+    OFF_TARGET = "Off-target"
 
 
 # Mapping from TaxonomicCall to DiversityStatus
@@ -42,7 +44,7 @@ TAXONOMIC_TO_DIVERSITY: dict[str, str] = {
     "Ambiguous Within Genus": "Uncertain",
     "Conserved Region": "Uncertain",
     "Unclassified": "Uncertain",
-    "Off-target": "Uncertain",
+    "Off-target": "Off-target",
 }
 
 

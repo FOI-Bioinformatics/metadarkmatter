@@ -133,6 +133,7 @@ class TaxonomicSummary:
     diversity_known: int = 0
     diversity_novel: int = 0
     diversity_uncertain: int = 0
+    diversity_off_target: int = 0
     mean_novelty_index: float = 0.0
     mean_placement_uncertainty: float = 0.0
     mean_top_hit_identity: float = 0.0
@@ -190,6 +191,13 @@ class TaxonomicSummary:
             return 0.0
         return self.diversity_uncertain / self.total_reads * 100
 
+    @property
+    def diversity_off_target_pct(self) -> float:
+        """Percentage of reads classified as off-target."""
+        if self.total_reads == 0:
+            return 0.0
+        return self.diversity_off_target / self.total_reads * 100
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for template rendering."""
         result = {
@@ -205,6 +213,7 @@ class TaxonomicSummary:
             "diversity_known": self.diversity_known,
             "diversity_novel": self.diversity_novel,
             "diversity_uncertain": self.diversity_uncertain,
+            "diversity_off_target": self.diversity_off_target,
             "mean_novelty_index": self.mean_novelty_index,
             "mean_placement_uncertainty": self.mean_placement_uncertainty,
             "mean_top_hit_identity": self.mean_top_hit_identity,
@@ -212,6 +221,7 @@ class TaxonomicSummary:
             "diversity_known_pct": self.diversity_known_pct,
             "diversity_novel_pct": self.diversity_novel_pct,
             "diversity_uncertain_pct": self.diversity_uncertain_pct,
+            "diversity_off_target_pct": self.diversity_off_target_pct,
             # Family validation
             "off_target": self.off_target,
             "has_family_validation": self.has_family_validation,
@@ -364,8 +374,9 @@ class ReportGenerator:
         diversity_novel = novel_species + novel_genus
         diversity_uncertain = (
             species_boundary + ambiguous + ambiguous_within_genus +
-            conserved_regions + unclassified + off_target
+            conserved_regions + unclassified
         )
+        diversity_off_target = off_target
 
         # Check for enhanced scoring columns.  The column must exist AND
         # have non-null numeric data for classified (non-Off-target) reads;
@@ -466,6 +477,7 @@ class ReportGenerator:
             diversity_known=diversity_known,
             diversity_novel=diversity_novel,
             diversity_uncertain=diversity_uncertain,
+            diversity_off_target=diversity_off_target,
             mean_novelty_index=mean_novelty,
             mean_placement_uncertainty=mean_uncertainty,
             mean_top_hit_identity=mean_identity,
@@ -690,6 +702,30 @@ class ReportGenerator:
         total = s.total_reads if s.total_reads > 0 else 1  # Avoid division by zero
 
         # Diversity summary - the hero section
+        # Build off-target card/bar/legend fragments (empty when no off-target reads)
+        if s.diversity_off_target > 0:
+            ot_pct = s.diversity_off_target_pct
+            off_target_card = (
+                '        <div class="diversity-card off-target">\n'
+                f'            <div class="diversity-pct">{ot_pct:.1f}%</div>\n'
+                '            <div class="diversity-label">Off-target</div>\n'
+                f'            <div class="diversity-count">{s.diversity_off_target:,} reads</div>\n'
+                '            <div class="diversity-desc">Better match outside target family</div>\n'
+                '        </div>'
+            )
+            off_target_bar = (
+                f'        <div class="bar-segment off-target" style="width: {ot_pct}%;" '
+                f'title="Off-target: {ot_pct:.1f}%"></div>'
+            )
+            off_target_legend = (
+                '        <span class="legend-item">'
+                '<span class="legend-dot off-target"></span> Off-target</span>'
+            )
+        else:
+            off_target_card = ""
+            off_target_bar = ""
+            off_target_legend = ""
+
         diversity_html = DIVERSITY_SUMMARY_TEMPLATE.format(
             known_pct=s.diversity_known_pct,
             known_count=s.diversity_known,
@@ -697,6 +733,9 @@ class ReportGenerator:
             novel_count=s.diversity_novel,
             uncertain_pct=s.diversity_uncertain_pct,
             uncertain_count=s.diversity_uncertain,
+            off_target_card=off_target_card,
+            off_target_bar=off_target_bar,
+            off_target_legend=off_target_legend,
         )
 
         # Key findings cards
@@ -2160,6 +2199,111 @@ class ReportGenerator:
             content=content,
         )
 
+    def _build_toggle_heatmap_content(
+        self,
+        *,
+        metric: str,
+        title: str,
+        description: str,
+        all_plot_id: str,
+        all_stats_html: str,
+        rep_plot_id: str,
+        rep_stats_html: str,
+        n_all: int,
+        n_reps: int,
+    ) -> str:
+        """Build HTML content with toggle between all genomes and representatives.
+
+        Args:
+            metric: Short identifier ('ani' or 'aai') used for element IDs
+            title: Plot title text
+            description: Plot description text
+            all_plot_id: Plotly div ID for the all-genomes heatmap
+            all_stats_html: Statistics cards HTML for all genomes
+            rep_plot_id: Plotly div ID for the representative-only heatmap
+            rep_stats_html: Statistics cards HTML for representatives
+            n_all: Total number of genomes
+            n_reps: Number of representative genomes
+
+        Returns:
+            HTML string with toggle controls and both heatmaps
+        """
+        return f"""
+        <div class="heatmap-toggle-controls">
+            <button class="heatmap-toggle-btn active"
+                    id="{metric}-toggle-all"
+                    onclick="toggleHeatmapView('{metric}', 'all')">
+                All Genomes ({n_all})
+            </button>
+            <button class="heatmap-toggle-btn"
+                    id="{metric}-toggle-reps"
+                    onclick="toggleHeatmapView('{metric}', 'reps')">
+                Representatives Only ({n_reps})
+            </button>
+        </div>
+        <div id="{metric}-view-all">
+            {all_stats_html}
+            <div class="plot-container full-width">
+                <div class="plot-title">{title}</div>
+                <div class="plot-description">{description}</div>
+                <div id="{all_plot_id}" class="plotly-chart"></div>
+            </div>
+        </div>
+        <div id="{metric}-view-reps" style="display:none;">
+            {rep_stats_html}
+            <div class="plot-container full-width">
+                <div class="plot-title">{title} (Representatives Only)</div>
+                <div class="plot-description">
+                    Showing {n_reps} species representative genomes
+                    (one per species from GTDB). {description}
+                </div>
+                <div id="{rep_plot_id}" class="plotly-chart"></div>
+            </div>
+        </div>
+        """
+
+    def _filter_matrix_to_representatives(
+        self, matrix: pl.DataFrame
+    ) -> pl.DataFrame | None:
+        """Filter a similarity matrix to representative genomes only.
+
+        Args:
+            matrix: Similarity matrix DataFrame (wide format, optional 'genome' column)
+
+        Returns:
+            Filtered matrix with only representative genomes, or None if
+            metadata lacks representative information or filtering would
+            remove all genomes.
+        """
+        if self.genome_metadata is None or not self.genome_metadata.has_representatives:
+            return None
+
+        rep_set = set(self.genome_metadata.build_representative_mapping().values())
+
+        # Identify accessions in the matrix
+        cols = matrix.columns
+        has_genome_col = "genome" in cols
+        if has_genome_col:
+            accessions = matrix["genome"].to_list()
+        else:
+            accessions = list(cols)
+
+        # Filter to representatives present in the matrix
+        keep = [acc for acc in accessions if acc in rep_set]
+        if len(keep) < 2:
+            return None  # Need at least 2 genomes for a meaningful heatmap
+
+        if has_genome_col:
+            filtered = matrix.filter(pl.col("genome").is_in(keep))
+            filtered = filtered.select(["genome"] + keep)
+        else:
+            # Columns are accessions; filter both rows and columns
+            indices = [i for i, acc in enumerate(accessions) if acc in keep]
+            filtered = matrix.select([accessions[i] for i in indices])
+            filtered = filtered[indices]
+
+        return filtered
+
     def _build_ani_section(self) -> str:
         """Build the ANI matrix heatmap tab section."""
         if self.ani_matrix is None or len(self.ani_matrix) == 0:
@@ -2176,30 +2320,63 @@ class ReportGenerator:
 
             genome_labels_map = self._get_genome_labels_map(genome_accessions)
 
-            # Build heatmap and compute statistics using extracted components
+            # Build full heatmap
             heatmap_fig, stats, clustering_succeeded = build_ani_heatmap(
                 self.ani_matrix,
                 genome_labels_map,
             )
 
-            # Register plot
             ani_id = "plot-ani-heatmap"
             self._register_plot(ani_id, heatmap_fig)
-
-            # Generate statistics cards
             stats_html = build_ani_stats_cards(stats)
 
-            content = stats_html + PLOT_CONTAINER_TEMPLATE.format(
-                extra_class="full-width",
-                title="Average Nucleotide Identity Matrix",
-                description=(
-                    "Heatmap showing pairwise ANI values between reference genomes, "
-                    "hierarchically clustered by similarity. "
-                    "Red = high ANI (similar), blue = low ANI (distant). "
-                    "ANI ~95% indicates species boundary (Jain et al. 2018)."
-                ),
-                plot_id=ani_id,
-            )
+            # Check for representative genome toggle
+            rep_matrix = self._filter_matrix_to_representatives(self.ani_matrix)
+
+            if rep_matrix is not None:
+                # Build representative-only heatmap
+                rep_cols = rep_matrix.columns
+                if "genome" in rep_cols:
+                    rep_accessions = rep_matrix["genome"].to_list()
+                else:
+                    rep_accessions = list(rep_cols)
+                rep_labels = self._get_genome_labels_map(rep_accessions)
+                rep_fig, rep_stats, _ = build_ani_heatmap(rep_matrix, rep_labels)
+                rep_id = "plot-ani-heatmap-reps"
+                self._register_plot(rep_id, rep_fig)
+                rep_stats_html = build_ani_stats_cards(rep_stats)
+
+                n_all = len(genome_accessions)
+                n_reps = len(rep_accessions)
+
+                content = self._build_toggle_heatmap_content(
+                    metric="ani",
+                    title="Average Nucleotide Identity Matrix",
+                    description=(
+                        "Heatmap showing pairwise ANI values between reference genomes, "
+                        "hierarchically clustered by similarity. "
+                        "Red = high ANI (similar), blue = low ANI (distant). "
+                        "ANI ~95% indicates species boundary (Jain et al. 2018)."
+                    ),
+                    all_plot_id=ani_id,
+                    all_stats_html=stats_html,
+                    rep_plot_id=rep_id,
+                    rep_stats_html=rep_stats_html,
+                    n_all=n_all,
+                    n_reps=n_reps,
+                )
+            else:
+                content = stats_html + PLOT_CONTAINER_TEMPLATE.format(
+                    extra_class="full-width",
+                    title="Average Nucleotide Identity Matrix",
+                    description=(
+                        "Heatmap showing pairwise ANI values between reference genomes, "
+                        "hierarchically clustered by similarity. "
+                        "Red = high ANI (similar), blue = low ANI (distant). "
+                        "ANI ~95% indicates species boundary (Jain et al. 2018)."
+                    ),
+                    plot_id=ani_id,
+                )
 
         return TAB_SECTION_TEMPLATE.format(
             tab_id="ani",
@@ -2228,30 +2405,62 @@ class ReportGenerator:
 
             genome_labels_map = self._get_genome_labels_map(genome_accessions)
 
-            # Build heatmap and compute statistics using extracted components
+            # Build full heatmap
             heatmap_fig, stats, clustering_succeeded = build_aai_heatmap(
                 self.aai_matrix,
                 genome_labels_map,
             )
 
-            # Register plot
             aai_id = "plot-aai-heatmap"
             self._register_plot(aai_id, heatmap_fig)
-
-            # Generate statistics cards
             stats_html = build_aai_stats_cards(stats)
 
-            content = stats_html + PLOT_CONTAINER_TEMPLATE.format(
-                extra_class="full-width",
-                title="Average Amino Acid Identity Matrix",
-                description=(
-                    "Heatmap showing pairwise AAI values between reference genomes, "
-                    "hierarchically clustered by similarity. "
-                    "Red = high AAI (similar), blue = low AAI (distant). "
-                    "AAI ~65% indicates genus boundary (Riesco & Trujillo 2024)."
-                ),
-                plot_id=aai_id,
-            )
+            # Check for representative genome toggle
+            rep_matrix = self._filter_matrix_to_representatives(self.aai_matrix)
+
+            if rep_matrix is not None:
+                rep_cols = rep_matrix.columns
+                if "genome" in rep_cols:
+                    rep_accessions = rep_matrix["genome"].to_list()
+                else:
+                    rep_accessions = list(rep_cols)
+                rep_labels = self._get_genome_labels_map(rep_accessions)
+                rep_fig, rep_stats, _ = build_aai_heatmap(rep_matrix, rep_labels)
+                rep_id = "plot-aai-heatmap-reps"
+                self._register_plot(rep_id, rep_fig)
+                rep_stats_html = build_aai_stats_cards(rep_stats)
+
+                n_all = len(genome_accessions)
+                n_reps = len(rep_accessions)
+
+                content = self._build_toggle_heatmap_content(
+                    metric="aai",
+                    title="Average Amino Acid Identity Matrix",
+                    description=(
+                        "Heatmap showing pairwise AAI values between reference genomes, "
+                        "hierarchically clustered by similarity. "
+                        "Red = high AAI (similar), blue = low AAI (distant). "
+                        "AAI ~65% indicates genus boundary (Riesco & Trujillo 2024)."
+                    ),
+                    all_plot_id=aai_id,
+                    all_stats_html=stats_html,
+                    rep_plot_id=rep_id,
+                    rep_stats_html=rep_stats_html,
+                    n_all=n_all,
+                    n_reps=n_reps,
+                )
+            else:
+                content = stats_html + PLOT_CONTAINER_TEMPLATE.format(
+                    extra_class="full-width",
+                    title="Average Amino Acid Identity Matrix",
+                    description=(
+                        "Heatmap showing pairwise AAI values between reference genomes, "
+                        "hierarchically clustered by similarity. "
+                        "Red = high AAI (similar), blue = low AAI (distant). "
+                        "AAI ~65% indicates genus boundary (Riesco & Trujillo 2024)."
+                    ),
+                    plot_id=aai_id,
+                )
 
         return TAB_SECTION_TEMPLATE.format(
             tab_id="aai",
@@ -2680,6 +2889,34 @@ document.addEventListener('DOMContentLoaded', function() {
             )
 
         js_lines.append("});")
+
+        # Toggle function for ANI/AAI heatmap views
+        js_lines.append("""
+function toggleHeatmapView(metric, view) {
+    var allView = document.getElementById(metric + '-view-all');
+    var repsView = document.getElementById(metric + '-view-reps');
+    var allBtn = document.getElementById(metric + '-toggle-all');
+    var repsBtn = document.getElementById(metric + '-toggle-reps');
+    if (!allView || !repsView) return;
+    if (view === 'all') {
+        allView.style.display = '';
+        repsView.style.display = 'none';
+        allBtn.classList.add('active');
+        repsBtn.classList.remove('active');
+    } else {
+        allView.style.display = 'none';
+        repsView.style.display = '';
+        allBtn.classList.remove('active');
+        repsBtn.classList.add('active');
+        // Resize Plotly chart in the newly visible container
+        var plotDiv = repsView.querySelector('.plotly-chart');
+        if (plotDiv && typeof Plotly !== 'undefined') {
+            Plotly.Plots.resize(plotDiv);
+        }
+    }
+}
+""")
+
         js_lines.append("</script>")
 
         return "\n".join(js_lines)

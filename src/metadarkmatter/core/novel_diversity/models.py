@@ -104,6 +104,16 @@ class NovelCluster(BaseModel):
         default_factory=list,
         description="List of read identifiers in this cluster"
     )
+    mean_bayesian_confidence: float | None = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Mean per-read Bayesian confidence_score (0-100) for reads in this cluster"
+    )
+    contributing_genomes: list[str] = Field(
+        default_factory=list,
+        description="Reference genomes that contributed reads to this cluster (after neighborhood merging)"
+    )
 
     model_config = {"frozen": True}
 
@@ -159,7 +169,7 @@ class NovelCluster(BaseModel):
 
     def to_summary_dict(self) -> dict:
         """Convert to dictionary for summary output (excludes read_ids)."""
-        return {
+        result = {
             "cluster_id": self.cluster_id,
             "taxonomic_call": self.taxonomic_call,
             "read_count": self.read_count,
@@ -180,6 +190,11 @@ class NovelCluster(BaseModel):
             "confidence": self.confidence,
             "phylogenetic_context": self.phylogenetic_context,
         }
+        if self.mean_bayesian_confidence is not None:
+            result["mean_bayesian_confidence"] = round(self.mean_bayesian_confidence, 1)
+        if self.contributing_genomes:
+            result["contributing_genomes_count"] = len(self.contributing_genomes)
+        return result
 
 
 class NovelDiversitySummary(BaseModel):

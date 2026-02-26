@@ -261,6 +261,11 @@ body {
     border-color: var(--info-color);
 }
 
+.diversity-card.off-target {
+    background: rgba(52, 152, 219, 0.1);
+    border-color: #3498db;
+}
+
 .diversity-pct {
     font-size: 2.5rem;
     font-weight: 700;
@@ -270,6 +275,7 @@ body {
 .diversity-card.known .diversity-pct { color: var(--success-color); }
 .diversity-card.novel .diversity-pct { color: var(--danger-color); }
 .diversity-card.uncertain .diversity-pct { color: var(--info-color); }
+.diversity-card.off-target .diversity-pct { color: #3498db; }
 
 .diversity-label {
     font-size: 1.1rem;
@@ -305,6 +311,7 @@ body {
 .bar-segment.known { background: var(--success-color); }
 .bar-segment.novel { background: var(--danger-color); }
 .bar-segment.uncertain { background: var(--info-color); }
+.bar-segment.off-target { background: #3498db; }
 
 .diversity-bar-legend {
     display: flex;
@@ -329,6 +336,7 @@ body {
 .legend-dot.known { background: var(--success-color); }
 .legend-dot.novel { background: var(--danger-color); }
 .legend-dot.uncertain { background: var(--info-color); }
+.legend-dot.off-target { background: #3498db; }
 
 /* Key Findings Cards */
 .key-findings {
@@ -1981,6 +1989,11 @@ body {
     border-color: var(--info-color);
 }
 
+.diversity-card.off-target {
+    background: rgba(52, 152, 219, 0.1);
+    border-color: #3498db;
+}
+
 .diversity-pct {
     font-size: 2.5rem;
     font-weight: 700;
@@ -1990,6 +2003,7 @@ body {
 .diversity-card.known .diversity-pct { color: var(--success-color); }
 .diversity-card.novel .diversity-pct { color: var(--danger-color); }
 .diversity-card.uncertain .diversity-pct { color: var(--info-color); }
+.diversity-card.off-target .diversity-pct { color: #3498db; }
 
 .diversity-label {
     font-size: 1.1rem;
@@ -2025,6 +2039,7 @@ body {
 .bar-segment.known { background: var(--success-color); }
 .bar-segment.novel { background: var(--danger-color); }
 .bar-segment.uncertain { background: var(--info-color); }
+.bar-segment.off-target { background: #3498db; }
 
 .diversity-bar-legend {
     display: flex;
@@ -2049,6 +2064,7 @@ body {
 .legend-dot.known { background: var(--success-color); }
 .legend-dot.novel { background: var(--danger-color); }
 .legend-dot.uncertain { background: var(--info-color); }
+.legend-dot.off-target { background: #3498db; }
 
 /* Category Breakdown - Dark Theme */
 .category-breakdown {
@@ -3579,6 +3595,43 @@ PHYLOGENY_STYLES: str = """
     font-size: 0.9rem;
     color: var(--text-secondary);
     line-height: 1.5;
+}
+
+/* Heatmap Toggle Controls (ANI/AAI representative filter) */
+.heatmap-toggle-controls {
+    display: flex;
+    gap: 0;
+    margin-bottom: 1rem;
+}
+
+.heatmap-toggle-btn {
+    padding: 0.5rem 1.25rem;
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.heatmap-toggle-btn:first-child {
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+    border-right: none;
+}
+
+.heatmap-toggle-btn:last-child {
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.heatmap-toggle-btn:hover {
+    background: var(--bg-tertiary);
+}
+
+.heatmap-toggle-btn.active {
+    background: var(--accent-color);
+    color: white;
+    border-color: var(--accent-color);
 }
 
 /* Phylogeny Controls */

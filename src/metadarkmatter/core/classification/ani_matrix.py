@@ -9,11 +9,15 @@ usage and O(1) lookup performance.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from metadarkmatter.core.constants import ANI_DEFAULT_UNRELATED
 from metadarkmatter.core.parsers import ANIMatrixParser
+
+if TYPE_CHECKING:
+    import polars as pl
 
 
 class ANIMatrix:
@@ -95,6 +99,48 @@ class ANIMatrix:
         """
         parser = ANIMatrixParser(path)
         ani_dict = parser.to_dict()
+        return cls(ani_dict, default_ani=default_ani)
+
+    @classmethod
+    def from_dataframe(cls, df: pl.DataFrame, default_ani: float = ANI_DEFAULT_UNRELATED) -> ANIMatrix:
+        """
+        Construct an ANIMatrix from a Polars DataFrame.
+
+        Accepts the matrix format used by the report generator, where the
+        first column is ``genome`` (row labels) and remaining columns are
+        genome accessions with ANI values.  Also accepts a square numeric
+        DataFrame where column names serve as both row and column labels.
+
+        Args:
+            df: Polars DataFrame with ANI values
+            default_ani: Default ANI value for missing/uncomputed pairs
+
+        Returns:
+            ANIMatrix instance
+        """
+        import polars as pl
+
+        if len(df) == 0:
+            return cls({}, default_ani=default_ani)
+
+        # Determine genome labels and value columns
+        if "genome" in df.columns:
+            genomes = df["genome"].to_list()
+            value_cols = [c for c in df.columns if c != "genome"]
+        else:
+            genomes = list(df.columns)
+            value_cols = list(df.columns)
+
+        # Build nested dict
+        ani_dict: dict[str, dict[str, float]] = {}
+        for row_idx, row_genome in enumerate(genomes):
+            inner: dict[str, float] = {}
+            for col in value_cols:
+                val = df[col][row_idx]
+                if val is not None:
+                    inner[col] = float(val)
+            ani_dict[row_genome] = inner
+
         return cls(ani_dict, default_ani=default_ani)
 
     @property

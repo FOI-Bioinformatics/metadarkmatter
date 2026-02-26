@@ -361,6 +361,38 @@ def classify(
         min=0.0,
         max=1.0,
     ),
+    max_evalue: float = typer.Option(
+        0.0,
+        "--max-evalue",
+        help="Maximum E-value for hit filtering. 0 disables (default).",
+        min=0.0,
+    ),
+    min_percent_identity: float = typer.Option(
+        0.0,
+        "--min-percent-identity",
+        help="Minimum percent identity for hit filtering. 0 disables (default).",
+        min=0.0,
+        max=100.0,
+    ),
+    min_bitscore: float = typer.Option(
+        0.0,
+        "--min-bitscore",
+        help="Minimum bitscore for hit filtering. 0 disables (default).",
+        min=0.0,
+    ),
+    min_read_length: int = typer.Option(
+        0,
+        "--min-read-length",
+        help="Minimum read length in bp. 0 disables (default).",
+        min=0,
+    ),
+    min_query_coverage: float = typer.Option(
+        0.0,
+        "--min-query-coverage",
+        help="Minimum query coverage percentage (0-100). 0 disables (default).",
+        min=0.0,
+        max=100.0,
+    ),
     coverage_weight_mode: str = typer.Option(
         "linear",
         "--coverage-weight-mode",
@@ -683,6 +715,11 @@ def classify(
         "uncertainty_mode": (uncertainty_mode, "second", "--uncertainty-mode"),
         "single_hit_uncertainty_threshold": (single_hit_uncertainty_threshold, 10.0, "--single-hit-threshold"),
         "family_ratio_threshold": (family_ratio_threshold, 0.8, "--family-ratio-threshold"),
+        "max_evalue": (max_evalue, 0.0, "--max-evalue"),
+        "min_percent_identity": (min_percent_identity, 0.0, "--min-percent-identity"),
+        "min_bitscore": (min_bitscore, 0.0, "--min-bitscore"),
+        "min_read_length": (min_read_length, 0, "--min-read-length"),
+        "min_query_coverage": (min_query_coverage, 0.0, "--min-query-coverage"),
     }
     if config_file:
         for key, (val, default, flag_name) in _deprecated_flags.items():
@@ -730,6 +767,16 @@ def classify(
             overrides["target_family"] = target_family
         if family_ratio_threshold != 0.8:
             overrides["family_ratio_threshold"] = family_ratio_threshold
+        if max_evalue != 0.0:
+            overrides["max_evalue"] = max_evalue
+        if min_percent_identity != 0.0:
+            overrides["min_percent_identity"] = min_percent_identity
+        if min_bitscore != 0.0:
+            overrides["min_bitscore"] = min_bitscore
+        if min_read_length != 0:
+            overrides["min_read_length"] = min_read_length
+        if min_query_coverage != 0.0:
+            overrides["min_query_coverage"] = min_query_coverage
         if include_legacy_scores:
             overrides["include_legacy_scores"] = True
         if overrides:
@@ -761,6 +808,11 @@ def classify(
                 uncertainty_conserved_min=config.uncertainty_conserved_min,
                 min_alignment_length=config.min_alignment_length,
                 min_alignment_fraction=config.min_alignment_fraction,
+                max_evalue=max_evalue,
+                min_percent_identity=min_percent_identity,
+                min_bitscore=min_bitscore,
+                min_read_length=min_read_length,
+                min_query_coverage=min_query_coverage,
                 coverage_weight_mode=coverage_weight_mode,
                 coverage_weight_strength=coverage_weight_strength,
                 uncertainty_mode=uncertainty_mode_lower,
@@ -775,6 +827,11 @@ def classify(
             bitscore_threshold_pct=bitscore_threshold,
             min_alignment_length=min_alignment_length,
             min_alignment_fraction=min_alignment_fraction,
+            max_evalue=max_evalue,
+            min_percent_identity=min_percent_identity,
+            min_bitscore=min_bitscore,
+            min_read_length=min_read_length,
+            min_query_coverage=min_query_coverage,
             coverage_weight_mode=coverage_weight_mode,
             coverage_weight_strength=coverage_weight_strength,
             uncertainty_mode=uncertainty_mode_lower,
@@ -784,12 +841,24 @@ def classify(
             include_legacy_scores=include_legacy_scores,
         )
 
-    # Log alignment filter settings if non-default
-    if config.min_alignment_length > 0 or config.min_alignment_fraction > 0:
-        out.print(
-            f"[dim]Alignment filters: length >= {config.min_alignment_length}bp, "
-            f"fraction >= {config.min_alignment_fraction:.0%}[/dim]"
-        )
+    # Log active filter settings
+    active_filters = []
+    if config.min_alignment_length > 0:
+        active_filters.append(f"length >= {config.min_alignment_length}bp")
+    if config.min_alignment_fraction > 0:
+        active_filters.append(f"fraction >= {config.min_alignment_fraction:.0%}")
+    if config.max_evalue > 0:
+        active_filters.append(f"evalue <= {config.max_evalue:.0e}")
+    if config.min_percent_identity > 0:
+        active_filters.append(f"identity >= {config.min_percent_identity:.1f}%")
+    if config.min_bitscore > 0:
+        active_filters.append(f"bitscore >= {config.min_bitscore:.1f}")
+    if config.min_read_length > 0:
+        active_filters.append(f"read length >= {config.min_read_length}bp")
+    if config.min_query_coverage > 0:
+        active_filters.append(f"query coverage >= {config.min_query_coverage:.1f}%")
+    if active_filters:
+        out.print(f"[dim]Alignment filters: {', '.join(active_filters)}[/dim]")
 
     # Load ANI matrix
     with Progress(
@@ -1270,6 +1339,38 @@ def batch(
         min=0.0,
         max=1.0,
     ),
+    max_evalue: float = typer.Option(
+        0.0,
+        "--max-evalue",
+        help="Maximum E-value for hit filtering. 0 disables (default).",
+        min=0.0,
+    ),
+    min_percent_identity: float = typer.Option(
+        0.0,
+        "--min-percent-identity",
+        help="Minimum percent identity for hit filtering. 0 disables (default).",
+        min=0.0,
+        max=100.0,
+    ),
+    min_bitscore: float = typer.Option(
+        0.0,
+        "--min-bitscore",
+        help="Minimum bitscore for hit filtering. 0 disables (default).",
+        min=0.0,
+    ),
+    min_read_length: int = typer.Option(
+        0,
+        "--min-read-length",
+        help="Minimum read length in bp. 0 disables (default).",
+        min=0,
+    ),
+    min_query_coverage: float = typer.Option(
+        0.0,
+        "--min-query-coverage",
+        help="Minimum query coverage percentage (0-100). 0 disables (default).",
+        min=0.0,
+        max=100.0,
+    ),
     coverage_weight_mode: str = typer.Option(
         "linear",
         "--coverage-weight-mode",
@@ -1476,6 +1577,11 @@ def batch(
                 uncertainty_conserved_min=config.uncertainty_conserved_min,
                 min_alignment_length=config.min_alignment_length,
                 min_alignment_fraction=config.min_alignment_fraction,
+                max_evalue=max_evalue,
+                min_percent_identity=min_percent_identity,
+                min_bitscore=min_bitscore,
+                min_read_length=min_read_length,
+                min_query_coverage=min_query_coverage,
                 uncertainty_mode=uncertainty_mode_lower,
             )
     else:
@@ -1484,17 +1590,34 @@ def batch(
             bitscore_threshold_pct=bitscore_threshold,
             min_alignment_length=min_alignment_length,
             min_alignment_fraction=min_alignment_fraction,
+            max_evalue=max_evalue,
+            min_percent_identity=min_percent_identity,
+            min_bitscore=min_bitscore,
+            min_read_length=min_read_length,
+            min_query_coverage=min_query_coverage,
             coverage_weight_mode=coverage_weight_mode,
             coverage_weight_strength=coverage_weight_strength,
             uncertainty_mode=uncertainty_mode_lower,
         )
 
-    # Log alignment filter settings if non-default
-    if config.min_alignment_length > 0 or config.min_alignment_fraction > 0:
-        console.print(
-            f"[dim]Alignment filters: length >= {config.min_alignment_length}bp, "
-            f"fraction >= {config.min_alignment_fraction:.0%}[/dim]"
-        )
+    # Log active filter settings
+    active_filters = []
+    if config.min_alignment_length > 0:
+        active_filters.append(f"length >= {config.min_alignment_length}bp")
+    if config.min_alignment_fraction > 0:
+        active_filters.append(f"fraction >= {config.min_alignment_fraction:.0%}")
+    if config.max_evalue > 0:
+        active_filters.append(f"evalue <= {config.max_evalue:.0e}")
+    if config.min_percent_identity > 0:
+        active_filters.append(f"identity >= {config.min_percent_identity:.1f}%")
+    if config.min_bitscore > 0:
+        active_filters.append(f"bitscore >= {config.min_bitscore:.1f}")
+    if config.min_read_length > 0:
+        active_filters.append(f"read length >= {config.min_read_length}bp")
+    if config.min_query_coverage > 0:
+        active_filters.append(f"query coverage >= {config.min_query_coverage:.1f}%")
+    if active_filters:
+        console.print(f"[dim]Alignment filters: {', '.join(active_filters)}[/dim]")
 
     # Note: Batch mode does not currently support AAI matrix
     vectorized = VectorizedClassifier(ani_matrix=ani_matrix, aai_matrix=None, config=config)

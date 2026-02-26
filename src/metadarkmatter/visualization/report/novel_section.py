@@ -64,12 +64,12 @@ NOVEL_CONFIDENCE_GUIDE_TEMPLATE: str = '''
     <div class="confidence-grid">
         <div class="confidence-item high">
             <span class="conf-badge">High</span>
-            <span class="conf-criteria">>=10 reads, uncertainty <5%, discovery >=75</span>
+            <span class="conf-criteria">Bayesian confidence >=70 and >=10 reads</span>
             <span class="conf-action">Prioritize for experimental validation</span>
         </div>
         <div class="confidence-item medium">
             <span class="conf-badge">Medium</span>
-            <span class="conf-criteria">>=5 reads, uncertainty <10%, discovery >=50</span>
+            <span class="conf-criteria">Bayesian confidence >=50 and >=5 reads</span>
             <span class="conf-action">Include in candidate list</span>
         </div>
         <div class="confidence-item low">
@@ -77,6 +77,11 @@ NOVEL_CONFIDENCE_GUIDE_TEMPLATE: str = '''
             <span class="conf-criteria">Other clusters meeting minimum size</span>
             <span class="conf-action">May need additional evidence</span>
         </div>
+    </div>
+    <div class="confidence-note" style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-muted);">
+        Confidence is derived from per-read Bayesian posterior confidence scores (0-100).
+        When posteriors are unavailable, ratings fall back to read count, placement uncertainty,
+        and discovery score thresholds.
     </div>
 </div>
 '''

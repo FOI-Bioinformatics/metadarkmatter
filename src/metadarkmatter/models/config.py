@@ -259,6 +259,42 @@ class ScoringConfig(BaseModel):
         ),
     )
 
+    # Hit-level quality filters
+    max_evalue: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Maximum E-value for hit filtering. 0 disables (default).",
+    )
+    min_percent_identity: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=100.0,
+        description="Minimum percent identity for hit filtering. 0 disables (default).",
+    )
+    min_bitscore: float = Field(
+        default=0.0,
+        ge=0.0,
+        description="Minimum bitscore for hit filtering. 0 disables (default).",
+    )
+    min_read_length: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "Minimum read length in bp. Uses qlen when available, "
+            "otherwise estimates from alignment coordinates. 0 disables (default)."
+        ),
+    )
+    min_query_coverage: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=100.0,
+        description=(
+            "Minimum query coverage percentage (0-100). Hits where "
+            "aligned_length / read_length * 100 is below this are removed. "
+            "0 disables (default)."
+        ),
+    )
+
     # Coverage weighting for hit selection
     # Prioritizes longer alignments over short conserved domains
     coverage_weight_mode: Literal["none", "linear", "log", "sigmoid"] = Field(
@@ -681,6 +717,11 @@ def _flatten_yaml_config(raw: dict[str, Any]) -> dict[str, Any]:
     _map_if_present(filters, "min_alignment_length", flat, "min_alignment_length")
     _map_if_present(filters, "min_alignment_fraction", flat, "min_alignment_fraction")
     _map_if_present(filters, "bitscore_threshold_pct", flat, "bitscore_threshold_pct")
+    _map_if_present(filters, "max_evalue", flat, "max_evalue")
+    _map_if_present(filters, "min_percent_identity", flat, "min_percent_identity")
+    _map_if_present(filters, "min_bitscore", flat, "min_bitscore")
+    _map_if_present(filters, "min_read_length", flat, "min_read_length")
+    _map_if_present(filters, "min_query_coverage", flat, "min_query_coverage")
 
     # Coverage weighting section
     cw = raw.get("coverage_weighting", {})
@@ -752,6 +793,11 @@ def _build_yaml_structure(config: "ScoringConfig") -> dict[str, Any]:
             "min_alignment_length": config.min_alignment_length,
             "min_alignment_fraction": config.min_alignment_fraction,
             "bitscore_threshold_pct": config.bitscore_threshold_pct,
+            "max_evalue": config.max_evalue,
+            "min_percent_identity": config.min_percent_identity,
+            "min_bitscore": config.min_bitscore,
+            "min_read_length": config.min_read_length,
+            "min_query_coverage": config.min_query_coverage,
         },
         "coverage_weighting": {
             "mode": config.coverage_weight_mode,

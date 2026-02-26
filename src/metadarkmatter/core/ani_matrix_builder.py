@@ -176,6 +176,7 @@ def extract_genome_name_from_path(path_str: str) -> str:
 
     Handles common formats:
     - File paths: /path/to/GCF_000123456.1_ASM123v1_genomic.fna -> GCF_000123456.1
+    - Prefixed: Francisellaceae_Genus_species_GCA_000710735.1.fasta -> GCA_000710735.1
     - BLAST sseqid with pipe format: GCF_000123456.1|NZ_CP007557.1 -> GCF_000123456.1
     - Custom names: custom_genome|contig1 -> custom_genome
     - Simple filenames: genome.fasta -> genome
@@ -203,8 +204,9 @@ def extract_genome_name_from_path(path_str: str) -> str:
     # Remove _genomic suffix common in NCBI downloads
     filename = filename.removesuffix("_genomic")
 
-    # Try to extract RefSeq/GenBank accession pattern
-    match = re.match(r"(GCF_\d+\.\d+|GCA_\d+\.\d+)", filename)
+    # Try to extract RefSeq/GenBank accession pattern (search anywhere in
+    # string to handle prefixed filenames like Family_Genus_species_GCF_...)
+    match = re.search(r"(GCF_\d+\.\d+|GCA_\d+\.\d+)", filename)
     if match:
         return match.group(1)
 
