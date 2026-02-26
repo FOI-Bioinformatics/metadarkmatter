@@ -406,6 +406,7 @@ DATA_SUMMARY_TEMPLATE: str = '''
             <span class="stat-value">{uncertain_count:,}</span>
             <span class="stat-label">Uncertain</span>
         </div>
+        {off_target_stat}
     </div>
 </div>
 '''
@@ -418,8 +419,12 @@ DATA_QUICK_FILTERS_TEMPLATE: str = '''
         <button class="filter-chip known" data-filter="Known Species" onclick="quickFilter(this, 'Known Species')">Known Species ({known_count})</button>
         <button class="filter-chip novel-species" data-filter="Novel Species" onclick="quickFilter(this, 'Novel Species')">Novel Species ({novel_species_count})</button>
         <button class="filter-chip novel-genus" data-filter="Novel Genus" onclick="quickFilter(this, 'Novel Genus')">Novel Genus ({novel_genus_count})</button>
+        <button class="filter-chip species-boundary" data-filter="Species Boundary" onclick="quickFilter(this, 'Species Boundary')">Species Boundary ({species_boundary_count})</button>
         <button class="filter-chip ambiguous" data-filter="Ambiguous" onclick="quickFilter(this, 'Ambiguous')">Ambiguous ({ambiguous_count})</button>
+        <button class="filter-chip ambiguous-wg" data-filter="Ambiguous Within Genus" onclick="quickFilter(this, 'Ambiguous Within Genus')">Ambiguous Within Genus ({ambiguous_wg_count})</button>
         <button class="filter-chip conserved" data-filter="Conserved Region" onclick="quickFilter(this, 'Conserved Region')">Conserved ({conserved_count})</button>
+        <button class="filter-chip unclassified" data-filter="Unclassified" onclick="quickFilter(this, 'Unclassified')">Unclassified ({unclassified_count})</button>
+        {off_target_chip}
     </div>
     <div class="filter-row">
         <span class="filter-label">Novelty:</span>

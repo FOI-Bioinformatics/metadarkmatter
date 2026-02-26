@@ -2333,20 +2333,40 @@ class ReportGenerator:
                 f'</div>'
             )
 
+        # Summary counts reflect the FULL dataset (not truncated table)
+        off_target_stat = ""
+        if s.off_target > 0:
+            off_target_stat = (
+                '<div class="data-stat off-target">'
+                f'<span class="stat-value">{s.off_target:,}</span>'
+                '<span class="stat-label">Off-target</span>'
+                '</div>'
+            )
         summary_html = DATA_SUMMARY_TEMPLATE.format(
-            total_rows=len(table_df),
+            total_rows=total_reads,
             known_count=s.diversity_known,
             novel_count=s.diversity_novel,
             uncertain_count=s.diversity_uncertain,
+            off_target_stat=off_target_stat,
         )
 
-        # Build quick filters section
+        # Build quick filters section with all classification categories
+        off_target_chip = ""
+        if s.off_target > 0:
+            off_target_chip = (
+                f'<button class="filter-chip off-target" data-filter="Off-target" '
+                f'onclick="quickFilter(this, \'Off-target\')">Off-target ({s.off_target})</button>'
+            )
         quick_filters_html = DATA_QUICK_FILTERS_TEMPLATE.format(
             known_count=s.known_species,
             novel_species_count=s.novel_species,
             novel_genus_count=s.novel_genus,
+            species_boundary_count=s.species_boundary,
             ambiguous_count=s.ambiguous,
+            ambiguous_wg_count=s.ambiguous_within_genus,
             conserved_count=s.conserved_regions,
+            unclassified_count=s.unclassified,
+            off_target_chip=off_target_chip,
         )
 
         # Column guide with similarity type (ANI or AAI)

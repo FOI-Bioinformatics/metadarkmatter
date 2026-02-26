@@ -1244,6 +1244,7 @@ body {
 .data-stat.known { border-left: 3px solid var(--success-color); }
 .data-stat.novel { border-left: 3px solid var(--warning-color); }
 .data-stat.uncertain { border-left: 3px solid var(--text-muted); }
+.data-stat.off-target { border-left: 3px solid #3498db; }
 
 /* Quick Filters */
 .quick-filters {
@@ -1289,8 +1290,12 @@ body {
 .filter-chip.known.active { background: var(--success-color); border-color: var(--success-color); }
 .filter-chip.novel-species.active { background: var(--warning-color); border-color: var(--warning-color); }
 .filter-chip.novel-genus.active { background: var(--danger-color); border-color: var(--danger-color); }
+.filter-chip.species-boundary.active { background: #8b5cf6; border-color: #8b5cf6; }
 .filter-chip.ambiguous.active { background: var(--text-muted); border-color: var(--text-muted); }
+.filter-chip.ambiguous-wg.active { background: #6b7280; border-color: #6b7280; }
 .filter-chip.conserved.active { background: var(--info-color); border-color: var(--info-color); }
+.filter-chip.unclassified.active { background: #d1d5db; border-color: #d1d5db; color: #1a1a2e; }
+.filter-chip.off-target.active { background: #3498db; border-color: #3498db; }
 .filter-chip.range.active { background: var(--accent-color); border-color: var(--accent-color); }
 
 /* Filter Rows */
@@ -2958,6 +2963,7 @@ body {
 .data-stat.known { border-left: 3px solid var(--success-color); }
 .data-stat.novel { border-left: 3px solid var(--warning-color); }
 .data-stat.uncertain { border-left: 3px solid var(--text-muted); }
+.data-stat.off-target { border-left: 3px solid #3498db; }
 
 /* Quick Filters - Dark Theme */
 .quick-filters {
@@ -3004,8 +3010,12 @@ body {
 .filter-chip.known.active { background: var(--success-color); border-color: var(--success-color); }
 .filter-chip.novel-species.active { background: var(--warning-color); border-color: var(--warning-color); }
 .filter-chip.novel-genus.active { background: var(--danger-color); border-color: var(--danger-color); }
+.filter-chip.species-boundary.active { background: #8b5cf6; border-color: #8b5cf6; }
 .filter-chip.ambiguous.active { background: var(--text-muted); border-color: var(--text-muted); }
+.filter-chip.ambiguous-wg.active { background: #6b7280; border-color: #6b7280; }
 .filter-chip.conserved.active { background: var(--info-color); border-color: var(--info-color); }
+.filter-chip.unclassified.active { background: #d1d5db; border-color: #d1d5db; color: #1a1a2e; }
+.filter-chip.off-target.active { background: #3498db; border-color: #3498db; }
 
 /* Column Guide - Dark Theme */
 .column-guide {
