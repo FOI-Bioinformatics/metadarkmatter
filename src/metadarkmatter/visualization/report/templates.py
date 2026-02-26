@@ -82,6 +82,60 @@ METRIC_CARD_TEMPLATE: str = '''
 </div>
 '''
 
+KPI_STRIP_TEMPLATE: str = '''
+<div class="kpi-strip">
+{cards}
+</div>
+'''
+
+KPI_CARD_TEMPLATE: str = '''
+<div class="kpi-card {color_class}">
+    <div class="kpi-value">{value}</div>
+    <div class="kpi-label">{label}</div>
+</div>
+'''
+
+TWO_COLUMN_ROW_TEMPLATE: str = '''
+<div class="two-col-row">
+    <div class="col-left" style="flex: {left_flex};">
+        {left_content}
+    </div>
+    <div class="col-right" style="flex: {right_flex};">
+        {right_content}
+    </div>
+</div>
+'''
+
+TOP_SPECIES_TABLE_TEMPLATE: str = '''
+<div class="top-species-card">
+    <h4 class="card-section-title">Top Species</h4>
+    <table class="mini-table">
+        <thead>
+            <tr><th>Species</th><th>Reads</th><th>%</th></tr>
+        </thead>
+        <tbody>
+{rows}
+        </tbody>
+    </table>
+</div>
+'''
+
+TOP_SPECIES_ROW_TEMPLATE: str = '''<tr><td class="species-name">{species}</td><td class="num">{count}</td><td class="num">{pct:.1f}%</td></tr>'''
+
+CATEGORY_GRID_TEMPLATE: str = '''
+<div class="category-grid">
+{cells}
+</div>
+'''
+
+CATEGORY_GRID_CELL: str = '''
+<div class="cat-grid-cell {color_class}">
+    <div class="cat-grid-name">{name}</div>
+    <div class="cat-grid-count">{count:,}</div>
+    <div class="cat-grid-pct">{pct:.1f}%</div>
+</div>
+'''
+
 # =============================================================================
 # Diversity Summary (Hero Section)
 # =============================================================================
@@ -398,6 +452,20 @@ PLOT_CONTAINER_TEMPLATE: str = '''
 PLOT_CONTAINER_SIMPLE_TEMPLATE: str = '''
 <div class="plot-container {extra_class}">
     <div id="{plot_id}" class="plotly-chart"></div>
+</div>
+'''
+
+COLLAPSIBLE_PANEL_TEMPLATE: str = '''
+<div class="collapsible-panel {default_state}" id="panel-{panel_id}">
+    <div class="collapsible-header" onclick="togglePanel('{panel_id}')">
+        <span class="collapsible-chevron">&#9654;</span>
+        {title}
+    </div>
+    <div class="collapsible-body">
+        <div class="collapsible-content">
+            {content}
+        </div>
+    </div>
 </div>
 '''
 
@@ -805,6 +873,13 @@ function showTab(tabId) {
     event.target.classList.add('active');
 
     // Trigger Plotly resize for proper rendering
+    window.dispatchEvent(new Event('resize'));
+}
+
+// Collapsible panel toggle
+function togglePanel(panelId) {
+    var panel = document.getElementById('panel-' + panelId);
+    panel.classList.toggle('open');
     window.dispatchEvent(new Event('resize'));
 }
 '''

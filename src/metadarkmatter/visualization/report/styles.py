@@ -13,26 +13,31 @@ from __future__ import annotations
 
 LIGHT_THEME: str = """
 :root {
-    --bg-primary: #ffffff;
-    --bg-secondary: #f8f9fa;
-    --bg-tertiary: #e9ecef;
-    --text-primary: #212529;
-    --text-secondary: #6c757d;
-    --text-muted: #adb5bd;
-    --border-color: #dee2e6;
-    --border-light: #e9ecef;
-    --accent-color: #0d6efd;
-    --accent-hover: #0b5ed7;
-    --success-color: #2ecc71;
-    --warning-color: #f39c12;
-    --danger-color: #e74c3c;
-    --info-color: #95a5a6;
+    --bg-page:       #f0f2f5;
+    --bg-card:       #ffffff;
+    --bg-primary:    #ffffff;
+    --bg-secondary:  #f0f2f5;
+    --bg-tertiary:   #e4e7eb;
+    --bg-collapsible: #f8f9fa;
+    --text-primary:  #1a1a2e;
+    --text-secondary: #6b7280;
+    --text-muted:    #9ca3af;
+    --border-color:  #e4e7eb;
+    --border-light:  #e4e7eb;
+    --header-bg:     #1a1a2e;
+    --accent-color:  #667eea;
+    --accent-hover:  #5a6fd6;
+    --success-color: #22c55e;
+    --warning-color: #f59e0b;
+    --danger-color:  #ef4444;
+    --info-color:    #94a3b8;
+    --offtarget-color: #3498db;
     --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-    --shadow-md: 0 4px 6px rgba(0,0,0,0.07);
-    --shadow-lg: 0 10px 15px rgba(0,0,0,0.1);
+    --shadow-md: 0 2px 4px rgba(0,0,0,0.06);
+    --shadow-lg: 0 4px 8px rgba(0,0,0,0.08);
     --radius-sm: 4px;
-    --radius-md: 8px;
-    --radius-lg: 12px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
 }
 
 * {
@@ -44,22 +49,22 @@ LIGHT_THEME: str = """
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
                  "Helvetica Neue", Arial, sans-serif;
-    background-color: var(--bg-secondary);
+    background-color: var(--bg-page);
     color: var(--text-primary);
-    line-height: 1.6;
-    font-size: 14px;
+    line-height: 1.5;
+    font-size: 13px;
 }
 
 /* Header */
 .report-header {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: var(--header-bg);
     color: white;
-    padding: 2rem 2rem 1.5rem;
+    padding: 1.25rem 2rem 1rem;
     text-align: center;
 }
 
 .report-header h1 {
-    font-size: 1.75rem;
+    font-size: 1.25rem;
     font-weight: 600;
     margin-bottom: 0.5rem;
 }
@@ -83,43 +88,46 @@ body {
     display: flex;
     justify-content: center;
     flex-wrap: wrap;
-    gap: 0.25rem;
-    background: var(--bg-primary);
+    gap: 0;
+    background: var(--bg-card);
     border-bottom: 1px solid var(--border-color);
-    padding: 0.75rem 1rem;
+    padding: 0 1.25rem;
     position: sticky;
     top: 0;
     z-index: 100;
-    box-shadow: var(--shadow-sm);
 }
 
 .tab-btn {
-    padding: 0.5rem 1.25rem;
+    padding: 0.75rem 1.25rem;
     border: none;
     background: transparent;
     cursor: pointer;
-    font-size: 0.875rem;
+    font-size: 0.8rem;
     font-weight: 500;
     color: var(--text-secondary);
-    border-radius: var(--radius-sm);
+    border-bottom: 2px solid transparent;
     transition: all 0.2s ease;
+    border-radius: 0;
 }
 
 .tab-btn:hover {
-    background: var(--bg-secondary);
+    background: transparent;
     color: var(--text-primary);
+    border-bottom-color: var(--border-color);
 }
 
 .tab-btn.active {
-    background: var(--accent-color);
-    color: white;
+    background: transparent;
+    color: var(--text-primary);
+    font-weight: 700;
+    border-bottom-color: var(--accent-color);
 }
 
 /* Main Content */
 .report-content {
     max-width: 1400px;
     margin: 0 auto;
-    padding: 1.5rem;
+    padding: 1.25rem;
 }
 
 .tab-section {
@@ -137,12 +145,14 @@ body {
 }
 
 .section-title {
-    font-size: 1.25rem;
+    font-size: 0.85rem;
     font-weight: 600;
-    margin-bottom: 1.5rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 1rem;
     color: var(--text-primary);
     padding-bottom: 0.5rem;
-    border-bottom: 2px solid var(--accent-color);
+    border-bottom: 1px solid var(--border-color);
 }
 
 /* Metric Cards */
@@ -193,6 +203,223 @@ body {
     font-size: 0.8rem;
     color: var(--text-muted);
     margin-top: 0.25rem;
+}
+
+/* KPI Strip */
+.kpi-strip {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+
+.kpi-card {
+    flex: 1;
+    min-width: 120px;
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    padding: 0.75rem 1rem;
+    border-left: 3px solid var(--accent-color);
+    box-shadow: var(--shadow-sm);
+}
+
+.kpi-card.known { border-left-color: var(--success-color); }
+.kpi-card.novel { border-left-color: var(--danger-color); }
+.kpi-card.uncertain { border-left-color: var(--info-color); }
+.kpi-card.off-target { border-left-color: var(--offtarget-color); }
+.kpi-card.accent { border-left-color: var(--accent-color); }
+
+.kpi-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+    color: var(--text-primary);
+}
+
+.kpi-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    margin-top: 0.15rem;
+}
+
+/* Collapsible Panels */
+.collapsible-panel {
+    margin-bottom: 0.75rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+}
+
+.collapsible-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg-collapsible);
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.collapsible-header:hover {
+    background: var(--bg-tertiary);
+}
+
+.collapsible-chevron {
+    transition: transform 0.2s ease;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.collapsible-panel.open .collapsible-chevron {
+    transform: rotate(90deg);
+}
+
+.collapsible-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+    background: var(--bg-card);
+}
+
+.collapsible-panel.open .collapsible-body {
+    max-height: 5000px;
+}
+
+.collapsible-content {
+    padding: 1rem;
+}
+
+/* Two-Column Row */
+.two-col-row {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.two-col-row .col-left,
+.two-col-row .col-right {
+    min-width: 0;
+}
+
+@media (max-width: 768px) {
+    .two-col-row {
+        flex-direction: column;
+    }
+}
+
+/* Mini Table (for top species) */
+.top-species-card {
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border-color);
+    height: 100%;
+}
+
+.card-section-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+}
+
+.mini-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+}
+
+.mini-table th {
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    padding: 0.25rem 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.mini-table td {
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--border-light);
+    color: var(--text-primary);
+}
+
+.mini-table .species-name {
+    font-style: italic;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mini-table .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* Category Grid (compact 2-row) */
+.category-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.cat-grid-cell {
+    background: var(--bg-card);
+    border-radius: var(--radius-sm);
+    padding: 0.6rem 0.75rem;
+    border-left: 3px solid var(--border-color);
+    box-shadow: var(--shadow-sm);
+}
+
+.cat-grid-cell.known { border-left-color: var(--success-color); }
+.cat-grid-cell.novel-species { border-left-color: var(--warning-color); }
+.cat-grid-cell.novel-genus { border-left-color: var(--danger-color); }
+.cat-grid-cell.species-boundary { border-left-color: var(--info-color); }
+.cat-grid-cell.ambiguous { border-left-color: var(--info-color); }
+.cat-grid-cell.conserved { border-left-color: var(--info-color); }
+.cat-grid-cell.unclassified { border-left-color: var(--text-muted); }
+.cat-grid-cell.off-target { border-left-color: var(--offtarget-color); }
+
+.cat-grid-name {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.cat-grid-count {
+    font-size: 1.1rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+}
+
+.cat-grid-pct {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 768px) {
+    .category-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
 }
 
 /* Diversity Summary (Hero Section) */
@@ -1751,7 +1978,7 @@ body {
     }
 
     .report-header {
-        background: #667eea;
+        background: #1a1a2e;
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
     }
@@ -1764,26 +1991,31 @@ body {
 
 DARK_THEME: str = """
 :root {
-    --bg-primary: #1a1a2e;
-    --bg-secondary: #16213e;
-    --bg-tertiary: #0f3460;
-    --text-primary: #eaeaea;
+    --bg-page:       #0f0f1a;
+    --bg-card:       #1e1e2e;
+    --bg-primary:    #1a1a2e;
+    --bg-secondary:  #16213e;
+    --bg-tertiary:   #0f3460;
+    --bg-collapsible: #252538;
+    --text-primary:  #eaeaea;
     --text-secondary: #94a3b8;
-    --text-muted: #64748b;
-    --border-color: #334155;
-    --border-light: #1e293b;
-    --accent-color: #818cf8;
-    --accent-hover: #6366f1;
+    --text-muted:    #64748b;
+    --border-color:  #334155;
+    --border-light:  #1e293b;
+    --header-bg:     #0f0f1a;
+    --accent-color:  #818cf8;
+    --accent-hover:  #6366f1;
     --success-color: #34d399;
     --warning-color: #fbbf24;
-    --danger-color: #f87171;
-    --info-color: #94a3b8;
+    --danger-color:  #f87171;
+    --info-color:    #94a3b8;
+    --offtarget-color: #3498db;
     --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
-    --shadow-md: 0 4px 6px rgba(0,0,0,0.4);
-    --shadow-lg: 0 10px 15px rgba(0,0,0,0.5);
+    --shadow-md: 0 2px 4px rgba(0,0,0,0.4);
+    --shadow-lg: 0 4px 8px rgba(0,0,0,0.5);
     --radius-sm: 4px;
-    --radius-md: 8px;
-    --radius-lg: 12px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
 }
 
 * {
@@ -1795,21 +2027,21 @@ DARK_THEME: str = """
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
                  "Helvetica Neue", Arial, sans-serif;
-    background-color: var(--bg-secondary);
+    background-color: var(--bg-page);
     color: var(--text-primary);
-    line-height: 1.6;
-    font-size: 14px;
+    line-height: 1.5;
+    font-size: 13px;
 }
 
 .report-header {
-    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+    background: var(--header-bg);
     color: white;
-    padding: 2rem 2rem 1.5rem;
+    padding: 1.25rem 2rem 1rem;
     text-align: center;
 }
 
 .report-header h1 {
-    font-size: 1.75rem;
+    font-size: 1.25rem;
     font-weight: 600;
     margin-bottom: 0.5rem;
 }
@@ -1826,41 +2058,45 @@ body {
     display: flex;
     justify-content: center;
     flex-wrap: wrap;
-    gap: 0.25rem;
-    background: var(--bg-primary);
+    gap: 0;
+    background: var(--bg-card);
     border-bottom: 1px solid var(--border-color);
-    padding: 0.75rem 1rem;
+    padding: 0 1.25rem;
     position: sticky;
     top: 0;
     z-index: 100;
 }
 
 .tab-btn {
-    padding: 0.5rem 1.25rem;
+    padding: 0.75rem 1.25rem;
     border: none;
     background: transparent;
     cursor: pointer;
-    font-size: 0.875rem;
+    font-size: 0.8rem;
     font-weight: 500;
     color: var(--text-secondary);
-    border-radius: var(--radius-sm);
+    border-bottom: 2px solid transparent;
     transition: all 0.2s ease;
+    border-radius: 0;
 }
 
 .tab-btn:hover {
-    background: var(--bg-tertiary);
+    background: transparent;
     color: var(--text-primary);
+    border-bottom-color: var(--border-color);
 }
 
 .tab-btn.active {
-    background: var(--accent-color);
-    color: white;
+    background: transparent;
+    color: var(--text-primary);
+    font-weight: 700;
+    border-bottom-color: var(--accent-color);
 }
 
 .report-content {
     max-width: 1400px;
     margin: 0 auto;
-    padding: 1.5rem;
+    padding: 1.25rem;
 }
 
 .tab-section {
@@ -1878,12 +2114,14 @@ body {
 }
 
 .section-title {
-    font-size: 1.25rem;
+    font-size: 0.85rem;
     font-weight: 600;
-    margin-bottom: 1.5rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 1rem;
     color: var(--text-primary);
     padding-bottom: 0.5rem;
-    border-bottom: 2px solid var(--accent-color);
+    border-bottom: 1px solid var(--border-color);
 }
 
 .metric-cards {
@@ -1921,6 +2159,223 @@ body {
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin-top: 0.25rem;
+}
+
+/* KPI Strip - Dark Theme */
+.kpi-strip {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+
+.kpi-card {
+    flex: 1;
+    min-width: 120px;
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    padding: 0.75rem 1rem;
+    border-left: 3px solid var(--accent-color);
+    box-shadow: var(--shadow-sm);
+}
+
+.kpi-card.known { border-left-color: var(--success-color); }
+.kpi-card.novel { border-left-color: var(--danger-color); }
+.kpi-card.uncertain { border-left-color: var(--info-color); }
+.kpi-card.off-target { border-left-color: var(--offtarget-color); }
+.kpi-card.accent { border-left-color: var(--accent-color); }
+
+.kpi-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+    color: var(--text-primary);
+}
+
+.kpi-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    margin-top: 0.15rem;
+}
+
+/* Collapsible Panels - Dark Theme */
+.collapsible-panel {
+    margin-bottom: 0.75rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+}
+
+.collapsible-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg-collapsible);
+    cursor: pointer;
+    user-select: none;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.collapsible-header:hover {
+    background: var(--bg-tertiary);
+}
+
+.collapsible-chevron {
+    transition: transform 0.2s ease;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.collapsible-panel.open .collapsible-chevron {
+    transform: rotate(90deg);
+}
+
+.collapsible-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+    background: var(--bg-card);
+}
+
+.collapsible-panel.open .collapsible-body {
+    max-height: 5000px;
+}
+
+.collapsible-content {
+    padding: 1rem;
+}
+
+/* Two-Column Row - Dark Theme */
+.two-col-row {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.two-col-row .col-left,
+.two-col-row .col-right {
+    min-width: 0;
+}
+
+@media (max-width: 768px) {
+    .two-col-row {
+        flex-direction: column;
+    }
+}
+
+/* Mini Table - Dark Theme */
+.top-species-card {
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border-color);
+    height: 100%;
+}
+
+.card-section-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+}
+
+.mini-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+}
+
+.mini-table th {
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    padding: 0.25rem 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.mini-table td {
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--border-light);
+    color: var(--text-primary);
+}
+
+.mini-table .species-name {
+    font-style: italic;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.mini-table .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* Category Grid - Dark Theme */
+.category-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+}
+
+.cat-grid-cell {
+    background: var(--bg-card);
+    border-radius: var(--radius-sm);
+    padding: 0.6rem 0.75rem;
+    border-left: 3px solid var(--border-color);
+    box-shadow: var(--shadow-sm);
+}
+
+.cat-grid-cell.known { border-left-color: var(--success-color); }
+.cat-grid-cell.novel-species { border-left-color: var(--warning-color); }
+.cat-grid-cell.novel-genus { border-left-color: var(--danger-color); }
+.cat-grid-cell.species-boundary { border-left-color: var(--info-color); }
+.cat-grid-cell.ambiguous { border-left-color: var(--info-color); }
+.cat-grid-cell.conserved { border-left-color: var(--info-color); }
+.cat-grid-cell.unclassified { border-left-color: var(--text-muted); }
+.cat-grid-cell.off-target { border-left-color: var(--offtarget-color); }
+
+.cat-grid-name {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.cat-grid-count {
+    font-size: 1.1rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+}
+
+.cat-grid-pct {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 768px) {
+    .category-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
 }
 
 /* Diversity Summary (Hero Section) - Dark Theme */

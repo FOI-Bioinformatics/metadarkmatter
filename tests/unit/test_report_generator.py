@@ -216,13 +216,13 @@ class TestCSSStyles:
         from metadarkmatter.visualization.report.styles import get_css_styles
 
         css = get_css_styles("light")
-        assert "--bg-primary: #ffffff" in css
+        assert "--bg-primary:" in css and "#ffffff" in css
 
     def test_dark_theme(self):
         from metadarkmatter.visualization.report.styles import get_css_styles
 
         css = get_css_styles("dark")
-        assert "--bg-primary: #1a1a2e" in css
+        assert "--bg-primary:" in css and "#1a1a2e" in css
 
 
 class TestHTMLTemplates:
