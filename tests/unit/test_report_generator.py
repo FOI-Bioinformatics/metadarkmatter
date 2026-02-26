@@ -131,7 +131,7 @@ class TestReportGenerator:
         assert "<!DOCTYPE html>" in content
         assert "Metadarkmatter" in content
         assert "Summary" in content
-        assert "Distributions" in content
+        assert "Classification" in content
 
     def test_generate_with_ani_matrix(self, sample_classifications, sample_ani_matrix, tmp_path):
         from metadarkmatter.visualization.report.generator import ReportGenerator

@@ -58,7 +58,6 @@ from metadarkmatter.visualization.report.templates import (
     DATA_SUMMARY_TEMPLATE,
     DATA_TABLE_JS,
     DATA_TABLE_TEMPLATE,
-    DISTRIBUTIONS_SUMMARY_TEMPLATE,
     DIVERSITY_SUMMARY_TEMPLATE,
     EMPTY_SECTION_TEMPLATE,
     ENHANCED_SCORING_SUMMARY_TEMPLATE,
@@ -77,7 +76,6 @@ from metadarkmatter.visualization.report.templates import (
     PLOT_ROW_TEMPLATE,
     RECRUITMENT_NOT_PROVIDED_MESSAGE,
     REPORT_BASE_TEMPLATE,
-    SCATTER_INTERPRETATION_TEMPLATE,
     TAB_NAVIGATION_JS,
     TAB_SECTION_TEMPLATE,
     TABLE_ROW_TEMPLATE,
@@ -575,8 +573,8 @@ class ReportGenerator:
         # Summary tab (always visible first)
         content_sections.append(self._build_summary_section())
 
-        # Distributions tab
-        content_sections.append(self._build_distributions_section())
+        # Classification tab (merged distributions + confidence)
+        content_sections.append(self._build_classification_section())
 
         # Species & Genomes tab (merged)
         content_sections.append(self._build_species_genomes_section())
@@ -614,10 +612,6 @@ class ReportGenerator:
                         content=self._phylogeny_html,
                     )
                 )
-
-        # Classification Confidence tab (merged Bayesian + Discovery Scores)
-        if self.summary.has_bayesian or self.summary.has_enhanced_scoring or self.summary.has_inferred_uncertainty:
-            content_sections.append(self._build_confidence_section())
 
         # Recruitment tab
         content_sections.append(self._build_recruitment_section())
@@ -660,7 +654,7 @@ class ReportGenerator:
         # Tab order: General -> Specific -> Novel -> Reference -> Technical -> Data
         tabs = [
             ("summary", "Summary", True),
-            ("distributions", "Distributions", False),
+            ("classification", "Classification", False),
             ("species-genomes", "Species & Genomes", False),
         ]
 
@@ -681,10 +675,6 @@ class ReportGenerator:
         # Add Phylogeny tab if phylogeny section was built
         if hasattr(self, "_phylogeny_html") and self._phylogeny_html is not None:
             tabs.append(("phylogeny", "Phylogeny", False))
-
-        # Classification Confidence tab (merged Bayesian + Discovery Scores)
-        if self.summary.has_bayesian or self.summary.has_enhanced_scoring or self.summary.has_inferred_uncertainty:
-            tabs.append(("confidence", "Classification Confidence", False))
 
         tabs.extend([
             ("recruitment", "Recruitment", False),
@@ -1024,87 +1014,73 @@ class ReportGenerator:
 
         return METRIC_CARDS_CONTAINER.format(cards=cards_html)
 
-    def _build_distributions_section(self) -> str:
-        """Build the distributions tab section with improved UX."""
+    def _build_classification_section(self) -> str:
+        """Build the Classification tab with scatter, sunburst, histograms, and collapsible confidence."""
         s = self.summary
 
-        # Calculate interpretations based on mean values
-        if s.mean_novelty_index < 5:
-            novelty_interp = "Mostly known taxa"
-        elif s.mean_novelty_index < 15:
-            novelty_interp = "Some novel diversity"
-        else:
-            novelty_interp = "High novel diversity"
-
-        if s.mean_placement_uncertainty < 2:
-            uncertainty_interp = "Confident placements"
-        elif s.mean_placement_uncertainty < 5:
-            uncertainty_interp = "Moderate confidence"
-        else:
-            uncertainty_interp = "Many ambiguous hits"
-
-        # Count confident classifications (low uncertainty)
-        confident_count = len(self.df.filter(
-            self.df["placement_uncertainty"] < 2
+        # 1. Metric Strip (KPI-style)
+        kpi_cards = []
+        kpi_cards.append(KPI_CARD_TEMPLATE.format(
+            color_class="accent",
+            value=f"{s.mean_novelty_index:.1f}",
+            label="Mean Novelty",
         ))
-        confident_pct = (confident_count / s.total_reads * 100) if s.total_reads else 0
+        kpi_cards.append(KPI_CARD_TEMPLATE.format(
+            color_class="accent",
+            value=f"{s.mean_placement_uncertainty:.1f}",
+            label="Mean Uncertainty",
+        ))
+        if s.has_bayesian:
+            kpi_cards.append(KPI_CARD_TEMPLATE.format(
+                color_class="accent",
+                value=f"{s.mean_posterior_entropy:.2f}",
+                label="Mean Entropy",
+            ))
+            kpi_cards.append(KPI_CARD_TEMPLATE.format(
+                color_class="known",
+                value=f"{s.high_confidence_pct:.0f}%",
+                label="High Confidence",
+            ))
+        kpi_html = KPI_STRIP_TEMPLATE.format(cards="\n".join(kpi_cards))
 
-        # Summary section
-        summary_html = DISTRIBUTIONS_SUMMARY_TEMPLATE.format(
-            mean_identity=s.mean_top_hit_identity,
-            mean_novelty=s.mean_novelty_index,
-            novelty_interpretation=novelty_interp,
-            mean_uncertainty=s.mean_placement_uncertainty,
-            uncertainty_interpretation=uncertainty_interp,
-            confident_pct=confident_pct,
-        )
-
-        # 2D scatter (the key diagnostic plot) - show first as it's the primary view
+        # 2. Scatter plot (primary diagnostic)
         scatter = NoveltyUncertaintyScatter(
             self.df,
-            config=PlotConfig(width=1100, height=650),
+            config=PlotConfig(width=800, height=550),
             thresholds=self.config.thresholds,
             max_points=self.config.max_scatter_points,
         )
         scatter_id = "plot-scatter-2d"
         self._register_plot(scatter_id, scatter.create_figure())
 
-        # Interpretation guide
-        interpretation_html = SCATTER_INTERPRETATION_TEMPLATE
-
-        scatter_plot = PLOT_CONTAINER_TEMPLATE.format(
-            extra_class="full-width",
-            title="Novelty vs Uncertainty Landscape",
-            description=(
-                "Each point represents a read. Position indicates divergence from references (x-axis) "
-                "and confidence in placement (y-axis). Colors show classification categories. "
-                "Use dropdown to toggle single-hit reads."
-            ),
+        scatter_plot = PLOT_CONTAINER_SIMPLE_TEMPLATE.format(
+            extra_class="",
             plot_id=scatter_id,
         )
 
-        # Confidence vs Novelty scatter plot
-        confidence_scatter = ConfidenceNoveltyScatter(
-            self.df,
-            config=PlotConfig(width=1100, height=650),
-            thresholds=self.config.thresholds,
-            max_points=self.config.max_scatter_points,
+        # 3. Sunburst
+        sunburst = DiversitySunburstChart(
+            s.to_dict(),
+            config=PlotConfig(width=500, height=550),
+            title="Diversity Classification",
         )
-        confidence_id = "plot-confidence-novelty"
-        self._register_plot(confidence_id, confidence_scatter.create_figure())
+        sunburst_id = "plot-diversity-sunburst"
+        self._register_plot(sunburst_id, sunburst.create_figure())
 
-        confidence_plot = PLOT_CONTAINER_TEMPLATE.format(
-            extra_class="full-width",
-            title="Confidence Score vs Novelty Index",
-            description=(
-                "Confidence score (100 - novelty - uncertainty) vs novelty index. "
-                "High confidence with high novelty indicates reliable novel species detection. "
-                "Use dropdown to toggle single-hit reads."
-            ),
-            plot_id=confidence_id,
+        sunburst_plot = PLOT_CONTAINER_SIMPLE_TEMPLATE.format(
+            extra_class="",
+            plot_id=sunburst_id,
         )
 
-        # Novelty histogram
+        # Two-column: scatter (60%) + sunburst (40%)
+        scatter_row = TWO_COLUMN_ROW_TEMPLATE.format(
+            left_flex="3",
+            right_flex="2",
+            left_content=scatter_plot,
+            right_content=sunburst_plot,
+        )
+
+        # 4. Histograms side-by-side
         novelty_hist = NoveltyHistogram(
             self.df,
             config=PlotConfig(width=550, height=400),
@@ -1114,7 +1090,6 @@ class ReportGenerator:
         novelty_id = "plot-novelty-hist"
         self._register_plot(novelty_id, novelty_hist.create_figure())
 
-        # Uncertainty histogram
         uncertainty_hist = UncertaintyHistogram(
             self.df,
             config=PlotConfig(width=550, height=400),
@@ -1124,47 +1099,55 @@ class ReportGenerator:
         uncertainty_id = "plot-uncertainty-hist"
         self._register_plot(uncertainty_id, uncertainty_hist.create_figure())
 
-        # Build histogram row
         hist_row = PLOT_ROW_TEMPLATE.format(
             plots=(
-                PLOT_CONTAINER_TEMPLATE.format(
+                PLOT_CONTAINER_SIMPLE_TEMPLATE.format(
                     extra_class="half-width",
-                    title="Novelty Index Distribution",
-                    description=(
-                        "Low values (0-5) = known species. "
-                        "Medium (5-20) = novel species. "
-                        "High (>20) = novel genus or more divergent."
-                    ),
                     plot_id=novelty_id,
                 )
-                + PLOT_CONTAINER_TEMPLATE.format(
+                + PLOT_CONTAINER_SIMPLE_TEMPLATE.format(
                     extra_class="half-width",
-                    title="Placement Uncertainty Distribution",
-                    description=(
-                        "Low values (<2) = confident placement. "
-                        "Medium (2-5) = species boundary zone. "
-                        "High (>5) = conserved regions or ambiguous."
-                    ),
                     plot_id=uncertainty_id,
                 )
             )
         )
 
-        content = summary_html + interpretation_html + scatter_plot + confidence_plot + hist_row
+        # 5. Confidence Analysis (collapsible, default collapsed)
+        confidence_content = self._build_confidence_panel_content()
+        if confidence_content:
+            confidence_panel = COLLAPSIBLE_PANEL_TEMPLATE.format(
+                default_state="",
+                panel_id="confidence-analysis",
+                title="Confidence Analysis",
+                content=confidence_content,
+            )
+        else:
+            confidence_panel = ""
+
+        content = kpi_html + scatter_row + hist_row + confidence_panel
 
         return TAB_SECTION_TEMPLATE.format(
-            tab_id="distributions",
+            tab_id="classification",
             active_class="",
-            section_title="Distributions",
+            section_title="Classification",
             content=content,
         )
 
-    def _build_confidence_section(self) -> str:
-        """Build the merged Classification Confidence tab (Bayesian + Discovery Scores)."""
+    def _build_confidence_panel_content(self) -> str:
+        """Build inner HTML content for the collapsible Confidence Analysis panel.
+
+        Extracts the body content from what was previously the standalone
+        Classification Confidence tab. Returns empty string if no Bayesian
+        or enhanced scoring data is available.
+        """
         import plotly.graph_objects as go
 
         s = self.summary
-        content_parts = []
+
+        if not (s.has_bayesian or s.has_enhanced_scoring or s.has_inferred_uncertainty):
+            return ""
+
+        content_parts: list[str] = []
 
         # --- Merged summary cards ---
         if s.has_bayesian:
@@ -1284,7 +1267,7 @@ class ReportGenerator:
                 plot_id=bar_id,
             ))
 
-        # --- Discovery Score Distribution (moved from Discovery Scores tab) ---
+        # --- Discovery Score Distribution ---
         if s.has_enhanced_scoring and "discovery_score" in self.df.columns:
             discovery_df = self.df.filter(pl.col("discovery_score").is_not_null())
             if len(discovery_df) > 0:
@@ -1312,7 +1295,7 @@ class ReportGenerator:
                     plot_id=discovery_hist_id,
                 ))
 
-        # --- Uncertainty types breakdown (moved from Discovery Scores tab) ---
+        # --- Uncertainty types breakdown ---
         if s.has_inferred_uncertainty and "uncertainty_type" in self.df.columns:
             measured_df = self.df.filter(pl.col("uncertainty_type") == "measured")
             inferred_df = self.df.filter(pl.col("uncertainty_type") == "inferred")
@@ -1353,14 +1336,7 @@ class ReportGenerator:
                 plot_id=scatter_id,
             ))
 
-        content = "\n".join(content_parts)
-
-        return TAB_SECTION_TEMPLATE.format(
-            tab_id="confidence",
-            active_class="",
-            section_title="Classification Confidence",
-            content=content,
-        )
+        return "\n".join(content_parts)
 
     def _build_novel_diversity_section(self) -> str:
         """Build the novel diversity tab section with cluster analysis."""
