@@ -283,3 +283,92 @@ class TestEdgeCases:
         assert newick is not None
         tree = Phylo.read(StringIO(newick), "newick")
         assert len(list(tree.get_terminals())) == 3
+
+
+class TestTreeMethod:
+    """Test TreeMethod enum."""
+
+    def test_enum_values(self) -> None:
+        """TreeMethod has nj, upgma, mashtree."""
+        from metadarkmatter.core.phylogeny.tree_builder import TreeMethod
+
+        assert TreeMethod.NJ == "nj"
+        assert TreeMethod.UPGMA == "upgma"
+        assert TreeMethod.MASHTREE == "mashtree"
+
+
+class TestAniToUpgma:
+    """Test ANI matrix to UPGMA tree conversion."""
+
+    def test_basic_3x3_matrix(self) -> None:
+        """3x3 ANI matrix produces valid UPGMA Newick with all taxa."""
+        from metadarkmatter.core.phylogeny.tree_builder import ani_to_upgma
+
+        ani = pd.DataFrame(
+            {
+                "A": [100.0, 95.0, 80.0],
+                "B": [95.0, 100.0, 82.0],
+                "C": [80.0, 82.0, 100.0],
+            },
+            index=["A", "B", "C"],
+        )
+
+        newick = ani_to_upgma(ani)
+
+        assert newick is not None
+        assert newick.endswith(";")
+        tree = Phylo.read(StringIO(newick), "newick")
+        tip_names = {t.name for t in tree.get_terminals()}
+        assert tip_names == {"A", "B", "C"}
+
+    def test_fewer_than_3_genomes_returns_none(self) -> None:
+        """Fewer than 3 genomes returns None."""
+        from metadarkmatter.core.phylogeny.tree_builder import ani_to_upgma
+
+        ani = pd.DataFrame(
+            {"A": [100.0, 95.0], "B": [95.0, 100.0]},
+            index=["A", "B"],
+        )
+        assert ani_to_upgma(ani) is None
+
+    def test_empty_matrix_returns_none(self) -> None:
+        """Empty matrix returns None."""
+        from metadarkmatter.core.phylogeny.tree_builder import ani_to_upgma
+
+        assert ani_to_upgma(pd.DataFrame()) is None
+
+    def test_upgma_produces_ultrametric_tree(self) -> None:
+        """UPGMA should produce a tree where root-to-tip distances are approx equal."""
+        from metadarkmatter.core.phylogeny.tree_builder import ani_to_upgma
+
+        ani = pd.DataFrame(
+            {
+                "A": [100.0, 99.0, 80.0],
+                "B": [99.0, 100.0, 81.0],
+                "C": [80.0, 81.0, 100.0],
+            },
+            index=["A", "B", "C"],
+        )
+
+        newick = ani_to_upgma(ani)
+        assert newick is not None
+
+        tree = Phylo.read(StringIO(newick), "newick")
+        distances = [tree.distance(t) for t in tree.get_terminals()]
+        assert max(distances) - min(distances) < 1.0
+
+    def test_missing_values_handled(self) -> None:
+        """Missing ANI values should be filled and produce valid tree."""
+        from metadarkmatter.core.phylogeny.tree_builder import ani_to_upgma
+
+        ani = pd.DataFrame(
+            {
+                "A": [100.0, 95.0, np.nan],
+                "B": [95.0, 100.0, 82.0],
+                "C": [np.nan, 82.0, 100.0],
+            },
+            index=["A", "B", "C"],
+        )
+
+        newick = ani_to_upgma(ani)
+        assert newick is not None

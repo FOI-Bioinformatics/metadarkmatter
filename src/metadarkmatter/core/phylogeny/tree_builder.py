@@ -1,13 +1,14 @@
 """Build phylogenetic trees from ANI matrices.
 
 This module provides functions to convert ANI (Average Nucleotide Identity)
-matrices into neighbor-joining phylogenetic trees in Newick format, and to
-load and validate user-provided phylogenetic trees.
+matrices into neighbor-joining or UPGMA phylogenetic trees in Newick format,
+and to load and validate user-provided phylogenetic trees.
 """
 
 from __future__ import annotations
 
 import logging
+from enum import Enum
 from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -18,6 +19,14 @@ if TYPE_CHECKING:
     from Bio.Phylo.BaseTree import Tree
 
 logger = logging.getLogger(__name__)
+
+
+class TreeMethod(str, Enum):
+    """Phylogenetic tree building method."""
+
+    NJ = "nj"
+    UPGMA = "upgma"
+    MASHTREE = "mashtree"
 
 
 def _to_lower_triangular(matrix: pd.DataFrame) -> list[list[float]]:
@@ -103,6 +112,53 @@ def ani_to_newick(ani_matrix: pd.DataFrame) -> str | None:
         logger.debug("Could not root at midpoint (all distances may be identical)")
 
     # Convert to Newick string
+    output = StringIO()
+    Phylo.write(tree, output, "newick")
+    return output.getvalue().strip()
+
+
+def ani_to_upgma(ani_matrix: pd.DataFrame) -> str | None:
+    """Convert ANI matrix to UPGMA tree in Newick format.
+
+    Uses BioPython's UPGMA implementation. Same distance conversion
+    as ani_to_newick() but produces an ultrametric tree.
+
+    Args:
+        ani_matrix: Square DataFrame with ANI values (0-100 scale) where
+            rows and columns are genome identifiers. Diagonal should be 100.
+
+    Returns:
+        Newick format string if tree construction succeeds, None if the
+        matrix has fewer than 3 genomes.
+
+    Note:
+        Missing ANI values (NaN) are filled with maximum distance (50).
+    """
+    from Bio import Phylo
+    from Bio.Phylo.TreeConstruction import DistanceMatrix, DistanceTreeConstructor
+
+    if len(ani_matrix) < 3:
+        if len(ani_matrix) > 0:
+            logger.warning(
+                f"Too few genomes for phylogenetic tree (need >= 3). Got {len(ani_matrix)}."
+            )
+        return None
+
+    distance_matrix = 100 - ani_matrix
+    distance_matrix = distance_matrix.clip(lower=0, upper=50)
+
+    missing_count = distance_matrix.isna().sum().sum() // 2
+    if missing_count > 0:
+        logger.warning(f"{missing_count} genome pairs lack ANI values; using maximum distance (50)")
+        distance_matrix = distance_matrix.fillna(50.0)
+
+    names = list(ani_matrix.columns)
+    matrix = _to_lower_triangular(distance_matrix)
+    dm = DistanceMatrix(names, matrix)
+
+    constructor = DistanceTreeConstructor()
+    tree = constructor.upgma(dm)
+
     output = StringIO()
     Phylo.write(tree, output, "newick")
     return output.getvalue().strip()
