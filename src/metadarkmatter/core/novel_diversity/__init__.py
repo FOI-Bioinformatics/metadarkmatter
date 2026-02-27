@@ -12,6 +12,9 @@ from metadarkmatter.core.novel_diversity.models import (
     NovelDiversitySummary,
     PhylogeneticNeighborhood,
 )
+from metadarkmatter.core.novel_diversity.neighborhood import (
+    PhylogeneticNeighborhoodAnalyzer,
+)
 
 __all__ = [
     "GenusDistance",
@@ -19,4 +22,5 @@ __all__ = [
     "NovelDiversityAnalyzer",
     "NovelDiversitySummary",
     "PhylogeneticNeighborhood",
+    "PhylogeneticNeighborhoodAnalyzer",
 ]
