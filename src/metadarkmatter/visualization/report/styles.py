@@ -3405,6 +3405,98 @@ NOVEL_SECTION_CSS: str = """
     margin-top: 1rem;
 }
 
+/* Cluster table hint */
+.cluster-table-hint {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+}
+
+/* Neighborhood Panels */
+.neighborhood-panel {
+    padding: 1rem;
+    background: var(--bg-secondary, #f8f9fa);
+    border-top: 1px solid var(--border-color);
+}
+
+.neighborhood-panel-row td {
+    padding: 0 !important;
+    border-bottom: none !important;
+}
+
+.nbr-section { margin-bottom: 1rem; }
+.nbr-section h5 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary);
+}
+
+.nbr-genera-table { width: 100%; font-size: 0.8rem; border-collapse: collapse; }
+.nbr-genera-table th,
+.nbr-genera-table td {
+    padding: 0.3rem 0.5rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+.nbr-genera-table th {
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+.nbr-genera-table code {
+    font-size: 0.75rem;
+    background: var(--bg-tertiary, #e4e7eb);
+    padding: 0.1rem 0.3rem;
+    border-radius: 2px;
+}
+
+.nbr-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+}
+
+.nbr-metric {
+    padding: 0.5rem;
+    background: var(--bg-primary, white);
+    border-radius: 4px;
+    text-align: center;
+    border: 1px solid var(--border-color);
+}
+
+.nbr-label {
+    display: block;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.nbr-value {
+    display: block;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+/* Support score colors */
+.support-tag {
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.support-high { background: #dcfce7; color: #166534; }
+.support-medium { background: #fef3c7; color: #92400e; }
+.support-low { background: #fecaca; color: #991b1b; }
+
+/* Context column */
+.cluster-context {
+    font-size: 0.8rem;
+    max-width: 300px;
+    color: var(--text-secondary);
+}
+
 @media (max-width: 768px) {
     .novel-metrics {
         grid-template-columns: repeat(2, 1fr);
@@ -3418,6 +3510,10 @@ NOVEL_SECTION_CSS: str = """
     .phylo-item {
         grid-template-columns: 1fr;
         gap: 0.25rem;
+    }
+
+    .nbr-metrics {
+        grid-template-columns: repeat(2, 1fr);
     }
 }
 """

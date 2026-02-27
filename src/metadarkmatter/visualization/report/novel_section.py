@@ -89,6 +89,7 @@ NOVEL_CONFIDENCE_GUIDE_TEMPLATE: str = '''
 NOVEL_CLUSTER_TABLE_TEMPLATE: str = '''
 <div class="novel-cluster-table">
     <h4>Novel Clusters</h4>
+    <p class="cluster-table-hint">Click a row to expand phylogenetic neighborhood details.</p>
     <div class="table-wrapper">
         <table class="cluster-table">
             <thead>
@@ -100,6 +101,8 @@ NOVEL_CLUSTER_TABLE_TEMPLATE: str = '''
                     <th>Est. ANI</th>
                     <th>Uncertainty</th>
                     <th>Confidence</th>
+                    <th>Phylogenetic Context</th>
+                    <th>Support</th>
                 </tr>
             </thead>
             <tbody>
@@ -107,10 +110,19 @@ NOVEL_CLUSTER_TABLE_TEMPLATE: str = '''
             </tbody>
         </table>
     </div>
+    <script>
+    function toggleNeighborhood(clusterId) {{
+        var panel = document.getElementById('nbr-' + clusterId);
+        if (panel) {{
+            var div = panel.querySelector('.neighborhood-panel');
+            div.style.display = div.style.display === 'none' ? 'block' : 'none';
+        }}
+    }}
+    </script>
 </div>
 '''
 
-NOVEL_CLUSTER_ROW_TEMPLATE: str = '''<tr class="cluster-row {confidence_class}">
+NOVEL_CLUSTER_ROW_TEMPLATE: str = '''<tr class="cluster-row {confidence_class}" onclick="toggleNeighborhood('{cluster_id}')" style="cursor:pointer;">
     <td class="cluster-id">{cluster_id}</td>
     <td class="cluster-type {type_class}">{taxonomic_call}</td>
     <td class="cluster-reads">{read_count:,}</td>
@@ -122,6 +134,31 @@ NOVEL_CLUSTER_ROW_TEMPLATE: str = '''<tr class="cluster-row {confidence_class}">
     <td class="cluster-ani">{estimated_ani:.1f}%</td>
     <td class="cluster-uncertainty">{mean_uncertainty:.1f}%</td>
     <td class="cluster-confidence"><span class="conf-tag {confidence_class}">{confidence}</span></td>
+    <td class="cluster-context">{neighborhood_context}</td>
+    <td class="cluster-support"><span class="support-tag {support_class}">{placement_support}</span></td>
+</tr>'''
+
+NEIGHBORHOOD_PANEL_TEMPLATE: str = '''<tr class="neighborhood-panel-row" id="nbr-{cluster_id}">
+    <td colspan="9">
+        <div class="neighborhood-panel" style="display:none;">
+            <div class="nbr-section">
+                <h5>Nearest Genera</h5>
+                <table class="nbr-genera-table">
+                    <thead><tr><th>Genus</th><th>Representative</th><th>Est. ANI</th><th>Genomes</th></tr></thead>
+                    <tbody>{genera_rows}</tbody>
+                </table>
+            </div>
+            <div class="nbr-section">
+                <h5>Placement Metrics</h5>
+                <div class="nbr-metrics">
+                    <div class="nbr-metric"><span class="nbr-label">Isolation Score</span><span class="nbr-value">{isolation_score}</span></div>
+                    <div class="nbr-metric"><span class="nbr-label">Neighborhood Density</span><span class="nbr-value">{neighborhood_density} genera</span></div>
+                    <div class="nbr-metric"><span class="nbr-label">Placement Support</span><span class="nbr-value {support_class}">{placement_support}/100</span></div>
+                    <div class="nbr-metric"><span class="nbr-label">Genus Boundary</span><span class="nbr-value">{genus_boundary}</span></div>
+                </div>
+            </div>
+        </div>
+    </td>
 </tr>'''
 
 NOVEL_PHYLOGENETIC_CONTEXT_TEMPLATE: str = '''
@@ -270,9 +307,68 @@ def build_novel_summary_html(summary: NovelDiversitySummary) -> str:
     )
 
 
+def _build_neighborhood_panel(cluster: NovelCluster) -> str:
+    """Build the collapsible neighborhood detail panel for a cluster.
+
+    Args:
+        cluster: NovelCluster with a populated neighborhood field.
+
+    Returns:
+        HTML string for the neighborhood panel row, or empty string
+        if no neighborhood data is available.
+    """
+    nbr = cluster.neighborhood
+    if nbr is None:
+        return ""
+
+    # Build genera rows
+    genera_rows_parts: list[str] = []
+    for gd in nbr.nearest_genera:
+        genera_rows_parts.append(
+            f"<tr><td>{gd.genus}</td>"
+            f"<td><code>{gd.representative_genome}</code></td>"
+            f"<td>{gd.estimated_ani:.1f}%</td>"
+            f"<td>{gd.num_genomes_in_genus}</td></tr>"
+        )
+    genera_rows = "\n".join(genera_rows_parts) if genera_rows_parts else (
+        "<tr><td colspan='4'>No reference genera available</td></tr>"
+    )
+
+    support_class = _support_class(nbr.placement_support)
+
+    genus_boundary_text = (
+        f"{nbr.genus_boundary_ani:.1f}% ANI"
+        if nbr.genus_boundary_ani is not None
+        else "default (80%)"
+    )
+
+    return NEIGHBORHOOD_PANEL_TEMPLATE.format(
+        cluster_id=cluster.cluster_id,
+        genera_rows=genera_rows,
+        isolation_score=f"{nbr.isolation_score:.1f}%",
+        neighborhood_density=nbr.neighborhood_density,
+        placement_support=f"{nbr.placement_support:.0f}",
+        support_class=support_class,
+        genus_boundary=genus_boundary_text,
+    )
+
+
+def _support_class(support: float) -> str:
+    """Return CSS class for a placement support score."""
+    if support >= 70:
+        return "support-high"
+    elif support >= 40:
+        return "support-medium"
+    return "support-low"
+
+
 def build_cluster_table_html(clusters: list[NovelCluster]) -> str:
     """
     Build the cluster details table HTML.
+
+    Includes two additional columns (Phylogenetic Context and Support)
+    when neighborhood profiles are available, and a collapsible panel
+    per cluster showing nearest genera and placement metrics.
 
     Args:
         clusters: List of NovelCluster objects
@@ -291,6 +387,17 @@ def build_cluster_table_html(clusters: list[NovelCluster]) -> str:
         # Build full taxonomy string for tooltip
         full_taxonomy = f"{cluster.nearest_species} ({cluster.nearest_genus}, {cluster.nearest_family})"
 
+        # Extract neighborhood values
+        if cluster.neighborhood is not None:
+            nbr = cluster.neighborhood
+            neighborhood_context = nbr.phylogenetic_context
+            placement_support = f"{nbr.placement_support:.0f}"
+            support_class = _support_class(nbr.placement_support)
+        else:
+            neighborhood_context = "-"
+            placement_support = "-"
+            support_class = ""
+
         row = NOVEL_CLUSTER_ROW_TEMPLATE.format(
             cluster_id=cluster.cluster_id,
             taxonomic_call=cluster.taxonomic_call,
@@ -304,8 +411,16 @@ def build_cluster_table_html(clusters: list[NovelCluster]) -> str:
             confidence=cluster.confidence,
             confidence_class=confidence_class,
             suggested_name=cluster.suggested_name,
+            neighborhood_context=neighborhood_context,
+            placement_support=placement_support,
+            support_class=support_class,
         )
         rows.append(row)
+
+        # Append neighborhood panel row (hidden by default)
+        panel = _build_neighborhood_panel(cluster)
+        if panel:
+            rows.append(panel)
 
     return NOVEL_CLUSTER_TABLE_TEMPLATE.format(cluster_rows="\n".join(rows))
 
