@@ -1285,6 +1285,11 @@ class ReportGenerator:
 
         content_parts = []
 
+        # Track genus boundary result across nested scopes so it can
+        # be used in KPI cards and the scatter plot later.
+        genus_boundary_ani: float = 80.0
+        genus_boundary_result = None  # AdaptiveGenusThreshold or None
+
         # Create analyzer and cluster novel reads
         try:
             from metadarkmatter.core.classification.ani_matrix import ANIMatrix
@@ -1320,8 +1325,7 @@ class ReportGenerator:
                         if genus:
                             genus_map[genome] = genus
 
-                # Detect adaptive genus boundary
-                genus_boundary_ani = 80.0
+                # Detect adaptive genus boundary (updates method-level variables)
                 try:
                     from metadarkmatter.core.classification.adaptive import (
                         detect_genus_boundary,
@@ -1388,6 +1392,12 @@ class ReportGenerator:
             novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
                 color_class="known", value=str(high_conf_novel), label="High Confidence",
             ))
+        if genus_boundary_result is not None and genus_boundary_result.method != "fallback":
+            novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
+                color_class="accent",
+                value=f"{genus_boundary_result.genus_boundary:.0f}%",
+                label="Genus Boundary",
+            ))
         kpi_html = KPI_STRIP_TEMPLATE.format(cards="\n".join(novel_kpi_cards))
         content_parts.append(kpi_html)
 
@@ -1395,7 +1405,9 @@ class ReportGenerator:
         content_parts.append(build_novel_summary_html(summary))
 
         # Build scatter plot of cluster quality
-        scatter_fig = build_cluster_scatter_figure(clusters, width=1000, height=500)
+        scatter_fig = build_cluster_scatter_figure(
+            clusters, width=1000, height=500, genus_boundary=genus_boundary_ani,
+        )
         scatter_id = "plot-novel-scatter"
         self._register_plot(scatter_id, scatter_fig)
 

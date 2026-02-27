@@ -461,6 +461,7 @@ def build_cluster_scatter_figure(
     clusters: list[NovelCluster],
     width: int = 800,
     height: int = 500,
+    genus_boundary: float | None = None,
 ) -> go.Figure:
     """
     Build a scatter plot of cluster quality.
@@ -474,6 +475,9 @@ def build_cluster_scatter_figure(
         clusters: List of NovelCluster objects
         width: Plot width in pixels
         height: Plot height in pixels
+        genus_boundary: Optional genus boundary ANI value (e.g. 82.0).
+            When provided, a vertical dashed line is drawn at the
+            corresponding novelty index (100 - genus_boundary).
 
     Returns:
         Plotly Figure object
@@ -571,6 +575,21 @@ def build_cluster_scatter_figure(
         annotation_text="Novel Genus (20%)",
         annotation_position="top",
     )
+
+    # Add genus boundary line when an adaptive or metadata-derived value
+    # is available (novelty = 100 - ANI).
+    if genus_boundary is not None:
+        genus_novelty = 100.0 - genus_boundary
+        fig.add_vline(
+            x=genus_novelty,
+            line_dash="dash",
+            line_color="#8b5cf6",
+            line_width=1.5,
+            annotation_text=f"Genus boundary ({genus_boundary:.0f}% ANI)",
+            annotation_position="top right",
+            annotation_font_size=10,
+            annotation_font_color="#8b5cf6",
+        )
 
     return fig
 
