@@ -7,12 +7,16 @@ and analyzing the phylogenetic context of novel diversity.
 
 from metadarkmatter.core.novel_diversity.clustering import NovelDiversityAnalyzer
 from metadarkmatter.core.novel_diversity.models import (
+    GenusDistance,
     NovelCluster,
     NovelDiversitySummary,
+    PhylogeneticNeighborhood,
 )
 
 __all__ = [
+    "GenusDistance",
     "NovelCluster",
     "NovelDiversityAnalyzer",
     "NovelDiversitySummary",
+    "PhylogeneticNeighborhood",
 ]

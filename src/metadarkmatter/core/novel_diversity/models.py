@@ -12,6 +12,43 @@ from typing import Literal
 from pydantic import BaseModel, Field, computed_field
 
 
+class GenusDistance(BaseModel):
+    """Distance from a novel cluster to a reference genus."""
+
+    genus: str = Field(description="Genus name")
+    representative_genome: str = Field(description="Closest genome in this genus")
+    estimated_ani: float = Field(description="Estimated ANI from cluster to this genus")
+    num_genomes_in_genus: int = Field(description="Reference genomes in this genus")
+
+    model_config = {"frozen": True}
+
+
+class PhylogeneticNeighborhood(BaseModel):
+    """Phylogenetic neighborhood profile for a novel cluster."""
+
+    cluster_id: str = Field(description="Cluster this neighborhood belongs to")
+    nearest_genera: list[GenusDistance] = Field(
+        description="Nearest genera sorted by ANI (descending), top 5"
+    )
+    placement_support: float = Field(
+        ge=0, le=100, description="Placement support score (0-100)"
+    )
+    isolation_score: float = Field(
+        ge=0, description="ANI gap between nearest and second-nearest genus"
+    )
+    neighborhood_density: int = Field(
+        ge=0, description="Number of genera within genus_boundary + 5% ANI"
+    )
+    phylogenetic_context: str = Field(
+        description="One-line human-readable placement text"
+    )
+    genus_boundary_ani: float | None = Field(
+        default=None, description="Detected genus boundary ANI from GMM"
+    )
+
+    model_config = {"frozen": True}
+
+
 class NovelCluster(BaseModel):
     """
     Represents a putative novel taxon cluster.
@@ -113,6 +150,10 @@ class NovelCluster(BaseModel):
     contributing_genomes: list[str] = Field(
         default_factory=list,
         description="Reference genomes that contributed reads to this cluster (after neighborhood merging)"
+    )
+    neighborhood: PhylogeneticNeighborhood | None = Field(
+        default=None,
+        description="Phylogenetic neighborhood profile (computed post-clustering)"
     )
 
     model_config = {"frozen": True}

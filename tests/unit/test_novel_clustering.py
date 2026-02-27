@@ -11,9 +11,11 @@ import pytest
 import polars as pl
 
 from metadarkmatter.core.novel_diversity import (
+    GenusDistance,
     NovelCluster,
     NovelDiversityAnalyzer,
     NovelDiversitySummary,
+    PhylogeneticNeighborhood,
 )
 
 
@@ -1165,6 +1167,92 @@ class TestBayesianConfidence:
         # Legacy: >=10 reads, uncertainty < 5% -> High
         assert clusters[0].confidence == "High"
         assert clusters[0].mean_bayesian_confidence is None
+
+
+# =============================================================================
+# PhylogeneticNeighborhood Tests
+# =============================================================================
+
+
+class TestPhylogeneticNeighborhood:
+    """Tests for GenusDistance and PhylogeneticNeighborhood models."""
+
+    def test_genus_distance_creation(self):
+        gd = GenusDistance(
+            genus="Francisella",
+            representative_genome="GCF_000195955.2",
+            estimated_ani=78.5,
+            num_genomes_in_genus=5,
+        )
+        assert gd.genus == "Francisella"
+        assert gd.estimated_ani == 78.5
+
+    def test_neighborhood_creation(self):
+        gd1 = GenusDistance(genus="Francisella", representative_genome="GCF_001", estimated_ani=78.5, num_genomes_in_genus=5)
+        gd2 = GenusDistance(genus="Allofrancisella", representative_genome="GCF_002", estimated_ani=72.0, num_genomes_in_genus=2)
+        neighborhood = PhylogeneticNeighborhood(
+            cluster_id="NGN_001",
+            nearest_genera=[gd1, gd2],
+            placement_support=85.0,
+            isolation_score=6.5,
+            neighborhood_density=2,
+            phylogenetic_context="Sister to Francisella (78% ANI), 6% isolated from Allofrancisella. Support: 85/100.",
+            genus_boundary_ani=82.0,
+        )
+        assert neighborhood.placement_support == 85.0
+        assert len(neighborhood.nearest_genera) == 2
+
+    def test_novel_cluster_with_neighborhood(self):
+        cluster = NovelCluster(
+            cluster_id="NGN_001",
+            taxonomic_call="Novel Genus",
+            nearest_genome="GCF_001",
+            nearest_species="F. tularensis",
+            nearest_genus="Francisella",
+            nearest_family="Francisellaceae",
+            novelty_band=20,
+            read_count=47,
+            mean_novelty_index=21.5,
+            novelty_min=20.1,
+            novelty_max=24.3,
+            mean_placement_uncertainty=1.2,
+            suggested_name="Francisellaceae gen. nov. MDM-001",
+            confidence="High",
+            phylogenetic_context="Novel genus within Francisellaceae",
+        )
+        assert cluster.neighborhood is None
+
+    def test_novel_cluster_with_neighborhood_attached(self):
+        gd = GenusDistance(genus="Francisella", representative_genome="GCF_001", estimated_ani=78.5, num_genomes_in_genus=5)
+        nbr = PhylogeneticNeighborhood(
+            cluster_id="NGN_001",
+            nearest_genera=[gd],
+            placement_support=85.0,
+            isolation_score=6.5,
+            neighborhood_density=1,
+            phylogenetic_context="Sister to Francisella (78% ANI). Support: 85/100.",
+            genus_boundary_ani=82.0,
+        )
+        cluster = NovelCluster(
+            cluster_id="NGN_001",
+            taxonomic_call="Novel Genus",
+            nearest_genome="GCF_001",
+            nearest_species="F. tularensis",
+            nearest_genus="Francisella",
+            nearest_family="Francisellaceae",
+            novelty_band=20,
+            read_count=47,
+            mean_novelty_index=21.5,
+            novelty_min=20.1,
+            novelty_max=24.3,
+            mean_placement_uncertainty=1.2,
+            suggested_name="Francisellaceae gen. nov. MDM-001",
+            confidence="High",
+            phylogenetic_context="Novel genus within Francisellaceae",
+            neighborhood=nbr,
+        )
+        assert cluster.neighborhood is not None
+        assert cluster.neighborhood.placement_support == 85.0
 
 
 # =============================================================================
