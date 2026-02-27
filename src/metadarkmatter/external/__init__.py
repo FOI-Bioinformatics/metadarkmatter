@@ -20,6 +20,7 @@ from metadarkmatter.external.kraken import (
     Kraken2,
     KrakenReport,
 )
+from metadarkmatter.external.mashtree import Mashtree
 from metadarkmatter.external.mmseqs2 import MMseqs2
 from metadarkmatter.external.ncbi_datasets import (
     DownloadOutcome,
@@ -42,6 +43,7 @@ __all__ = [
     "Kraken2",
     "KrakenReport",
     "MakeBlastDb",
+    "Mashtree",
     "MMseqs2",
     "NCBIDatasets",
     "Prodigal",
