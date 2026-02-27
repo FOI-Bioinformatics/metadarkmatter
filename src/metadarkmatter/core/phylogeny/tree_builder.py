@@ -1,8 +1,9 @@
-"""Build phylogenetic trees from ANI matrices.
+"""Build phylogenetic trees from ANI matrices or genome assemblies.
 
 This module provides functions to convert ANI (Average Nucleotide Identity)
 matrices into neighbor-joining or UPGMA phylogenetic trees in Newick format,
-and to load and validate user-provided phylogenetic trees.
+to build trees from genome FASTA files using Mashtree, and to load and
+validate user-provided phylogenetic trees.
 """
 
 from __future__ import annotations
@@ -162,6 +163,100 @@ def ani_to_upgma(ani_matrix: pd.DataFrame) -> str | None:
     output = StringIO()
     Phylo.write(tree, output, "newick")
     return output.getvalue().strip()
+
+
+def mashtree_to_newick(
+    genome_dir: Path,
+    genome_pattern: str = "*.fna",
+    threads: int = 4,
+) -> str:
+    """Build tree from genome FASTA files using Mashtree.
+
+    Mashtree computes Mash (MinHash) distances between genome assemblies
+    and constructs a neighbor-joining tree.
+
+    Args:
+        genome_dir: Directory containing genome FASTA files.
+        genome_pattern: Glob pattern for genome files (default: "*.fna").
+        threads: Number of threads for mashtree.
+
+    Returns:
+        Newick format string.
+
+    Raises:
+        FileNotFoundError: If no genome files found matching the pattern.
+        ValueError: If fewer than 3 genome files found.
+    """
+    from metadarkmatter.external.mashtree import Mashtree
+
+    # Find genome files, trying multiple patterns if primary fails
+    genome_files = sorted(genome_dir.glob(genome_pattern))
+    if not genome_files:
+        for alt in ("*.fna", "*.fa", "*.fasta", "*.fna.gz", "*.fa.gz"):
+            if alt != genome_pattern:
+                genome_files = sorted(genome_dir.glob(alt))
+                if genome_files:
+                    break
+
+    if not genome_files:
+        raise FileNotFoundError(
+            f"No genome files found in {genome_dir} matching '{genome_pattern}'"
+        )
+
+    if len(genome_files) < 3:
+        raise ValueError(
+            f"Too few genome files for tree building (need >= 3, got {len(genome_files)})"
+        )
+
+    mt = Mashtree()
+    result = mt.run_or_raise(genomes=genome_files, threads=threads)
+    newick = result.stdout.strip()
+
+    if not newick:
+        raise RuntimeError("Mashtree produced no output")
+
+    logger.info(f"Mashtree tree built from {len(genome_files)} genomes")
+    return newick
+
+
+def build_tree(
+    method: TreeMethod,
+    *,
+    ani_matrix: pd.DataFrame | None = None,
+    genome_dir: Path | None = None,
+    genome_pattern: str = "*.fna",
+    threads: int = 4,
+) -> str | None:
+    """Build a phylogenetic tree using the specified method.
+
+    Dispatches to the appropriate tree builder based on the method.
+
+    Args:
+        method: Tree building method (NJ, UPGMA, or MASHTREE).
+        ani_matrix: ANI matrix DataFrame. Required for NJ and UPGMA.
+        genome_dir: Directory of genome FASTAs. Required for MASHTREE.
+        genome_pattern: Glob pattern for genome files (MASHTREE only).
+        threads: Number of threads (MASHTREE only).
+
+    Returns:
+        Newick format string, or None if NJ/UPGMA with < 3 genomes.
+
+    Raises:
+        ValueError: If required inputs are missing for the chosen method.
+    """
+    if method in (TreeMethod.NJ, TreeMethod.UPGMA):
+        if ani_matrix is None:
+            raise ValueError(f"ANI matrix required for {method.value} method")
+        if method == TreeMethod.NJ:
+            return ani_to_newick(ani_matrix)
+        return ani_to_upgma(ani_matrix)
+
+    if method == TreeMethod.MASHTREE:
+        if genome_dir is None:
+            raise ValueError("genome_dir required for mashtree method")
+        return mashtree_to_newick(genome_dir, genome_pattern, threads)
+
+    raise ValueError(f"Unknown method: {method}")
 
 
 def _prune_tips(tree: Tree, keep: set[str]) -> Tree:

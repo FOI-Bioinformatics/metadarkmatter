@@ -372,3 +372,86 @@ class TestAniToUpgma:
 
         newick = ani_to_upgma(ani)
         assert newick is not None
+
+
+class TestMashtreeToNewick:
+    """Test mashtree_to_newick function."""
+
+    def test_no_genome_files_raises(self, tmp_path: Path) -> None:
+        """Empty directory should raise FileNotFoundError."""
+        from metadarkmatter.core.phylogeny.tree_builder import mashtree_to_newick
+
+        with pytest.raises(FileNotFoundError):
+            mashtree_to_newick(tmp_path)
+
+    def test_fewer_than_3_genomes_raises(self, tmp_path: Path) -> None:
+        """Fewer than 3 genome files should raise ValueError."""
+        from metadarkmatter.core.phylogeny.tree_builder import mashtree_to_newick
+
+        (tmp_path / "g1.fna").write_text(">seq\nACGT")
+        (tmp_path / "g2.fna").write_text(">seq\nACGT")
+
+        with pytest.raises(ValueError, match="need >= 3"):
+            mashtree_to_newick(tmp_path)
+
+
+class TestBuildTree:
+    """Test build_tree dispatcher."""
+
+    def test_nj_method(self) -> None:
+        """NJ method produces valid tree from ANI matrix."""
+        from metadarkmatter.core.phylogeny.tree_builder import TreeMethod, build_tree
+
+        ani = pd.DataFrame(
+            {
+                "A": [100.0, 95.0, 80.0],
+                "B": [95.0, 100.0, 82.0],
+                "C": [80.0, 82.0, 100.0],
+            },
+            index=["A", "B", "C"],
+        )
+
+        newick = build_tree(TreeMethod.NJ, ani_matrix=ani)
+        assert newick is not None
+        assert "A" in newick
+        tree = Phylo.read(StringIO(newick), "newick")
+        assert len(list(tree.get_terminals())) == 3
+
+    def test_upgma_method(self) -> None:
+        """UPGMA method produces valid tree from ANI matrix."""
+        from metadarkmatter.core.phylogeny.tree_builder import TreeMethod, build_tree
+
+        ani = pd.DataFrame(
+            {
+                "A": [100.0, 95.0, 80.0],
+                "B": [95.0, 100.0, 82.0],
+                "C": [80.0, 82.0, 100.0],
+            },
+            index=["A", "B", "C"],
+        )
+
+        newick = build_tree(TreeMethod.UPGMA, ani_matrix=ani)
+        assert newick is not None
+        tree = Phylo.read(StringIO(newick), "newick")
+        assert len(list(tree.get_terminals())) == 3
+
+    def test_nj_without_ani_raises(self) -> None:
+        """NJ method without ANI matrix should raise ValueError."""
+        from metadarkmatter.core.phylogeny.tree_builder import TreeMethod, build_tree
+
+        with pytest.raises(ValueError, match="ANI matrix required"):
+            build_tree(TreeMethod.NJ)
+
+    def test_upgma_without_ani_raises(self) -> None:
+        """UPGMA method without ANI matrix should raise ValueError."""
+        from metadarkmatter.core.phylogeny.tree_builder import TreeMethod, build_tree
+
+        with pytest.raises(ValueError, match="ANI matrix required"):
+            build_tree(TreeMethod.UPGMA)
+
+    def test_mashtree_without_genomes_raises(self) -> None:
+        """Mashtree method without genome_dir should raise ValueError."""
+        from metadarkmatter.core.phylogeny.tree_builder import TreeMethod, build_tree
+
+        with pytest.raises(ValueError, match="genome_dir required"):
+            build_tree(TreeMethod.MASHTREE)
