@@ -1305,6 +1305,48 @@ class ReportGenerator:
             )
             clusters = analyzer.cluster_novel_reads()
             summary = analyzer.get_summary()
+
+            # Compute phylogenetic neighborhoods if ANI matrix available
+            if ani_matrix_obj is not None:
+                from metadarkmatter.core.novel_diversity.neighborhood import (
+                    PhylogeneticNeighborhoodAnalyzer,
+                )
+
+                genus_map = None
+                if self.genome_metadata is not None:
+                    genus_map = {}
+                    for genome in ani_matrix_obj.genomes:
+                        genus = self.genome_metadata.get_genus(genome)
+                        if genus:
+                            genus_map[genome] = genus
+
+                # Detect adaptive genus boundary
+                genus_boundary_ani = 80.0
+                try:
+                    from metadarkmatter.core.classification.adaptive import (
+                        detect_genus_boundary,
+                    )
+
+                    genus_boundary_result = detect_genus_boundary(
+                        ani_matrix_obj,
+                        genus_map=genus_map,
+                    )
+                    genus_boundary_ani = genus_boundary_result.genus_boundary
+                except Exception as e_gb:
+                    logger.debug("Genus boundary detection skipped: %s", e_gb)
+
+                try:
+                    nbr_analyzer = PhylogeneticNeighborhoodAnalyzer(
+                        ani_matrix=ani_matrix_obj,
+                        genus_map=genus_map,
+                        genus_boundary=genus_boundary_ani,
+                    )
+                    clusters = nbr_analyzer.analyze(clusters)
+                except Exception as e_nbr:
+                    logger.warning(
+                        "Neighborhood analysis failed: %s", e_nbr
+                    )
+
         except Exception as e:
             logger.warning(f"Could not analyze novel diversity: {e}")
             content = EMPTY_SECTION_TEMPLATE.format(
