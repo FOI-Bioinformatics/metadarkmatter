@@ -1,9 +1,13 @@
 """
 Adaptive threshold detection from ANI distribution.
 
-Uses Gaussian Mixture Model to detect natural species boundary
-from the ANI matrix distribution, rather than assuming a fixed
-threshold (e.g., 95-96% ANI) for all taxa.
+Uses Gaussian Mixture Models to detect natural species and genus boundaries
+from the ANI matrix distribution, rather than assuming fixed thresholds
+(e.g., 95-96% ANI for species, 80% ANI for genera).
+
+Species boundary: 2-component GMM separating within-species from between-species pairs.
+Genus boundary: 3-component GMM separating within-species, between-species-within-genus,
+and between-genus pairs.
 
 Requires scikit-learn (optional dependency: pip install metadarkmatter[adaptive]).
 """
@@ -189,6 +193,224 @@ def detect_species_boundary(
             novelty_known_max=NOVELTY_KNOWN_MAX,
             confidence=0.0,
             method="fallback",
+            ani_values_used=len(ani_values),
+        )
+
+
+@dataclass
+class AdaptiveGenusThreshold:
+    """Result of adaptive genus boundary detection."""
+
+    genus_boundary: float  # Detected ANI boundary (e.g., 82%)
+    novelty_genus_min: float  # = 100 - genus_boundary
+    confidence: float  # Separation quality (0-1)
+    method: str  # "gmm_3component" or "fallback"
+    inter_genus_ani_range: tuple[float, float] | None  # Observed min-max from metadata
+    ani_values_used: int  # Number of pairwise ANI values analyzed
+
+
+def detect_genus_boundary(
+    ani_matrix: ANIMatrix,
+    min_genomes: int = 8,
+    genus_map: dict[str, str] | None = None,
+) -> AdaptiveGenusThreshold:
+    """
+    Detect natural genus boundary from ANI matrix distribution.
+
+    Fits a 3-component Gaussian Mixture Model to upper-triangle ANI
+    values. The three components typically correspond to:
+    - Between-genus comparisons (lowest ANI)
+    - Between-species-within-genus comparisons (intermediate ANI)
+    - Within-species comparisons (highest ANI)
+
+    The genus boundary is estimated as the weighted midpoint between the
+    lowest and middle component means, weighted by their standard deviations.
+
+    When a genus_map is provided (genome -> genus name), empirical
+    inter-genus ANI values are computed for validation. A warning is
+    logged if the GMM boundary diverges from the empirical range by
+    more than 5 percentage points.
+
+    Falls back to the default threshold (80% ANI = 20% novelty) if:
+    - Too few genomes (< min_genomes, default 8)
+    - Too few pairwise ANI values (< 10)
+    - GMM does not converge
+    - Poor separation between components
+    - scikit-learn is not available
+
+    Args:
+        ani_matrix: ANI matrix with pairwise genome comparisons.
+        min_genomes: Minimum number of genomes required for 3-component GMM.
+        genus_map: Optional mapping of genome accession to genus name.
+            Used to compute empirical inter-genus ANI range for validation.
+
+    Returns:
+        AdaptiveGenusThreshold with detected or fallback boundary.
+    """
+    from metadarkmatter.core.constants import NOVELTY_NOVEL_GENUS_MIN
+
+    default_boundary = 100.0 - NOVELTY_NOVEL_GENUS_MIN  # 80.0%
+    genomes = sorted(ani_matrix.genomes)
+
+    if len(genomes) < min_genomes:
+        logger.info(
+            "Too few genomes (%d < %d) for adaptive genus threshold detection. "
+            "Using default boundary %.1f%%.",
+            len(genomes), min_genomes, default_boundary,
+        )
+        return AdaptiveGenusThreshold(
+            genus_boundary=default_boundary,
+            novelty_genus_min=NOVELTY_NOVEL_GENUS_MIN,
+            confidence=0.0,
+            method="fallback",
+            inter_genus_ani_range=None,
+            ani_values_used=0,
+        )
+
+    # Extract upper-triangle ANI values (excluding diagonal)
+    ani_values = []
+    for i, g1 in enumerate(genomes):
+        for j in range(i + 1, len(genomes)):
+            g2 = genomes[j]
+            ani = ani_matrix.get_ani(g1, g2)
+            if ani > 0:
+                ani_values.append(ani)
+
+    if len(ani_values) < 10:
+        logger.info(
+            "Insufficient pairwise ANI values (%d < 10). Using default genus boundary.",
+            len(ani_values),
+        )
+        return AdaptiveGenusThreshold(
+            genus_boundary=default_boundary,
+            novelty_genus_min=NOVELTY_NOVEL_GENUS_MIN,
+            confidence=0.0,
+            method="fallback",
+            inter_genus_ani_range=None,
+            ani_values_used=len(ani_values),
+        )
+
+    # Compute empirical inter-genus ANI range if genus_map is provided
+    inter_genus_range: tuple[float, float] | None = None
+    if genus_map is not None:
+        inter_genus_anis = []
+        for i, g1 in enumerate(genomes):
+            genus1 = genus_map.get(g1)
+            if genus1 is None:
+                continue
+            for j in range(i + 1, len(genomes)):
+                g2 = genomes[j]
+                genus2 = genus_map.get(g2)
+                if genus2 is None:
+                    continue
+                if genus1 != genus2:
+                    ani = ani_matrix.get_ani(g1, g2)
+                    if ani > 0:
+                        inter_genus_anis.append(ani)
+        if inter_genus_anis:
+            inter_genus_range = (min(inter_genus_anis), max(inter_genus_anis))
+
+    ani_array = np.array(ani_values).reshape(-1, 1)
+
+    try:
+        from sklearn.mixture import GaussianMixture
+
+        gmm = GaussianMixture(
+            n_components=3,
+            covariance_type="full",
+            max_iter=200,
+            n_init=5,
+            random_state=42,
+        )
+        gmm.fit(ani_array)
+
+        means = gmm.means_.flatten()
+        stds = np.sqrt(gmm.covariances_.flatten())
+
+        # Order components by mean: low (between-genus), mid (between-species), high (within-species)
+        order = np.argsort(means)
+        low_mean = means[order[0]]
+        mid_mean = means[order[1]]
+        low_std = stds[order[0]]
+        mid_std = stds[order[1]]
+
+        # Separation quality: gap between lowest and middle components
+        separation = abs(mid_mean - low_mean) / (low_std + mid_std + 1e-10)
+
+        if separation < 0.8:
+            logger.info(
+                "GMM components not well separated for genus boundary "
+                "(separation=%.2f < 0.8). Using default boundary %.1f%%.",
+                separation, default_boundary,
+            )
+            return AdaptiveGenusThreshold(
+                genus_boundary=default_boundary,
+                novelty_genus_min=NOVELTY_NOVEL_GENUS_MIN,
+                confidence=separation / 3.0,
+                method="fallback",
+                inter_genus_ani_range=inter_genus_range,
+                ani_values_used=len(ani_values),
+            )
+
+        # Genus boundary: weighted midpoint between low and mid components
+        w_low = 1.0 / (low_std + 1e-10)
+        w_mid = 1.0 / (mid_std + 1e-10)
+        boundary = (low_mean * w_low + mid_mean * w_mid) / (w_low + w_mid)
+
+        # Clamp to reasonable range (70-90% ANI)
+        boundary = max(70.0, min(90.0, boundary))
+        novelty_min = 100.0 - boundary
+
+        confidence = min(1.0, separation / 3.0)
+
+        # Warn if GMM boundary diverges from empirical inter-genus range
+        if inter_genus_range is not None:
+            empirical_mid = (inter_genus_range[0] + inter_genus_range[1]) / 2.0
+            if abs(boundary - empirical_mid) > 5.0:
+                logger.warning(
+                    "GMM genus boundary (%.1f%%) diverges from empirical "
+                    "inter-genus ANI midpoint (%.1f%%) by >5%%.",
+                    boundary, empirical_mid,
+                )
+
+        logger.info(
+            "Detected genus boundary at %.1f%% ANI (novelty_genus_min=%.1f%%, "
+            "confidence=%.2f, method=gmm_3component, n=%d).",
+            boundary, novelty_min, confidence, len(ani_values),
+        )
+
+        return AdaptiveGenusThreshold(
+            genus_boundary=boundary,
+            novelty_genus_min=novelty_min,
+            confidence=confidence,
+            method="gmm_3component",
+            inter_genus_ani_range=inter_genus_range,
+            ani_values_used=len(ani_values),
+        )
+
+    except ImportError:
+        logger.warning(
+            "scikit-learn not available for genus boundary detection. "
+            "Install with: pip install metadarkmatter[adaptive]"
+        )
+        return AdaptiveGenusThreshold(
+            genus_boundary=default_boundary,
+            novelty_genus_min=NOVELTY_NOVEL_GENUS_MIN,
+            confidence=0.0,
+            method="fallback",
+            inter_genus_ani_range=inter_genus_range,
+            ani_values_used=len(ani_values),
+        )
+    except Exception as e:
+        logger.warning(
+            "3-component GMM fitting failed: %s. Using default genus boundary.", e,
+        )
+        return AdaptiveGenusThreshold(
+            genus_boundary=default_boundary,
+            novelty_genus_min=NOVELTY_NOVEL_GENUS_MIN,
+            confidence=0.0,
+            method="fallback",
+            inter_genus_ani_range=inter_genus_range,
             ani_values_used=len(ani_values),
         )
 
