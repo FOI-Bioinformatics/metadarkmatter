@@ -170,8 +170,8 @@ def _build_similarity_heatmap(
         genome_accessions = list(matrix_cols)
         z_data = matrix.to_numpy()
 
-    # Fill missing values
-    z_filled = np.where(z_data == 0.0, config.default_value, z_data)
+    # Fill missing values (NaN or zero indicate uncomputed pairs)
+    z_filled = np.where(np.isnan(z_data) | (z_data == 0.0), config.default_value, z_data)
 
     # Hierarchical clustering
     z_clustered, genome_accessions_ordered, clustering_succeeded = (

@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
-from metadarkmatter.external.base import ExternalTool, ToolResult
+from metadarkmatter.external.base import ExternalTool, ToolResult, ToolTimeoutError
 
 # Rate limiting defaults for NCBI API
 DEFAULT_BATCH_DELAY = 0.5  # seconds between batch requests
@@ -251,6 +251,7 @@ class NCBIDatasets(ExternalTool):
         retry_versions: bool = True,
         max_version_attempts: int = 3,
         progress_callback: Callable[[int, int], None] | None = None,
+        max_total_timeout: float = 14400.0,
     ) -> DownloadReport:
         """Download genomes in batches and extract FASTA files.
 
@@ -271,6 +272,9 @@ class NCBIDatasets(ExternalTool):
             retry_versions: If True, retry failed accessions with alt versions.
             max_version_attempts: Max alternative versions to try per accession.
             progress_callback: Optional callback(completed, total).
+            max_total_timeout: Maximum total wall-clock time in seconds across
+                all batches (default 4 hours). Partial results are returned
+                if exceeded.
 
         Returns:
             DownloadReport with per-accession outcomes.
@@ -295,9 +299,24 @@ class NCBIDatasets(ExternalTool):
         total_elapsed = 0.0
         all_failed: list[str] = []
         outcomes: list[DownloadOutcome] = []
+        operation_start = time.monotonic()
 
         # Process in batches
         for i in range(0, total, batch_size):
+            # Check total elapsed time before starting next batch
+            wall_elapsed = time.monotonic() - operation_start
+            if wall_elapsed >= max_total_timeout:
+                logger.error(
+                    "Total download time (%.0fs) exceeded max_total_timeout "
+                    "(%.0fs). Returning partial results: %d/%d accessions "
+                    "completed.",
+                    wall_elapsed,
+                    max_total_timeout,
+                    completed,
+                    total,
+                )
+                break
+
             batch = accessions[i : i + batch_size]
             batch_zip = output_dir / f"ncbi_dataset_batch_{i}.zip"
 
@@ -309,14 +328,63 @@ class NCBIDatasets(ExternalTool):
                     progress_callback(completed, total)
                 continue
 
-            # Download batch
-            result = self.run(
-                accessions=batch,
-                output_file=batch_zip,
-                include_sequence=True,
-                include_protein=include_protein,
-                timeout=timeout_per_batch,
-            )
+            # Download batch with retry for transient network errors
+            max_retries = 3
+            retry_delay = 2.0
+
+            for attempt in range(1, max_retries + 1):
+                try:
+                    result = self.run(
+                        accessions=batch,
+                        output_file=batch_zip,
+                        include_sequence=True,
+                        include_protein=include_protein,
+                        timeout=timeout_per_batch,
+                    )
+                    # Non-zero exit code may indicate transient NCBI error
+                    if not result.success and attempt < max_retries:
+                        logger.warning(
+                            "Batch download attempt %d/%d failed (exit code %d), "
+                            "retrying in %.0fs...",
+                            attempt,
+                            max_retries,
+                            result.return_code,
+                            retry_delay,
+                        )
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                        continue
+                    break
+                except ToolTimeoutError:
+                    if attempt < max_retries:
+                        logger.warning(
+                            "Batch download attempt %d/%d timed out, "
+                            "retrying in %.0fs...",
+                            attempt,
+                            max_retries,
+                            retry_delay,
+                        )
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                        continue
+                    raise
+                except OSError as e:
+                    if attempt < max_retries:
+                        logger.warning(
+                            "Batch download attempt %d/%d failed (%s), "
+                            "retrying in %.0fs...",
+                            attempt,
+                            max_retries,
+                            e,
+                            retry_delay,
+                        )
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                        continue
+                    msg = (
+                        f"Download failed after {max_retries} attempts: {e}"
+                    )
+                    raise OSError(msg) from e
 
             total_elapsed += result.elapsed_seconds
 
@@ -535,6 +603,80 @@ class NCBIDatasets(ExternalTool):
             )
             return None
 
+    def _validate_fasta_file(
+        self,
+        path: Path,
+        accession: str,
+    ) -> bool:
+        """Validate that an extracted file is a valid FASTA.
+
+        Checks that the file exists, is non-empty, and begins with a
+        FASTA header line (``>``).  For gzip-compressed files the first
+        line is read through ``gzip.open``.
+
+        Args:
+            path: Path to the extracted file.
+            accession: Accession string used for log messages.
+
+        Returns:
+            True if the file passes validation, False otherwise.
+        """
+        import gzip as _gzip
+
+        # Existence and size check
+        if not path.exists() or path.stat().st_size == 0:
+            logger.warning(
+                "Validation failed for %s: file missing or empty (%s)",
+                accession,
+                path,
+            )
+            return False
+
+        # Read first line and count sequences
+        try:
+            is_gz = path.suffix == ".gz"
+            opener = _gzip.open if is_gz else open
+            seq_count = 0
+            first_line: str | None = None
+            with opener(path, "rt") as fh:  # type: ignore[arg-type]
+                for line in fh:
+                    if first_line is None:
+                        first_line = line
+                    if line.startswith(">"):
+                        seq_count += 1
+
+            if first_line is None or not first_line.startswith(">"):
+                logger.warning(
+                    "Validation failed for %s: not a valid FASTA file (%s)",
+                    accession,
+                    path,
+                )
+                return False
+
+            logger.debug(
+                "Validated %s: %d sequence(s) in %s",
+                accession,
+                seq_count,
+                path.name,
+            )
+            return True
+
+        except _gzip.BadGzipFile:
+            logger.warning(
+                "Validation failed for %s: corrupted gzip file (%s)",
+                accession,
+                path,
+            )
+            return False
+        except OSError as exc:
+            logger.warning(
+                "Validation failed for %s: %s (%s)",
+                accession,
+                exc,
+                path,
+            )
+            return False
+
     def _extract_fastas(
         self,
         zip_path: Path,
@@ -562,6 +704,7 @@ class NCBIDatasets(ExternalTool):
         """
         extracted = []
         extracted_accessions: set[str] = set()
+        n_failed = 0
 
         # Build list of extensions to extract
         nucleotide_exts = (".fna", ".fna.gz")
@@ -636,9 +779,20 @@ class NCBIDatasets(ExternalTool):
                     out_path.unlink()
                     out_path = decompressed_path
 
-                extracted.append(out_path)
-                extracted_accessions.add(accession)
+                # Validate extracted FASTA content
+                if self._validate_fasta_file(out_path, accession or "unknown"):
+                    extracted.append(out_path)
+                    extracted_accessions.add(accession)
+                else:
+                    n_failed += 1
+                    if out_path.exists():
+                        out_path.unlink()
 
+        logger.info(
+            "Extracted %d FASTA files (%d failed validation)",
+            len(extracted),
+            n_failed,
+        )
         return extracted, extracted_accessions
 
 

@@ -46,6 +46,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-cov>=4.1.0",
     "pytest-xdist>=3.5.0",
+    "pytest-timeout>=2.2.0",
     "ruff>=0.3.0",
     "mypy>=1.8.0",
 ]
@@ -96,6 +97,7 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = ["-ra", "--strict-markers", "-v"]
+timeout = 120
 markers = [
     "slow: marks tests as slow",
     "integration: marks tests requiring external tools",

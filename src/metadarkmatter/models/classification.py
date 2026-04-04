@@ -7,11 +7,14 @@ algorithm applied to environmental DNA metagenomic samples.
 
 from __future__ import annotations
 
+import logging
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, computed_field, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 class DiversityStatus(str, Enum):
@@ -327,6 +330,24 @@ class TaxonomicSummary(BaseModel):
         default_factory=dict,
         description="Read counts per species (requires metadata)",
     )
+
+    @model_validator(mode="after")
+    def check_diversity_totals(self) -> Self:
+        """Warn if diversity counts exceed total reads."""
+        diversity_sum = (
+            self.diversity_known + self.diversity_novel + self.diversity_uncertain
+        )
+        if diversity_sum > self.total_reads:
+            logger.warning(
+                "Diversity counts (%d known + %d novel + %d uncertain = %d) "
+                "exceed total_reads (%d); counts may include overlapping categories",
+                self.diversity_known,
+                self.diversity_novel,
+                self.diversity_uncertain,
+                diversity_sum,
+                self.total_reads,
+            )
+        return self
 
     @computed_field
     @property

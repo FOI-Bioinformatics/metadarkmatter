@@ -16,6 +16,7 @@ from rich import print as rprint
 from rich.console import Console
 
 from metadarkmatter import __version__
+from metadarkmatter.core.logging_config import setup_logging
 
 app = typer.Typer(
     name="metadarkmatter",
@@ -44,6 +45,21 @@ def main(
         callback=version_callback,
         is_eager=True,
     ),
+    log_level: str = typer.Option(
+        "WARNING",
+        "--log-level",
+        help="Logging level (DEBUG, INFO, WARNING, ERROR)",
+    ),
+    log_format: str = typer.Option(
+        "text",
+        "--log-format",
+        help="Log format: text or json",
+    ),
+    log_file: str = typer.Option(
+        None,
+        "--log-file",
+        help="Log file path",
+    ),
 ) -> None:
     """
     Metadarkmatter: ANI-weighted placement for detecting novel microbial diversity.
@@ -52,10 +68,11 @@ def main(
     water samples, and other environmental sources to characterize microbial diversity
     and detect novel bacterial taxa using whole-genome competitive read recruitment.
     """
+    setup_logging(log_level, log_format, log_file)
 
 
 # Import subcommands
-from metadarkmatter.cli import aai, ani, blast, blastx, download, kraken2, mapping, mmseqs2, proteins, report, score, tree, visualize
+from metadarkmatter.cli import aai, ani, blast, blastx, download, kraken2, mapping, mmseqs2, proteins, report, score, tree, validate, visualize
 from metadarkmatter.cli import map as map_cmd  # Alias to avoid shadowing builtin
 
 # Register subcommands
@@ -73,6 +90,7 @@ app.add_typer(download.app, name="download")
 app.add_typer(report.app, name="report")
 app.add_typer(mapping.app, name="util")
 app.add_typer(tree.app, name="tree")
+app.add_typer(validate.app, name="validate")
 
 
 if __name__ == "__main__":

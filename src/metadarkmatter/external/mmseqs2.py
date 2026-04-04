@@ -17,11 +17,15 @@ Performance:
 
 from __future__ import annotations
 
+import logging
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Any, ClassVar
 
 from metadarkmatter.external.base import ExternalTool, validate_path_safe
+
+logger = logging.getLogger(__name__)
 
 
 class MMseqs2(ExternalTool):
@@ -243,8 +247,7 @@ class MMseqs2(ExternalTool):
             tmp_dir = Path(tmp_dir)
             tmp_dir.mkdir(parents=True, exist_ok=True)
 
-        # For now, use easy-search but add a warning that this is slow for large files
-        # TODO: Migrate to proper multi-step workflow
+        # Build easy-search command (used for dry-run / command display purposes)
         cmd = [
             exe,
             "easy-search",
@@ -320,7 +323,8 @@ class MMseqs2(ExternalTool):
     ) -> None:
         """Run MMseqs2 sequence search.
 
-        Convenience method for searching with BLAST-compatible output.
+        Uses the optimized multi-step workflow (createdb, search, convertalis)
+        instead of easy-search for improved performance on large query files.
 
         Args:
             query: Query sequences (FASTA/FASTQ)
@@ -334,8 +338,7 @@ class MMseqs2(ExternalTool):
             min_identity: Minimum percent identity filter (0-100 scale)
             search_type: Search type - 2=translated, 3=nucleotide (default: 3)
             timeout: Optional timeout in seconds
-            capture_output: If True, capture stdout/stderr. Set to False for
-                batch processing to prevent pipe buffer blocking.
+            capture_output: Kept for backward compatibility (ignored internally).
 
         Raises:
             ToolExecutionError: If MMseqs2 fails
@@ -350,8 +353,7 @@ class MMseqs2(ExternalTool):
             ...     sensitivity=5.7,
             ... )
         """
-        self.run_or_raise(
-            mode="search",
+        self.search_multistep(
             query=query,
             database=database,
             output=output,
@@ -363,7 +365,6 @@ class MMseqs2(ExternalTool):
             min_identity=min_identity,
             search_type=search_type,
             timeout=timeout,
-            capture_output=capture_output,
         )
 
     def search_multistep(
@@ -433,19 +434,58 @@ class MMseqs2(ExternalTool):
             ...     threads=16,
             ... )
         """
-        import subprocess
-        import time
-
         query = validate_path_safe(query, must_exist=True)
         database = validate_path_safe(database, must_exist=False)
         output = validate_path_safe(output, must_exist=False)
 
         # Setup directories
+        auto_tmp_dir = None
         if tmp_dir is None:
-            tmp_dir = Path(tempfile.mkdtemp(prefix="mmseqs_tmp_"))
+            auto_tmp_dir = Path(tempfile.mkdtemp(prefix="mmseqs_tmp_"))
+            tmp_dir = auto_tmp_dir
         else:
             tmp_dir = Path(tmp_dir)
             tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            return self._run_multistep_search(
+                query=query,
+                database=database,
+                output=output,
+                query_db=query_db,
+                tmp_dir=tmp_dir,
+                threads=threads,
+                sensitivity=sensitivity,
+                evalue=evalue,
+                max_seqs=max_seqs,
+                min_identity=min_identity,
+                search_type=search_type,
+                timeout=timeout,
+            )
+        finally:
+            if auto_tmp_dir is not None and auto_tmp_dir.exists():
+                shutil.rmtree(auto_tmp_dir, ignore_errors=True)
+                logger.debug(f"Cleaned up temp directory: {auto_tmp_dir}")
+
+    def _run_multistep_search(
+        self,
+        *,
+        query: Path,
+        database: Path,
+        output: Path,
+        query_db: Path | None,
+        tmp_dir: Path,
+        threads: int,
+        sensitivity: float,
+        evalue: float,
+        max_seqs: int,
+        min_identity: float | None,
+        search_type: int,
+        timeout: float | None,
+    ) -> dict[str, Any]:
+        """Execute the multi-step MMseqs2 search workflow."""
+        import subprocess
+        import time
 
         # Setup query database path
         if query_db is None:
@@ -459,7 +499,6 @@ class MMseqs2(ExternalTool):
         exe = str(self.get_executable())
         dbtype = search_type - 1  # 3->2 for nucleotide, 2->1 for protein
 
-        times = {}
         total_start = time.perf_counter()
 
         # Step 1: Create query database (skip if exists)
@@ -472,7 +511,7 @@ class MMseqs2(ExternalTool):
             ]
 
             start = time.perf_counter()
-            result = subprocess.run(
+            subprocess.run(
                 createdb_cmd,
                 capture_output=True,
                 text=True,
@@ -496,7 +535,7 @@ class MMseqs2(ExternalTool):
             search_cmd.extend(["--min-seq-id", str(min_identity / 100.0)])
 
         start = time.perf_counter()
-        result = subprocess.run(
+        subprocess.run(
             search_cmd,
             capture_output=True,
             text=True,
@@ -515,7 +554,7 @@ class MMseqs2(ExternalTool):
         ]
 
         start = time.perf_counter()
-        result = subprocess.run(
+        subprocess.run(
             convertalis_cmd,
             capture_output=True,
             text=True,

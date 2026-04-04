@@ -7,6 +7,11 @@ to improve maintainability and consistency.
 
 from __future__ import annotations
 
+import logging
+import math
+
+logger = logging.getLogger(__name__)
+
 # =============================================================================
 # Genome and Classification Constants
 # =============================================================================
@@ -17,6 +22,15 @@ UNKNOWN_GENOME = "unknown"
 # =============================================================================
 # ANI Thresholds
 # =============================================================================
+
+# ANI genus boundary zone: 75-80% ANI
+# Below 75% = different genus, above 80% = same genus (Parks et al. 2020)
+ANI_GENUS_BOUNDARY_LOW = 75.0
+ANI_GENUS_BOUNDARY_HIGH = 80.0
+
+# ANI values at which genomes are considered different species
+ANI_SPECIES_BOUNDARY_LOW = 95.0
+ANI_SPECIES_BOUNDARY_HIGH = 96.0
 
 # Default ANI for unrelated genomes (fallback when no ANI available)
 ANI_DEFAULT_UNRELATED = 70.0
@@ -172,6 +186,17 @@ def calculate_confidence_score(
     Returns:
         Confidence score from 0-100 (higher = more confident)
     """
+    # Guard: NaN/inf inputs silently corrupt comparisons; return safe default
+    if any(
+        math.isnan(v) or math.isinf(v)
+        for v in (novelty_index, placement_uncertainty, top_hit_identity)
+    ):
+        logger.warning("NaN or inf in confidence inputs, returning 0.0")
+        return 0.0
+    if identity_gap is not None and (math.isnan(identity_gap) or math.isinf(identity_gap)):
+        logger.warning("NaN or inf identity_gap, treating as None")
+        identity_gap = None
+
     score = 0.0
 
     # Component 1: Margin from threshold boundaries (0-40 points)
@@ -297,6 +322,12 @@ def calculate_inferred_uncertainty(novelty_index: float) -> float:
         - Novel genus range (20-25%): High uncertainty about placement
         - Very high divergence (> 25%): Maximum uncertainty
     """
+    # Guard: NaN/inf would propagate silently through comparisons
+    if math.isnan(novelty_index) or math.isinf(novelty_index):
+        logger.warning("NaN or inf novelty_index in inferred uncertainty, returning 0.0")
+        return 0.0
+    novelty_index = max(0.0, novelty_index)  # Clamp negative values
+
     # Compute continuous breakpoints from constants
     known_break = INFERRED_UNCERTAINTY_BASE + NOVELTY_KNOWN_MAX * 0.5
     species_break = known_break + (NOVELTY_NOVEL_SPECIES_MAX - NOVELTY_KNOWN_MAX) * INFERRED_UNCERTAINTY_NOVEL_SPECIES_SLOPE
@@ -345,14 +376,23 @@ def calculate_alignment_quality(
         - Coverage: Higher coverage = higher score
         - E-value significance: Lower e-value = higher score
     """
+    # Guard: zero-length alignment produces invalid rates
+    if length <= 0:
+        logger.warning("Alignment length <= 0, returning 0.0 for quality score")
+        return 0.0
+    # Guard: NaN/inf coverage or evalue would corrupt scoring
+    if math.isnan(coverage) or math.isinf(coverage) or math.isnan(evalue) or math.isinf(evalue):
+        logger.warning("NaN or inf in alignment quality inputs, returning 0.0")
+        return 0.0
+
     # Mismatch density penalty (0-25 pts)
     # Higher mismatch rate = lower score
-    mismatch_rate = mismatch / max(1, length)
+    mismatch_rate = mismatch / length
     mismatch_score = max(0.0, 25.0 - mismatch_rate * 50.0)
 
     # Gap complexity penalty (0-25 pts)
     # More gap openings per 100bp = lower score
-    gap_rate = gapopen / max(1, length) * 100.0
+    gap_rate = gapopen / length * 100.0
     gap_score = max(0.0, 25.0 - gap_rate * 25.0)
 
     # Coverage bonus (0-25 pts)
@@ -397,6 +437,13 @@ def calculate_identity_confidence(
         - High score: Confident about the identity measurement
         - Low score: Identity measurement may be unreliable
     """
+    # Guard: NaN/inf inputs would corrupt comparisons
+    if math.isnan(novelty_index) or math.isinf(novelty_index) or math.isnan(alignment_quality) or math.isinf(alignment_quality):
+        logger.warning("NaN or inf in identity confidence inputs, returning 0.0")
+        return 0.0
+    # Clamp novelty_index to valid range
+    novelty_index = max(0.0, min(100.0, novelty_index))
+
     # Base score from novelty (inverted - higher identity = more confident)
     if novelty_index < 5:
         base = 80.0  # Very high identity
@@ -440,6 +487,14 @@ def calculate_placement_confidence(
         measure competing placements - absence of data is not evidence
         of confident placement.
     """
+    # Guard: NaN/inf inputs would corrupt comparisons
+    if math.isnan(uncertainty) or math.isinf(uncertainty):
+        logger.warning("NaN or inf uncertainty in placement confidence, returning 0.0")
+        return 0.0
+    if identity_gap is not None and (math.isnan(identity_gap) or math.isinf(identity_gap)):
+        logger.warning("NaN or inf identity_gap in placement confidence, treating as None")
+        identity_gap = None
+
     # Base score from uncertainty level
     if uncertainty < 2:
         base = 80.0
@@ -502,6 +557,14 @@ def calculate_discovery_score(
     if taxonomic_call not in (CATEGORY_NOVEL_SPECIES, CATEGORY_NOVEL_GENUS):
         return None
 
+    # Guard: NaN/inf inputs would corrupt scoring
+    if any(
+        math.isnan(v) or math.isinf(v)
+        for v in (novelty_index, identity_confidence, placement_confidence, alignment_quality)
+    ):
+        logger.warning("NaN or inf in discovery score inputs, returning 0.0")
+        return 0.0
+
     # Novelty component (0-40): Higher divergence = more interesting
     if taxonomic_call == CATEGORY_NOVEL_SPECIES:
         # Novel species: 5-20% novelty -> 15-30 points
@@ -517,4 +580,4 @@ def calculate_discovery_score(
     # Confidence component (0-30): Average of identity and placement
     conf_pts = (identity_confidence + placement_confidence) / 2.0 * 0.3
 
-    return round(novelty_pts + quality_pts + conf_pts, 1)
+    return round(max(0.0, min(100.0, novelty_pts + quality_pts + conf_pts)), 1)

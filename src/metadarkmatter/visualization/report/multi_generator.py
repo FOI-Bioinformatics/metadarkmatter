@@ -72,7 +72,7 @@ MULTI_REPORT_TEMPLATE = '''<!DOCTYPE html>
         <p>ANI-weighted taxonomic placement for metagenomic analysis</p>
     </footer>
 
-    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+{plotly_cdn_script}
 {plotly_js}
 </body>
 </html>
@@ -127,6 +127,7 @@ class MultiSampleConfig:
     title: str = "Multi-Sample Comparison Report"
     theme: str = "light"
     plot_config: PlotConfig | None = None
+    include_plotlyjs: str = "cdn"  # 'cdn', 'embed', or path
 
 
 class MultiSampleReportGenerator:
@@ -314,6 +315,12 @@ class MultiSampleReportGenerator:
         # Build Plotly JS
         plotly_js = self._build_plotly_js()
 
+        # Build CDN script tag based on config
+        if self.config.include_plotlyjs == "cdn":
+            plotly_cdn_script = '    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>'
+        else:
+            plotly_cdn_script = ""
+
         return MULTI_REPORT_TEMPLATE.format(
             title=self.config.title,
             num_samples=len(self.sample_data),
@@ -322,6 +329,7 @@ class MultiSampleReportGenerator:
             version=__version__,
             css_styles=get_css_styles(self.config.theme),
             content=content,
+            plotly_cdn_script=plotly_cdn_script,
             plotly_js=plotly_js,
         )
 

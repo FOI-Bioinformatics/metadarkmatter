@@ -7,12 +7,19 @@ retrieved from GTDB and downloaded from NCBI.
 
 from __future__ import annotations
 
+import logging
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Self
 
 import polars as pl
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+logger = logging.getLogger(__name__)
+
+_ACCESSION_PATTERN = re.compile(r"^GC[AF]_\d{9}\.\d+$")
+_GTDB_PREFIXES = ("d__", "p__", "c__", "o__", "f__", "g__", "s__")
 
 
 class GenomeAccession(BaseModel):
@@ -33,6 +40,46 @@ class GenomeAccession(BaseModel):
     is_representative: bool = Field(default=False, description="GTDB species representative")
 
     model_config = {"frozen": True}
+
+    @field_validator("accession")
+    @classmethod
+    def validate_accession(cls, v: str) -> str:
+        """Validate NCBI accession matches expected pattern."""
+        if not _ACCESSION_PATTERN.match(v):
+            msg = (
+                f"Invalid NCBI accession '{v}': "
+                "expected format GCF_XXXXXXXXX.N or GCA_XXXXXXXXX.N "
+                "(e.g., GCF_000005845.2)"
+            )
+            raise ValueError(msg)
+        return v
+
+    @field_validator("genome_size")
+    @classmethod
+    def validate_genome_size(cls, v: int | None) -> int | None:
+        """Validate genome size is within plausible bounds."""
+        if v is not None:
+            if v <= 0:
+                msg = f"Genome size must be positive, got {v}"
+                raise ValueError(msg)
+            if v >= 50_000_000_000:
+                msg = f"Genome size {v} bp exceeds 50 Gbp upper bound"
+                raise ValueError(msg)
+        return v
+
+    @field_validator("gtdb_taxonomy")
+    @classmethod
+    def validate_gtdb_taxonomy(cls, v: str) -> str:
+        """Warn if GTDB taxonomy string is missing expected rank prefixes."""
+        if v:
+            missing = [p for p in _GTDB_PREFIXES if p not in v]
+            if missing:
+                logger.warning(
+                    "GTDB taxonomy '%s' missing expected prefixes: %s",
+                    v[:80],
+                    ", ".join(missing),
+                )
+        return v
 
     @property
     def genus(self) -> str:

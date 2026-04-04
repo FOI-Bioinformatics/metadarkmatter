@@ -44,7 +44,7 @@ class TestGenomeAccessionIsRepresentative:
     def test_default_is_false(self) -> None:
         """is_representative should default to False."""
         acc = GenomeAccession(
-            accession="GCF_001",
+            accession="GCF_000000001.1",
             gtdb_taxonomy="d__Bacteria;g__TestGenus;s__Test sp",
             species="Test sp",
         )
@@ -53,7 +53,7 @@ class TestGenomeAccessionIsRepresentative:
     def test_explicit_true(self) -> None:
         """is_representative can be set to True."""
         acc = GenomeAccession(
-            accession="GCF_001",
+            accession="GCF_000000001.1",
             gtdb_taxonomy="d__Bacteria;g__TestGenus;s__Test sp",
             species="Test sp",
             is_representative=True,
@@ -63,7 +63,7 @@ class TestGenomeAccessionIsRepresentative:
     def test_frozen_cannot_mutate(self) -> None:
         """is_representative should be immutable (frozen model)."""
         acc = GenomeAccession(
-            accession="GCF_001",
+            accession="GCF_000000001.1",
             gtdb_taxonomy="d__Bacteria",
             species="Test sp",
             is_representative=False,
@@ -85,19 +85,19 @@ class TestAccessionListRepresentativeMap:
         """AccessionList with three species and representative assignments."""
         accessions = [
             GenomeAccession(
-                accession="GCF_A1",
+                accession="GCF_000000011.1",
                 gtdb_taxonomy=_make_taxonomy("GenusA", "Species alpha"),
                 species="Species alpha",
                 is_representative=True,
             ),
             GenomeAccession(
-                accession="GCF_A2",
+                accession="GCF_000000012.1",
                 gtdb_taxonomy=_make_taxonomy("GenusA", "Species alpha"),
                 species="Species alpha",
                 is_representative=False,
             ),
             GenomeAccession(
-                accession="GCF_B1",
+                accession="GCF_000000021.1",
                 gtdb_taxonomy=_make_taxonomy("GenusB", "Species beta"),
                 species="Species beta",
                 is_representative=True,
@@ -108,16 +108,16 @@ class TestAccessionListRepresentativeMap:
             accessions=accessions,
             genus_counts={"GenusA": 2, "GenusB": 1},
             representative_map={
-                "Species alpha": "GCF_A1",
-                "Species beta": "GCF_B1",
+                "Species alpha": "GCF_000000011.1",
+                "Species beta": "GCF_000000021.1",
             },
         )
 
     def test_representative_map_populated(self, accession_list_with_reps: AccessionList) -> None:
         """representative_map should contain species-to-accession entries."""
         rmap = accession_list_with_reps.representative_map
-        assert rmap["Species alpha"] == "GCF_A1"
-        assert rmap["Species beta"] == "GCF_B1"
+        assert rmap["Species alpha"] == "GCF_000000011.1"
+        assert rmap["Species beta"] == "GCF_000000021.1"
 
     def test_representative_map_default_empty(self) -> None:
         """representative_map should default to an empty dict."""
@@ -147,22 +147,22 @@ class TestAccessionListRepresentativeMap:
 
         df = pl.read_csv(out, separator="\t")
         # GCF_A1 is representative of Species alpha - maps to itself
-        row_a1 = df.filter(pl.col("accession") == "GCF_A1")
-        assert row_a1["representative"][0] == "GCF_A1"
+        row_a1 = df.filter(pl.col("accession") == "GCF_000000011.1")
+        assert row_a1["representative"][0] == "GCF_000000011.1"
 
         # GCF_A2 is also Species alpha - maps to GCF_A1
-        row_a2 = df.filter(pl.col("accession") == "GCF_A2")
-        assert row_a2["representative"][0] == "GCF_A1"
+        row_a2 = df.filter(pl.col("accession") == "GCF_000000012.1")
+        assert row_a2["representative"][0] == "GCF_000000011.1"
 
         # GCF_B1 is representative of Species beta
-        row_b1 = df.filter(pl.col("accession") == "GCF_B1")
-        assert row_b1["representative"][0] == "GCF_B1"
+        row_b1 = df.filter(pl.col("accession") == "GCF_000000021.1")
+        assert row_b1["representative"][0] == "GCF_000000021.1"
 
     def test_to_metadata_tsv_no_representative_map(self, tmp_path: Path) -> None:
         """When representative_map is empty, each genome maps to itself."""
         accessions = [
             GenomeAccession(
-                accession="GCF_X1",
+                accession="GCF_000000031.1",
                 gtdb_taxonomy=_make_taxonomy("G", "S"),
                 species="S",
             ),
@@ -176,7 +176,7 @@ class TestAccessionListRepresentativeMap:
         acc_list.to_metadata_tsv(out)
 
         df = pl.read_csv(out, separator="\t")
-        assert df["representative"][0] == "GCF_X1"
+        assert df["representative"][0] == "GCF_000000031.1"
 
 
 # =============================================================================
@@ -191,24 +191,24 @@ class TestAccessionListFromTsvRepresentative:
         """from_tsv should populate representative_map from file."""
         tsv_content = (
             "accession\tgtdb_taxonomy\tspecies\trepresentative\n"
-            "GCF_001\td__Bacteria;g__G;s__S1\tS1\tGCF_001\n"
-            "GCF_002\td__Bacteria;g__G;s__S1\tS1\tGCF_001\n"
-            "GCF_003\td__Bacteria;g__G;s__S2\tS2\tGCF_003\n"
+            "GCF_000000001.1\td__Bacteria;g__G;s__S1\tS1\tGCF_000000001.1\n"
+            "GCF_000000002.1\td__Bacteria;g__G;s__S1\tS1\tGCF_000000001.1\n"
+            "GCF_000000003.1\td__Bacteria;g__G;s__S2\tS2\tGCF_000000003.1\n"
         )
         tsv_path = tmp_path / "accessions.tsv"
         tsv_path.write_text(tsv_content)
 
         acc_list = AccessionList.from_tsv(tsv_path)
 
-        assert acc_list.representative_map["S1"] == "GCF_001"
-        assert acc_list.representative_map["S2"] == "GCF_003"
+        assert acc_list.representative_map["S1"] == "GCF_000000001.1"
+        assert acc_list.representative_map["S2"] == "GCF_000000003.1"
 
     def test_from_tsv_sets_is_representative(self, tmp_path: Path) -> None:
         """from_tsv should set is_representative=True for self-referencing rows."""
         tsv_content = (
             "accession\tgtdb_taxonomy\tspecies\trepresentative\n"
-            "GCF_001\td__Bacteria\tS1\tGCF_001\n"
-            "GCF_002\td__Bacteria\tS1\tGCF_001\n"
+            "GCF_000000001.1\td__Bacteria\tS1\tGCF_000000001.1\n"
+            "GCF_000000002.1\td__Bacteria\tS1\tGCF_000000001.1\n"
         )
         tsv_path = tmp_path / "accessions.tsv"
         tsv_path.write_text(tsv_content)
@@ -216,14 +216,14 @@ class TestAccessionListFromTsvRepresentative:
         acc_list = AccessionList.from_tsv(tsv_path)
 
         rep_flags = {a.accession: a.is_representative for a in acc_list.accessions}
-        assert rep_flags["GCF_001"] is True
-        assert rep_flags["GCF_002"] is False
+        assert rep_flags["GCF_000000001.1"] is True
+        assert rep_flags["GCF_000000002.1"] is False
 
     def test_from_tsv_no_representative_column(self, tmp_path: Path) -> None:
         """from_tsv should handle files without representative column."""
         tsv_content = (
             "accession\tgtdb_taxonomy\tspecies\n"
-            "GCF_001\td__Bacteria\tS1\n"
+            "GCF_000000001.1\td__Bacteria\tS1\n"
         )
         tsv_path = tmp_path / "accessions.tsv"
         tsv_path.write_text(tsv_content)
@@ -237,13 +237,13 @@ class TestAccessionListFromTsvRepresentative:
         """Writing and reading metadata should preserve representative mapping."""
         accessions = [
             GenomeAccession(
-                accession="GCF_R1",
+                accession="GCF_000000041.1",
                 gtdb_taxonomy=_make_taxonomy("G1", "Sp1"),
                 species="Sp1",
                 is_representative=True,
             ),
             GenomeAccession(
-                accession="GCF_R2",
+                accession="GCF_000000042.1",
                 gtdb_taxonomy=_make_taxonomy("G1", "Sp1"),
                 species="Sp1",
             ),
@@ -251,14 +251,14 @@ class TestAccessionListFromTsvRepresentative:
         original = AccessionList(
             taxon="test",
             accessions=accessions,
-            representative_map={"Sp1": "GCF_R1"},
+            representative_map={"Sp1": "GCF_000000041.1"},
         )
 
         metadata_path = tmp_path / "metadata.tsv"
         original.to_metadata_tsv(metadata_path)
 
         loaded = AccessionList.from_tsv(metadata_path)
-        assert loaded.representative_map["Sp1"] == "GCF_R1"
+        assert loaded.representative_map["Sp1"] == "GCF_000000041.1"
 
 
 # =============================================================================
@@ -273,11 +273,11 @@ class TestGenomeMetadataRepresentativeMethods:
     def metadata_with_reps(self) -> GenomeMetadata:
         """GenomeMetadata with representative column."""
         df = pl.DataFrame({
-            "accession": ["GCF_001", "GCF_002", "GCF_003", "GCF_004"],
+            "accession": ["GCF_000000001.1", "GCF_000000002.1", "GCF_000000003.1", "GCF_000000004.1"],
             "species": ["SpA", "SpA", "SpB", "SpB"],
             "genus": ["GA", "GA", "GB", "GB"],
             "family": ["FA", "FA", "FA", "FA"],
-            "representative": ["GCF_001", "GCF_001", "GCF_003", "GCF_003"],
+            "representative": ["GCF_000000001.1", "GCF_000000001.1", "GCF_000000003.1", "GCF_000000003.1"],
         })
         return GenomeMetadata(df)
 
@@ -285,7 +285,7 @@ class TestGenomeMetadataRepresentativeMethods:
     def metadata_without_reps(self) -> GenomeMetadata:
         """GenomeMetadata without representative column."""
         df = pl.DataFrame({
-            "accession": ["GCF_001", "GCF_002"],
+            "accession": ["GCF_000000001.1", "GCF_000000002.1"],
             "species": ["SpA", "SpB"],
             "genus": ["GA", "GB"],
         })
@@ -295,11 +295,11 @@ class TestGenomeMetadataRepresentativeMethods:
 
     def test_get_representative_returns_rep(self, metadata_with_reps: GenomeMetadata) -> None:
         """get_representative should return the species representative."""
-        assert metadata_with_reps.get_representative("GCF_002") == "GCF_001"
+        assert metadata_with_reps.get_representative("GCF_000000002.1") == "GCF_000000001.1"
 
     def test_get_representative_self_for_rep(self, metadata_with_reps: GenomeMetadata) -> None:
         """get_representative should return self for a representative genome."""
-        assert metadata_with_reps.get_representative("GCF_001") == "GCF_001"
+        assert metadata_with_reps.get_representative("GCF_000000001.1") == "GCF_000000001.1"
 
     def test_get_representative_unknown_accession(
         self, metadata_with_reps: GenomeMetadata
@@ -311,25 +311,25 @@ class TestGenomeMetadataRepresentativeMethods:
         self, metadata_without_reps: GenomeMetadata
     ) -> None:
         """get_representative should return identity when no representative column."""
-        assert metadata_without_reps.get_representative("GCF_001") == "GCF_001"
+        assert metadata_without_reps.get_representative("GCF_000000001.1") == "GCF_000000001.1"
 
     # -- build_representative_mapping --
 
     def test_build_representative_mapping(self, metadata_with_reps: GenomeMetadata) -> None:
         """build_representative_mapping should return complete mapping dict."""
         mapping = metadata_with_reps.build_representative_mapping()
-        assert mapping["GCF_001"] == "GCF_001"
-        assert mapping["GCF_002"] == "GCF_001"
-        assert mapping["GCF_003"] == "GCF_003"
-        assert mapping["GCF_004"] == "GCF_003"
+        assert mapping["GCF_000000001.1"] == "GCF_000000001.1"
+        assert mapping["GCF_000000002.1"] == "GCF_000000001.1"
+        assert mapping["GCF_000000003.1"] == "GCF_000000003.1"
+        assert mapping["GCF_000000004.1"] == "GCF_000000003.1"
 
     def test_build_representative_mapping_identity(
         self, metadata_without_reps: GenomeMetadata
     ) -> None:
         """Without representative column, mapping should be identity."""
         mapping = metadata_without_reps.build_representative_mapping()
-        assert mapping["GCF_001"] == "GCF_001"
-        assert mapping["GCF_002"] == "GCF_002"
+        assert mapping["GCF_000000001.1"] == "GCF_000000001.1"
+        assert mapping["GCF_000000002.1"] == "GCF_000000002.1"
 
     # -- has_representatives --
 
@@ -346,10 +346,10 @@ class TestGenomeMetadataRepresentativeMethods:
     def test_has_representatives_false_all_self(self) -> None:
         """has_representatives should be False if all genomes map to themselves."""
         df = pl.DataFrame({
-            "accession": ["GCF_001", "GCF_002"],
+            "accession": ["GCF_000000001.1", "GCF_000000002.1"],
             "species": ["SpA", "SpB"],
             "genus": ["GA", "GB"],
-            "representative": ["GCF_001", "GCF_002"],
+            "representative": ["GCF_000000001.1", "GCF_000000002.1"],
         })
         meta = GenomeMetadata(df)
         assert meta.has_representatives is False
@@ -360,7 +360,7 @@ class TestGenomeMetadataRepresentativeMethods:
         self, metadata_with_reps: GenomeMetadata
     ) -> None:
         """representative_count should return the number of unique representatives."""
-        # 4 genomes, 2 representatives (GCF_001, GCF_003)
+        # 4 genomes, 2 representatives (GCF_000000001.1, GCF_000000003.1)
         assert metadata_with_reps.representative_count == 2
 
     def test_representative_count_no_column(
@@ -377,7 +377,7 @@ class TestGenomeMetadataRepresentativeMethods:
         """All representative methods should work when representative column is absent."""
         meta = metadata_without_reps
         # get_representative returns identity
-        assert meta.get_representative("GCF_001") == "GCF_001"
+        assert meta.get_representative("GCF_000000001.1") == "GCF_000000001.1"
         # build_representative_mapping returns identity
         mapping = meta.build_representative_mapping()
         assert all(k == v for k, v in mapping.items())
@@ -675,13 +675,13 @@ class TestValidateAniGenomeCoverageWithRepresentativeMapping:
 
         # BLAST file has non-representative genomes
         blast_path = tmp_path / "blast.tsv"
-        self._write_blast_file(blast_path, ["GCF_001", "GCF_002", "GCF_003"])
+        self._write_blast_file(blast_path, ["GCF_000000001.1", "GCF_000000002.1", "GCF_000000003.1"])
 
         # Mapping: all 3 genomes map to 2 representatives
         rep_mapping = {
-            "GCF_001": "GCF_REP1",
-            "GCF_002": "GCF_REP1",
-            "GCF_003": "GCF_REP2",
+            "GCF_000000001.1": "GCF_REP1",
+            "GCF_000000002.1": "GCF_REP1",
+            "GCF_000000003.1": "GCF_REP2",
         }
 
         matched, total, pct, missing = validate_ani_genome_coverage(
@@ -705,18 +705,18 @@ class TestValidateAniGenomeCoverageWithRepresentativeMapping:
         ani_matrix = ANIMatrix(ani_dict)
 
         blast_path = tmp_path / "blast.tsv"
-        self._write_blast_file(blast_path, ["GCF_001", "GCF_002"])
+        self._write_blast_file(blast_path, ["GCF_000000001.1", "GCF_000000002.1"])
 
         matched, total, pct, missing = validate_ani_genome_coverage(
             blast_path, ani_matrix, representative_mapping=None,
         )
 
-        # Without mapping, GCF_001 and GCF_002 are not in ANI
+        # Without mapping, GCF_000000001.1 and GCF_000000002.1 are not in ANI
         assert matched == 0
         assert total == 2
         assert pct == 0.0
-        assert "GCF_001" in missing
-        assert "GCF_002" in missing
+        assert "GCF_000000001.1" in missing
+        assert "GCF_000000002.1" in missing
 
     def test_partial_representative_coverage(self, tmp_path: Path) -> None:
         """Some representatives missing from ANI should be reported."""
@@ -728,11 +728,11 @@ class TestValidateAniGenomeCoverageWithRepresentativeMapping:
         ani_matrix = ANIMatrix(ani_dict)
 
         blast_path = tmp_path / "blast.tsv"
-        self._write_blast_file(blast_path, ["GCF_001", "GCF_002"])
+        self._write_blast_file(blast_path, ["GCF_000000001.1", "GCF_000000002.1"])
 
         rep_mapping = {
-            "GCF_001": "GCF_REP1",
-            "GCF_002": "GCF_REP_MISSING",
+            "GCF_000000001.1": "GCF_REP1",
+            "GCF_000000002.1": "GCF_REP_MISSING",
         }
 
         matched, total, pct, missing = validate_ani_genome_coverage(
@@ -1480,9 +1480,9 @@ class TestMultiRepresentativeStillWorks:
 
         # Two species, each with strains
         representative_mapping = {
-            "GCF_A1": "GCF_REP_A",
-            "GCF_A2": "GCF_REP_A",
-            "GCF_B1": "GCF_REP_B",
+            "GCF_000000011.1": "GCF_REP_A",
+            "GCF_000000012.1": "GCF_REP_A",
+            "GCF_000000021.1": "GCF_REP_B",
             "GCF_B2": "GCF_REP_B",
         }
 
@@ -1493,9 +1493,9 @@ class TestMultiRepresentativeStillWorks:
 
         blast_rows = []
         for genome, pident, bitscore in [
-            ("GCF_A1", 98.0, 500),
-            ("GCF_A2", 97.5, 495),
-            ("GCF_B1", 96.0, 490),
+            ("GCF_000000011.1", 98.0, 500),
+            ("GCF_000000012.1", 97.5, 495),
+            ("GCF_000000021.1", 96.0, 490),
             ("GCF_B2", 95.5, 485),
         ]:
             blast_rows.append({

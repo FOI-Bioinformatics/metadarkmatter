@@ -405,7 +405,7 @@ class TestBlastAlignCommand:
             db_prefix.with_suffix(suffix).write_bytes(b"\x00")
 
         output_tsv = temp_dir / "results.tsv"
-        blast_line = "read1\tGCF_000001.1|c1\t98.5\t150\t2\t0\t1\t150\t100\t250\t1e-50\t250.0\t150\n"
+        blast_line = "read1\tGCF_000000001.1|c1\t98.5\t150\t2\t0\t1\t150\t100\t250\t1e-50\t250.0\t150\n"
 
         def _write_output(**kwargs):
             """Side effect that writes a mock BLAST output file."""
@@ -887,7 +887,7 @@ class TestANIValidateCommand:
         """Command fails when ANI file does not exist."""
         blast_file = temp_dir / "blast.tsv"
         blast_file.write_text(
-            "read1\tGCF_000001.1|c1\t98.0\t150\t3\t0\t1\t150\t100\t250\t1e-50\t250\n"
+            "read1\tGCF_000000001.1|c1\t98.0\t150\t3\t0\t1\t150\t100\t250\t1e-50\t250\n"
         )
 
         result = cli_runner.invoke(
@@ -1176,13 +1176,13 @@ class TestDownloadGenomesListCommand:
 
         genomes = (
             GTDBGenome(
-                accession="GCF_000001.1",
+                accession="GCF_000000001.1",
                 gtdb_taxonomy="d__Bacteria;p__Proteobacteria;c__Gammaproteobacteria;o__Thiotrichales;f__Francisellaceae;g__Francisella;s__Francisella tularensis",
                 species="Francisella tularensis",
                 genome_size=1900000,
             ),
             GTDBGenome(
-                accession="GCF_000002.1",
+                accession="GCF_000000002.1",
                 gtdb_taxonomy="d__Bacteria;p__Proteobacteria;c__Gammaproteobacteria;o__Thiotrichales;f__Francisellaceae;g__Francisella;s__Francisella novicida",
                 species="Francisella novicida",
                 genome_size=1800000,
@@ -1219,7 +1219,7 @@ class TestDownloadGenomesListCommand:
         # Verify accession list content
         df = pl.read_csv(output, separator="\t")
         assert len(df) == 2
-        assert "GCF_000001.1" in df["accession"].to_list()
+        assert "GCF_000000001.1" in df["accession"].to_list()
         # Verify metadata file was also created
         metadata_path = temp_dir / "genome_metadata.tsv"
         assert metadata_path.exists()
@@ -1231,7 +1231,7 @@ class TestDownloadGenomesListCommand:
 
         genomes = (
             GTDBGenome(
-                accession="GCF_000001.1",
+                accession="GCF_000000001.1",
                 gtdb_taxonomy="d__Bacteria;f__Francisellaceae;g__Francisella;s__Francisella tularensis",
                 species="Francisella tularensis",
             ),
@@ -1289,7 +1289,7 @@ class TestDownloadGenomesFetchCommand:
     def test_fetch_requires_output_dir(self, cli_runner, temp_dir):
         """Command fails when --output-dir is missing."""
         acc_file = temp_dir / "acc.tsv"
-        acc_file.write_text("accession\tgtdb_taxonomy\tspecies\nGCF_000001.1\ttax\tsp\n")
+        acc_file.write_text("accession\tgtdb_taxonomy\tspecies\nGCF_000000001.1\ttax\tsp\n")
 
         result = cli_runner.invoke(
             app,
@@ -1327,7 +1327,7 @@ class TestDownloadGenomesFetchCommand:
         mock_ncbi_cls.return_value = mock_ncbi
 
         acc_file = temp_dir / "acc.tsv"
-        acc_file.write_text("accession\tgtdb_taxonomy\tspecies\nGCF_000001.1\ttax\tsp\n")
+        acc_file.write_text("accession\tgtdb_taxonomy\tspecies\nGCF_000000001.1\ttax\tsp\n")
 
         result = cli_runner.invoke(
             app,
@@ -1354,7 +1354,7 @@ class TestDownloadGenomesFetchCommand:
         acc_file = temp_dir / "acc.tsv"
         pl.DataFrame(
             {
-                "accession": ["GCF_000001.1", "GCF_000002.1"],
+                "accession": ["GCF_000000001.1", "GCF_000000002.1"],
                 "gtdb_taxonomy": ["tax1", "tax2"],
                 "species": ["sp1", "sp2"],
             }
@@ -1386,7 +1386,7 @@ class TestDownloadGenomesFetchCommand:
         acc_file = temp_dir / "acc.tsv"
         pl.DataFrame(
             {
-                "accession": ["GCF_000001.1"],
+                "accession": ["GCF_000000001.1"],
                 "gtdb_taxonomy": ["tax"],
                 "species": ["sp"],
             }
@@ -1394,7 +1394,7 @@ class TestDownloadGenomesFetchCommand:
 
         output_dir = temp_dir / "genomes"
         output_dir.mkdir()
-        (output_dir / "GCF_000001.1.fna").write_text(">c\nACGT\n")
+        (output_dir / "GCF_000000001.1.fna").write_text(">c\nACGT\n")
 
         result = cli_runner.invoke(
             app,
@@ -1452,7 +1452,7 @@ class TestDownloadGenomesFetchCommand:
         acc_file = temp_dir / "acc.tsv"
         pl.DataFrame(
             {
-                "accession": ["GCF_000001.1", "GCF_000002.1"],
+                "accession": ["GCF_000000001.1", "GCF_000000002.1"],
                 "gtdb_taxonomy": ["tax1", "tax2"],
                 "species": ["sp1", "sp2"],
             }
@@ -1464,10 +1464,10 @@ class TestDownloadGenomesFetchCommand:
         def _mock_download(**kwargs):
             od = kwargs.get("output_dir", output_dir)
             od.mkdir(parents=True, exist_ok=True)
-            (od / "GCF_000001.1.fna").write_text(">c1\nACGTACGT\n")
-            (od / "GCF_000002.1.fna").write_text(">c2\nTGCATGCA\n")
+            (od / "GCF_000000001.1.fna").write_text(">c1\nACGTACGT\n")
+            (od / "GCF_000000002.1.fna").write_text(">c2\nTGCATGCA\n")
             return _make_download_report(
-                accessions=["GCF_000001.1", "GCF_000002.1"],
+                accessions=["GCF_000000001.1", "GCF_000000002.1"],
                 elapsed_seconds=3.0,
             )
 
@@ -1501,7 +1501,7 @@ class TestDownloadGenomesFetchCommand:
         acc_file = temp_dir / "acc.tsv"
         pl.DataFrame(
             {
-                "accession": ["GCF_000001.1"],
+                "accession": ["GCF_000000001.1"],
                 "gtdb_taxonomy": ["tax"],
                 "species": ["sp"],
             }
@@ -1533,7 +1533,7 @@ class TestDownloadGenomesFetchCommand:
         acc_file = temp_dir / "acc.tsv"
         pl.DataFrame(
             {
-                "accession": ["GCF_000001.1", "GCF_000002.1"],
+                "accession": ["GCF_000000001.1", "GCF_000000002.1"],
                 "gtdb_taxonomy": ["tax1", "tax2"],
                 "species": ["sp1", "sp2"],
             }
@@ -1541,13 +1541,13 @@ class TestDownloadGenomesFetchCommand:
 
         output_dir = temp_dir / "genomes"
         output_dir.mkdir()
-        (output_dir / "GCF_000001.1.fna").write_text(">c\nACGT\n")
+        (output_dir / "GCF_000000001.1.fna").write_text(">c\nACGT\n")
 
         def _mock_download(**kwargs):
             od = kwargs.get("output_dir", output_dir)
-            (od / "GCF_000002.1.fna").write_text(">c2\nTGCA\n")
+            (od / "GCF_000000002.1.fna").write_text(">c2\nTGCA\n")
             return _make_download_report(
-                accessions=["GCF_000002.1"],
+                accessions=["GCF_000000002.1"],
             )
 
         mock_ncbi.download_genomes.side_effect = _mock_download

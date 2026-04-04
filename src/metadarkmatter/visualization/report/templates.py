@@ -46,7 +46,7 @@ REPORT_BASE_TEMPLATE: str = '''<!DOCTYPE html>
         <p>ANI-weighted taxonomic placement for metagenomic analysis</p>
     </footer>
 
-    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+{plotly_cdn_script}
 {plotly_js}
     <script>
 {js_scripts}
@@ -1613,6 +1613,15 @@ PHYLOTREE_JS_TEMPLATE: str = '''
 // Phylogenetic tree visualization using D3.js
 (function() {{
     'use strict';
+
+    // Check if D3.js loaded (CDN may be unavailable)
+    if (typeof d3 === 'undefined') {{
+        var container = document.getElementById('phylogeny-tree');
+        if (container) {{
+            container.innerHTML = '<p style="color:#666;padding:2em;">Phylogenetic tree requires D3.js (CDN unavailable). Check your internet connection.</p>';
+        }}
+        return;
+    }}
 
     // Check if tree data is available
     if (typeof TREE_DATA === 'undefined' || !TREE_DATA) {{

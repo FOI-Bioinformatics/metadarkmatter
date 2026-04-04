@@ -235,7 +235,7 @@ def generate_report(
     with spinner_progress("Reading classifications...", console, quiet):
         try:
             df = read_dataframe(classifications)
-        except Exception as e:
+        except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
             console.print(f"[red]Error reading classifications: {e}[/red]")
             raise typer.Exit(code=1) from None
 
@@ -255,7 +255,7 @@ def generate_report(
         try:
             ani_df = pl.read_csv(ani_matrix)
             out.print(f"  [green]Loaded ANI matrix ({len(ani_df)} genomes)[/green]")
-        except Exception as e:
+        except (pl.exceptions.PolarsError, OSError) as e:
             console.print(f"[yellow]Warning: Could not load ANI matrix: {e}[/yellow]")
 
     aai_df = None
@@ -264,7 +264,7 @@ def generate_report(
         try:
             aai_df = pl.read_csv(aai_matrix)
             out.print(f"  [green]Loaded AAI matrix ({len(aai_df)} genomes)[/green]")
-        except Exception as e:
+        except (pl.exceptions.PolarsError, OSError) as e:
             console.print(f"[yellow]Warning: Could not load AAI matrix: {e}[/yellow]")
 
     genome_metadata: GenomeMetadata | None = None
@@ -276,7 +276,7 @@ def generate_report(
                 f"  [green]Loaded metadata for {genome_metadata.genome_count} genomes "
                 f"({genome_metadata.species_count} species)[/green]"
             )
-        except Exception as e:
+        except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
             console.print(f"[yellow]Warning: Could not load metadata: {e}[/yellow]")
 
     recruitment_df = None
@@ -285,7 +285,7 @@ def generate_report(
         try:
             recruitment_df = pl.read_csv(recruitment_data)
             out.print(f"  [green]Loaded {len(recruitment_df):,} recruitment records[/green]")
-        except Exception as e:
+        except (pl.exceptions.PolarsError, OSError) as e:
             console.print(f"[yellow]Warning: Could not load recruitment data: {e}[/yellow]")
     elif bam:
         out.print("\n[bold]Step 2c:[/bold] Extracting recruitment data from BAM...")
@@ -307,7 +307,7 @@ def generate_report(
                     )
 
                 out.print(f"  [green]Loaded {len(recruitment_df):,} alignments[/green]")
-        except Exception as e:
+        except (ImportError, FileNotFoundError, OSError, ValueError) as e:
             console.print(f"[yellow]Warning: Could not extract from BAM: {e}[/yellow]")
 
     # Step 3: Generate report
@@ -479,7 +479,7 @@ def multi_sample_report(
                 sample_data[sample_name] = df
                 if verbose:
                     out.print(f"  [dim]Loaded {sample_name}: {len(df):,} reads[/dim]")
-            except Exception as e:
+            except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
                 failed.append((f.name, str(e)))
 
     if failed:
@@ -627,7 +627,7 @@ def summarize_novel_diversity(
     with spinner_progress("Reading classifications...", console, quiet):
         try:
             df = read_dataframe(classifications)
-        except Exception as e:
+        except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
             console.print(f"[red]Error reading classifications: {e}[/red]")
             raise typer.Exit(code=1) from None
 
@@ -653,7 +653,7 @@ def summarize_novel_diversity(
                 f"  [green]Loaded metadata for {genome_metadata.genome_count} genomes "
                 f"({genome_metadata.species_count} species)[/green]"
             )
-        except Exception as e:
+        except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
             console.print(f"[yellow]Warning: Could not load metadata: {e}[/yellow]")
 
     # Step 3: Cluster novel reads
@@ -672,7 +672,7 @@ def summarize_novel_diversity(
             clusters = analyzer.cluster_novel_reads()
             summary = analyzer.get_summary()
 
-        except Exception as e:
+        except (ImportError, ValueError, pl.exceptions.PolarsError) as e:
             console.print(f"[red]Error analyzing novel diversity: {e}[/red]")
             if verbose:
                 console.print_exception()
@@ -718,7 +718,7 @@ def summarize_novel_diversity(
             json_output.write_text(json.dumps(output_data, indent=2))
             out.print(f"  [green]Saved full JSON to {json_output}[/green]")
 
-    except Exception as e:
+    except (OSError, PermissionError, ValueError, pl.exceptions.PolarsError) as e:
         console.print(f"[red]Error writing output: {e}[/red]")
         raise typer.Exit(code=1) from None
 

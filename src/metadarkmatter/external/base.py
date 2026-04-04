@@ -269,6 +269,7 @@ class ExternalTool(ABC):
     TOOL_NAME: ClassVar[str]
     TOOL_ALIASES: ClassVar[tuple[str, ...]] = ()
     INSTALL_HINT: ClassVar[str] = ""
+    DEFAULT_TIMEOUT: ClassVar[float] = 3600.0  # 1 hour
 
     _executable_cache: ClassVar[dict[str, Path | None]] = {}
     # Dependency injection for testability - defaults to shutil.which
@@ -383,7 +384,8 @@ class ExternalTool(ABC):
         """Execute the tool with the specified arguments.
 
         Args:
-            timeout: Maximum execution time in seconds (None for no limit).
+            timeout: Maximum execution time in seconds. If None, falls back
+                to the class-level DEFAULT_TIMEOUT (1 hour).
             dry_run: If True, return command without execution.
             capture_output: If True, capture stdout/stderr.
             **kwargs: Arguments passed to build_command().
@@ -405,6 +407,14 @@ class ExternalTool(ABC):
                 stdout="[dry-run] Command not executed",
                 stderr="",
                 elapsed_seconds=0.0,
+            )
+
+        if timeout is None:
+            timeout = self.DEFAULT_TIMEOUT
+            logger.debug(
+                "Using default timeout of %.0fs for %s",
+                timeout,
+                self.TOOL_NAME,
             )
 
         start_time = time.perf_counter()

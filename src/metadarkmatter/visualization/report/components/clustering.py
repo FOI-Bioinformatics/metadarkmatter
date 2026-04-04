@@ -76,3 +76,9 @@ def perform_hierarchical_clustering(
             "Install scipy for clustered heatmaps: pip install scipy>=1.11.0"
         )
         return (matrix, labels, False)
+    except (ValueError, np.linalg.LinAlgError) as e:
+        logger.warning(
+            f"Hierarchical clustering failed ({e}), "
+            "returning unclustered matrix"
+        )
+        return (matrix, labels, False)

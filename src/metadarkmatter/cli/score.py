@@ -630,7 +630,7 @@ def classify(
             with alignment.open("rb") as f:
                 line_count = sum(1 for _ in f)
             console.print(f"  Alignments: ~{line_count:,}")
-        except Exception:
+        except OSError:
             console.print("  Alignments: (unable to count)")
 
         # Show ANI matrix info
@@ -638,7 +638,7 @@ def classify(
         try:
             ani_matrix = ANIMatrix.from_file(ani)
             console.print(f"  Genomes: {len(ani_matrix.genomes)}")
-        except Exception as e:
+        except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
             console.print(f"  [red]Error loading: {e}[/red]")
             raise typer.Exit(code=1) from None
 
@@ -651,7 +651,7 @@ def classify(
             console.print(f"  Matched: {matched}/{total} ({coverage_pct:.1f}%)")
             if coverage_pct < 50.0:
                 console.print("  [yellow]Warning: Low coverage[/yellow]")
-        except Exception:
+        except (FileNotFoundError, pl.exceptions.PolarsError, OSError):
             logger.debug("Could not validate genome coverage", exc_info=True)
 
         # Show output configuration
@@ -870,7 +870,7 @@ def classify(
         try:
             ani_matrix = ANIMatrix.from_file(ani)
             num_genomes = len(ani_matrix.genomes)
-        except Exception as e:
+        except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
             console.print(f"\n[red]Error loading ANI matrix: {e}[/red]")
             raise typer.Exit(code=1) from None
 
@@ -917,7 +917,7 @@ def classify(
             try:
                 aai_matrix = AAIMatrix.from_file(aai)
                 aai_genomes = len(aai_matrix.genomes)
-            except Exception as e:
+            except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
                 console.print(f"\n[red]Error loading AAI matrix: {e}[/red]")
                 raise typer.Exit(code=1) from None
 
@@ -938,7 +938,7 @@ def classify(
             progress.add_task(description="Loading genome metadata...", total=None)
             try:
                 genome_metadata = GenomeMetadata.from_file(metadata)
-            except Exception as e:
+            except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
                 console.print(f"\n[red]Error loading metadata: {e}[/red]")
                 raise typer.Exit(code=1) from None
 
@@ -989,7 +989,7 @@ def classify(
             progress.add_task(description="Generating ID mapping from genomes...", total=None)
             try:
                 contig_mapping = ContigIdMapping.from_genome_dir(genomes)
-            except Exception as e:
+            except (FileNotFoundError, ValueError, OSError) as e:
                 console.print(f"\n[red]Error generating ID mapping: {e}[/red]")
                 raise typer.Exit(code=1) from None
 
@@ -1006,7 +1006,7 @@ def classify(
             progress.add_task(description="Loading ID mapping...", total=None)
             try:
                 contig_mapping = ContigIdMapping.from_tsv(id_mapping)
-            except Exception as e:
+            except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
                 console.print(f"\n[red]Error loading ID mapping: {e}[/red]")
                 raise typer.Exit(code=1) from None
 
@@ -1044,7 +1044,7 @@ def classify(
                 out.print(
                     f"  Missing genomes (first 5): {', '.join(sample)}...\n"
                 )
-    except Exception as e:
+    except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
         # Always log warnings - don't silently swallow validation failures
         logger.warning("Could not validate genome coverage: %s", e)
         if verbose:
@@ -1194,7 +1194,7 @@ def classify(
                 if not quiet:
                     _display_summary_table(summary_obj)
 
-            except Exception as e:
+            except (pl.exceptions.PolarsError, ValueError, OSError) as e:
                 console.print(f"\n[yellow]Warning: Failed to generate summary: {e}[/yellow]")
                 if verbose:
                     console.print_exception()
@@ -1480,7 +1480,7 @@ def batch(
     try:
         ani_matrix = ANIMatrix.from_file(ani)
         num_genomes = len(ani_matrix.genomes)
-    except Exception as e:
+    except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
         console.print(f"[red]Error loading ANI matrix: {e}[/red]")
         raise typer.Exit(code=1) from None
 
@@ -1512,7 +1512,7 @@ def batch(
                     console.print(
                         f"  Missing genomes (first 5): {', '.join(sample)}...\n"
                     )
-        except Exception as e:
+        except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
             # Always log warnings - don't silently swallow validation failures
             logger.warning("Could not validate genome coverage: %s", e)
             if verbose:
@@ -1648,7 +1648,7 @@ def batch(
             console.print(f"  [green]Classified {num_classified:,} reads[/green]")
             total_classified += num_classified
 
-        except Exception as e:
+        except (pl.exceptions.PolarsError, FileNotFoundError, ValueError, OSError) as e:
             console.print(f"  [red]Failed: {e}[/red]")
             failed_files.append(alignment_file.name)
             if verbose:
@@ -1930,7 +1930,7 @@ def extract_novel(
 
     try:
         df = read_dataframe(classifications)
-    except Exception as e:
+    except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
         console.print(f"[red]Error reading classifications: {e}[/red]")
         raise typer.Exit(code=1) from None
 

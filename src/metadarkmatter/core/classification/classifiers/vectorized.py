@@ -8,6 +8,8 @@ without multiprocessing overhead.
 
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -35,6 +37,9 @@ if TYPE_CHECKING:
     from metadarkmatter.core.classification.ani_matrix import ANIMatrix
     from metadarkmatter.core.classification.qc import QCMetrics
     from metadarkmatter.core.id_mapping import ContigIdMapping
+
+logger = logging.getLogger(__name__)
+
 
 class VectorizedClassifier:
     """
@@ -242,6 +247,43 @@ class VectorizedClassifier:
 
         return min_weight + weight_range * normalized
 
+    def _check_memory(self, blast_path: Path) -> None:
+        """Estimate memory usage and warn if it may exceed available memory."""
+        try:
+            file_size = blast_path.stat().st_size
+        except OSError:
+            return
+
+        # Estimate in-memory size: gzipped files expand ~10x, then Polars adds ~1.5x overhead
+        is_gzipped = blast_path.name.endswith((".gz", ".gzip"))
+        estimated_bytes = file_size * 10 * 1.5 if is_gzipped else file_size * 1.5
+
+        logger.debug(
+            "Estimated memory usage for %s: %.1f GB",
+            blast_path.name,
+            estimated_bytes / (1024**3),
+        )
+
+        # Get total physical memory (stdlib only, Linux/macOS)
+        try:
+            page_size = os.sysconf("SC_PAGE_SIZE")
+            page_count = os.sysconf("SC_PHYS_PAGES")
+            total_memory = page_size * page_count
+        except (ValueError, OSError, AttributeError):
+            return
+
+        available_memory = total_memory * 0.6  # conservative estimate
+
+        if estimated_bytes > available_memory * 0.8:
+            est_gb = estimated_bytes / (1024**3)
+            avail_gb = available_memory / (1024**3)
+            logger.warning(
+                "Estimated memory usage (%.1f GB) may exceed available memory "
+                "(%.1f GB). Consider using --parallel flag for chunked processing.",
+                est_gb,
+                avail_gb,
+            )
+
     def classify_file(
         self,
         blast_input: Path | pl.DataFrame,
@@ -272,6 +314,8 @@ class VectorizedClassifier:
             df = blast_input
             raw_df = df if compute_qc else None
         else:
+            self._check_memory(blast_input)
+
             from metadarkmatter.core.parsers import (
                 StreamingBlastParser,
                 extract_genome_name_expr,

@@ -121,7 +121,7 @@ class TestAccessionList:
     def test_total_count(self):
         """Should return correct total count."""
         accessions = [
-            GenomeAccession(accession=f"GCF_{i}", gtdb_taxonomy="", species="")
+            GenomeAccession(accession=f"GCF_{i:09d}.1", gtdb_taxonomy="", species="")
             for i in range(5)
         ]
         acc_list = AccessionList(taxon="test", accessions=accessions)
@@ -130,9 +130,9 @@ class TestAccessionList:
     def test_species_count(self):
         """Should return unique species count."""
         accessions = [
-            GenomeAccession(accession="GCF_1", gtdb_taxonomy="", species="Species A"),
-            GenomeAccession(accession="GCF_2", gtdb_taxonomy="", species="Species A"),
-            GenomeAccession(accession="GCF_3", gtdb_taxonomy="", species="Species B"),
+            GenomeAccession(accession="GCF_000000001.1", gtdb_taxonomy="", species="Species A"),
+            GenomeAccession(accession="GCF_000000002.1", gtdb_taxonomy="", species="Species A"),
+            GenomeAccession(accession="GCF_000000003.1", gtdb_taxonomy="", species="Species B"),
         ]
         acc_list = AccessionList(taxon="test", accessions=accessions)
         assert acc_list.species_count == 2

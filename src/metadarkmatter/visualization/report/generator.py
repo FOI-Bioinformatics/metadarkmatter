@@ -7,6 +7,7 @@ with tabbed navigation, interactive data tables, and professional styling.
 
 from __future__ import annotations
 
+import html
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -593,10 +594,13 @@ class ReportGenerator:
             page_size=self.config.page_size
         )
 
+        # Build Plotly CDN script tag (empty when embedding JS inline)
+        plotly_cdn_script = self._build_plotly_cdn_script()
+
         # Build final HTML
         return REPORT_BASE_TEMPLATE.format(
-            title=self.config.title,
-            sample_name=self.config.sample_name,
+            title=html.escape(self.config.title),
+            sample_name=html.escape(self.config.sample_name),
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             total_reads=format_count(self.summary.total_reads),
             version=__version__,
@@ -604,6 +608,7 @@ class ReportGenerator:
             navigation=navigation,
             content=content,
             methods_footer=methods_footer,
+            plotly_cdn_script=plotly_cdn_script,
             plotly_js=plotly_js,
             js_scripts=js_scripts,
         )
@@ -626,9 +631,11 @@ class ReportGenerator:
         nav_items = []
         for tab_id, label, is_active in tabs:
             active_class = " active" if is_active else ""
+            safe_tab_id = html.escape(tab_id, quote=True)
+            safe_label = html.escape(label)
             nav_items.append(
                 f'        <button class="tab-btn{active_class}" '
-                f"onclick=\"showTab('{tab_id}')\">{label}</button>"
+                f"onclick=\"showTab('{safe_tab_id}')\">{safe_label}</button>"
             )
 
         return "\n".join(nav_items)
@@ -2468,19 +2475,29 @@ class ReportGenerator:
             pl_conf_str = "-" if pl_conf is None else f"{pl_conf:.1f}"
 
             rows_html += TABLE_ROW_TEMPLATE.format(
-                read_id=row.get("read_id", ""),
-                best_match=genome[:40] if len(genome) > 40 else genome,
-                species=species[:30] if len(species) > 30 else species,
-                genus=genus[:20] if len(genus) > 20 else genus,
+                read_id=html.escape(str(row.get("read_id", ""))),
+                best_match=html.escape(
+                    genome[:40] if len(genome) > 40 else genome
+                ),
+                species=html.escape(
+                    species[:30] if len(species) > 30 else species
+                ),
+                genus=html.escape(
+                    genus[:20] if len(genus) > 20 else genus
+                ),
                 identity=row.get("top_hit_identity", 0),
                 novelty=row.get("novelty_index", 0),
                 uncertainty=row.get("placement_uncertainty", 0),
                 ambiguous_hits=ambiguous_hits,
                 identity_gap=identity_gap_str,
                 is_novel="Yes" if is_novel else "No",
-                classification=row.get("taxonomic_call", ""),
+                classification=html.escape(
+                    str(row.get("taxonomic_call", ""))
+                ),
                 cell_class=get_cell_class(row.get("taxonomic_call", "")),
-                uncertainty_type=uncertainty_type or "-",
+                uncertainty_type=html.escape(
+                    str(uncertainty_type or "-")
+                ),
                 inferred_uncertainty=inferred_unc_str,
                 discovery_score=discovery_str,
                 identity_confidence=id_conf_str,
@@ -2796,6 +2813,17 @@ document.addEventListener('DOMContentLoaded', function() {
         """Register a plot for later JS initialization."""
         plot_json = fig.to_json()
         self._plot_data[plot_id] = plot_json
+
+    def _build_plotly_cdn_script(self) -> str:
+        """Build the Plotly.js script tag based on config.
+
+        Returns CDN script tag when include_plotlyjs='cdn', or empty string
+        when Plotly is embedded via plotly figure html export.
+        """
+        if self.config.include_plotlyjs == "cdn":
+            return '    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>'
+        # For 'embed' or path modes, Plotly JS is included inline by _build_plotly_js
+        return ""
 
     def _build_plotly_js(self) -> str:
         """Build Plotly.js initialization code for all plots."""

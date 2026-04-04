@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import polars as pl
 import typer
 from rich.console import Console
 from rich.progress import (
@@ -338,7 +339,7 @@ def fetch_genomes(
 
     try:
         accession_list = AccessionList.from_tsv(accessions)
-    except Exception as e:
+    except (FileNotFoundError, ValueError, OSError) as e:
         console.print(f"[red]Error reading accession file: {e}[/red]")
         raise typer.Exit(code=1) from None
 
@@ -518,7 +519,7 @@ def fetch_genomes(
                             out.print(f"[dim]  - {acc:<20} {species}[/dim]")
                         if len(missing_info) > 10:
                             out.print(f"[dim]  ... and {len(missing_info) - 10} more[/dim]")
-                except Exception:
+                except (pl.exceptions.PolarsError, OSError, KeyError):
                     if verbose and missing_accessions:
                         out.print("\n[dim]Missing protein files for:[/dim]")
                         for acc in missing_accessions[:10]:

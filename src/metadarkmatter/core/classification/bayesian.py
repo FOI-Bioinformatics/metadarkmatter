@@ -327,6 +327,14 @@ class BayesianClassifier:
         Returns:
             PosteriorResult with 6 posteriors, MAP category, and entropy.
         """
+        # Validate inputs: clamp NaN/inf to 0 to avoid propagating bad values
+        if not np.isfinite(novelty_index):
+            logger.warning("Bayesian: non-finite novelty_index=%r, clamping to 0.", novelty_index)
+            novelty_index = 0.0
+        if not np.isfinite(placement_uncertainty):
+            logger.warning("Bayesian: non-finite placement_uncertainty=%r, clamping to 0.", placement_uncertainty)
+            placement_uncertainty = 0.0
+
         bay = self.config.bayesian
         likelihoods = np.zeros(_N_CATEGORIES_6)
 
@@ -348,12 +356,14 @@ class BayesianClassifier:
             priors[amb_idx] *= bay.single_hit_boost
 
         # Bayes' rule: posterior = likelihood * prior / evidence
+        # When all likelihoods are zero (read far from all category centers),
+        # assign uniform posteriors rather than dividing by a tiny epsilon.
         joint = likelihoods * priors
         total = joint.sum()
-        if total == 0:
-            total = 1e-10
-
-        posteriors = joint / total
+        if total < 1e-300:
+            posteriors = np.full(_N_CATEGORIES_6, 1.0 / _N_CATEGORIES_6)
+        else:
+            posteriors = joint / total
 
         # MAP classification
         map_idx = int(np.argmax(posteriors))
@@ -518,9 +528,21 @@ class BayesianClassifier:
         n_reads = df.height
         bay = self.config.bayesian
 
-        # Extract input arrays
+        # Extract input arrays and sanitize NaN/inf values.
+        # Reads with invalid metrics get clamped to 0, which places them
+        # far from category centers and yields near-uniform posteriors.
         novelty = df["novelty_index"].to_numpy().astype(np.float64)
         uncertainty = df["placement_uncertainty"].to_numpy().astype(np.float64)
+        invalid_mask = ~np.isfinite(novelty) | ~np.isfinite(uncertainty)
+        if invalid_mask.any():
+            n_invalid = int(invalid_mask.sum())
+            logger.warning(
+                "Bayesian classifier: %d reads have NaN/inf novelty or "
+                "uncertainty values; clamping to 0.",
+                n_invalid,
+            )
+            novelty = np.where(np.isfinite(novelty), novelty, 0.0)
+            uncertainty = np.where(np.isfinite(uncertainty), uncertainty, 0.0)
 
         has_hits = "num_ambiguous_hits" in df.columns
         num_hits = (
@@ -562,10 +584,14 @@ class BayesianClassifier:
         priors[single_novel_mask, amb_idx] *= bay.single_hit_boost
 
         # --- Bayes' rule ---
+        # When all likelihoods are zero for a read, assign uniform posteriors
+        # (1/N_categories) instead of dividing by epsilon.
         joint = likelihoods * priors
         totals = joint.sum(axis=1, keepdims=True)
-        totals = np.where(totals == 0, 1e-10, totals)
-        posteriors = joint / totals  # shape (n, 6)
+        zero_mask = totals < 1e-300
+        safe_totals = np.where(zero_mask, 1.0, totals)
+        posteriors = joint / safe_totals  # shape (n, 6)
+        posteriors[zero_mask.squeeze(axis=1)] = 1.0 / _N_CATEGORIES_6
 
         # --- MAP classification ---
         map_indices = np.argmax(posteriors, axis=1)
