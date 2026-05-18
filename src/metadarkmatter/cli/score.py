@@ -2045,3 +2045,172 @@ def extract_novel(
         out.print(f"  Novel Genus: {cat_dict['Novel Genus']:,}")
 
     out.print()
+
+
+@app.command(name="sensitivity")
+def sensitivity(
+    classifications: Path = typer.Option(
+        ...,
+        "--classifications",
+        "-c",
+        help=(
+            "Classification CSV/Parquet produced by 'score classify'. Must "
+            "contain the columns novelty_index, placement_uncertainty, "
+            "num_ambiguous_hits, and identity_gap."
+        ),
+        exists=True,
+        dir_okay=False,
+    ),
+    output: Path = typer.Option(
+        ...,
+        "--output",
+        "-o",
+        help="Output file path (TSV or JSON based on --format).",
+    ),
+    config_file: Path | None = typer.Option(
+        None,
+        "--config",
+        help=(
+            "Base ScoringConfig YAML to vary. Defaults to built-in defaults. "
+            "Threshold ranges sweep around the novelty_known_max and "
+            "uncertainty_known_max fields."
+        ),
+        exists=True,
+        dir_okay=False,
+    ),
+    novelty_min: float = typer.Option(
+        2.0,
+        "--novelty-min",
+        help="Lower bound of the novelty_known_max sweep (default 2.0).",
+        min=0.0,
+        max=100.0,
+    ),
+    novelty_max: float = typer.Option(
+        8.0,
+        "--novelty-max",
+        help="Upper bound of the novelty_known_max sweep (default 8.0).",
+        min=0.0,
+        max=100.0,
+    ),
+    uncertainty_min: float = typer.Option(
+        0.5,
+        "--uncertainty-min",
+        help="Lower bound of the uncertainty_known_max sweep (default 0.5).",
+        min=0.0,
+        max=100.0,
+    ),
+    uncertainty_max: float = typer.Option(
+        3.0,
+        "--uncertainty-max",
+        help="Upper bound of the uncertainty_known_max sweep (default 3.0).",
+        min=0.0,
+        max=100.0,
+    ),
+    steps: int = typer.Option(
+        9,
+        "--steps",
+        help="Number of threshold points to evaluate (default 9).",
+        min=2,
+        max=101,
+    ),
+    output_format: str = typer.Option(
+        "tsv",
+        "--format",
+        "-f",
+        help="Output format: 'tsv' (long form) or 'json'.",
+    ),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        "-q",
+        help="Suppress progress output.",
+    ),
+) -> None:
+    """Sweep classification thresholds and report category counts.
+
+    Re-classifies the rows of an existing classification file across a
+    grid of (novelty_known_max, uncertainty_known_max) values, varying
+    both proportionally in ``steps`` increments. The output reveals
+    whether category counts are stable or sharply threshold-dependent.
+
+    Example:
+
+        metadarkmatter score sensitivity \\
+            --classifications results.csv \\
+            --output sensitivity.tsv \\
+            --novelty-min 2 --novelty-max 10 --steps 17
+    """
+    import json
+
+    from metadarkmatter.core.classification.sensitivity import (
+        run_sensitivity_analysis,
+    )
+
+    if novelty_min >= novelty_max:
+        console.print("[red]--novelty-min must be strictly less than --novelty-max[/red]")
+        raise typer.Exit(code=2)
+    if uncertainty_min >= uncertainty_max:
+        console.print(
+            "[red]--uncertainty-min must be strictly less than --uncertainty-max[/red]"
+        )
+        raise typer.Exit(code=2)
+    if output_format not in ("tsv", "json"):
+        console.print(
+            f"[red]Invalid --format '{output_format}'. Use 'tsv' or 'json'.[/red]"
+        )
+        raise typer.Exit(code=2)
+
+    out = QuietConsole(console, quiet=quiet)
+    out.print("\n[bold blue]Threshold sensitivity analysis[/bold blue]\n")
+
+    df = read_dataframe(classifications)
+    required = {"novelty_index", "placement_uncertainty", "num_ambiguous_hits", "identity_gap"}
+    missing = required - set(df.columns)
+    if missing:
+        console.print(
+            f"[red]Classification file is missing required columns: "
+            f"{sorted(missing)}.[/red]\n"
+            "[dim]Run 'score classify' to produce a compatible file.[/dim]"
+        )
+        raise typer.Exit(code=1)
+
+    base_config = (
+        ScoringConfig.from_yaml(config_file) if config_file is not None else ScoringConfig()
+    )
+
+    out.print(
+        f"Sweeping novelty in [{novelty_min}, {novelty_max}] "
+        f"and uncertainty in [{uncertainty_min}, {uncertainty_max}] "
+        f"over {steps} points on {len(df):,} reads ..."
+    )
+
+    result = run_sensitivity_analysis(
+        df=df,
+        base_config=base_config,
+        novelty_range=(novelty_min, novelty_max),
+        uncertainty_range=(uncertainty_min, uncertainty_max),
+        steps=steps,
+    )
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+
+    if output_format == "json":
+        output.write_text(json.dumps(result.to_dict(), indent=2))
+    else:
+        # Long-form TSV: one row per (threshold_point, category).
+        rows: list[dict[str, Any]] = []
+        for i, (n_thr, u_thr) in enumerate(
+            zip(result.novelty_thresholds, result.uncertainty_thresholds, strict=True)
+        ):
+            for category, counts in result.counts.items():
+                rows.append(
+                    {
+                        "novelty_known_max": round(n_thr, 4),
+                        "uncertainty_known_max": round(u_thr, 4),
+                        "taxonomic_call": category,
+                        "count": counts[i],
+                    }
+                )
+        pl.DataFrame(rows).write_csv(output, separator="\t")
+
+    out.print(f"\n[green]Sensitivity results written to:[/green] {output}")
