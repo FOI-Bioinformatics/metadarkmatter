@@ -463,24 +463,30 @@ class VectorizedClassifier:
             if not off_target_reads.is_empty():
                 off_target_read_ids = set(off_target_reads["qseqid"].to_list())
 
+                # For off-target reads we cannot compute a true placement
+                # uncertainty (the matching genome is outside the ANI matrix),
+                # so leave it null rather than reporting a misleading 0.0.
+                # Confidence is intentionally low (10.0) rather than zero so
+                # downstream filters can still rank off-target hits by their
+                # external identity if needed.
                 off_target_cols = [
                     pl.col("qseqid").alias("read_id"),
                     pl.col("external_best_genome").fill_null("unknown").alias("best_match_genome"),
                     pl.col("external_best_identity").alias("top_hit_identity"),
                     (100.0 - pl.col("external_best_identity")).alias("novelty_index"),
-                    pl.lit(0.0).alias("placement_uncertainty"),
-                    pl.lit(0.0).alias("genus_uncertainty"),
-                    pl.lit("unambiguous").alias("ambiguity_scope"),
+                    pl.lit(None).cast(pl.Float64).alias("placement_uncertainty"),
+                    pl.lit(None).cast(pl.Float64).alias("genus_uncertainty"),
+                    pl.lit("off_target").alias("ambiguity_scope"),
                     pl.lit(0).cast(pl.Int64).alias("num_ambiguous_hits"),
                     pl.lit(None).cast(pl.Float64).alias("second_hit_identity"),
                     pl.lit(None).cast(pl.Float64).alias("identity_gap"),
-                    pl.lit(0.0).alias("confidence_score"),
+                    pl.lit(10.0).alias("confidence_score"),
                     pl.lit("Off-target").alias("taxonomic_call"),
                     pl.lit("Off-target").alias("diversity_status"),
                     pl.lit(False).alias("is_novel"),
-                    pl.lit(False).alias("low_confidence"),
+                    pl.lit(True).alias("low_confidence"),
                     pl.lit(None).cast(pl.Float64).alias("inferred_uncertainty"),
-                    pl.lit("none").alias("uncertainty_type"),
+                    pl.lit("off_target").alias("uncertainty_type"),
                     pl.col("family_bitscore_ratio"),
                     pl.col("family_identity_gap"),
                     pl.col("in_family_hit_fraction"),
@@ -714,8 +720,8 @@ class VectorizedClassifier:
 
             # Step 5b: Calculate phylogenetic context metrics
             # Count secondary representatives and their ANI relationship to best genome
-            genus_threshold = 80.0  # Same genus if ANI >= 80%
-            species_threshold = 95.0  # Same species if ANI >= 95%
+            genus_threshold = self.config.same_genus_ani_threshold
+            species_threshold = self.config.same_species_ani_threshold
 
             phylo_metrics = (
                 secondary_with_ani

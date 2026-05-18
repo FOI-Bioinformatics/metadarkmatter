@@ -151,8 +151,8 @@ class ToolExecutionError(MetadarkmatterError):
             cmd_str = cmd_str[:200] + "..."
 
         stderr_display = stderr.strip()
-        if len(stderr_display) > 500:
-            stderr_display = stderr_display[:500] + "\n...[truncated]"
+        if len(stderr_display) > 4000:
+            stderr_display = stderr_display[:4000] + "\n...[truncated]"
 
         super().__init__(
             message=(

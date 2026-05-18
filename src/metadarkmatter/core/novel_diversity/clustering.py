@@ -63,6 +63,7 @@ class NovelDiversityAnalyzer:
         novelty_band_size: float = 5.0,
         min_cluster_size: int = 3,
         genome_neighborhood_threshold: float = 80.0,
+        merge_band_tolerance: float = 2.0,
     ) -> None:
         """
         Initialize the analyzer.
@@ -85,6 +86,7 @@ class NovelDiversityAnalyzer:
         self._novelty_band_size = novelty_band_size
         self._min_cluster_size = min_cluster_size
         self._genome_neighborhood_threshold = genome_neighborhood_threshold
+        self._merge_band_tolerance = merge_band_tolerance
         self._clusters: list[NovelCluster] | None = None
         self._summary: NovelDiversitySummary | None = None
 
@@ -224,8 +226,10 @@ class NovelDiversityAnalyzer:
                 and nxt["taxonomic_call"] == current["taxonomic_call"]
             )
             adjacent_band = (nxt["novelty_band"] - current["novelty_band"]) <= band_size
-            # Overlapping or near-overlapping novelty ranges (2% tolerance)
-            ranges_close = (current["novelty_max"] >= nxt["novelty_min"] - 2.0)
+            # Overlapping or near-overlapping novelty ranges
+            ranges_close = (
+                current["novelty_max"] >= nxt["novelty_min"] - self._merge_band_tolerance
+            )
 
             if same_group and adjacent_band and ranges_close:
                 # Merge nxt into current

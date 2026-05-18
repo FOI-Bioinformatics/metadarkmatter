@@ -397,6 +397,48 @@ class ScoringConfig(BaseModel):
         ),
     )
 
+    # ANI threshold used to decide whether competing genomes are in the same
+    # genus when computing phylogenetic context metrics. Default 80% follows
+    # the conventional ANI genus boundary but is configurable per clade.
+    same_genus_ani_threshold: float = Field(
+        default=80.0,
+        ge=0.0,
+        le=100.0,
+        description=(
+            "ANI percent above which two genomes are considered same-genus "
+            "during phylogenetic context computation. Default 80% follows the "
+            "conventional ANI genus boundary; lower for divergent clades."
+        ),
+    )
+
+    # ANI threshold used to decide whether two genomes are in the same species
+    # when computing phylogenetic context metrics. Default 95% follows
+    # Jain et al. 2018.
+    same_species_ani_threshold: float = Field(
+        default=95.0,
+        ge=0.0,
+        le=100.0,
+        description=(
+            "ANI percent above which two genomes are considered same-species. "
+            "Default 95% per Jain et al. 2018; configurable per clade."
+        ),
+    )
+
+    # Tolerance in percentage points used by adjacent-band merging in the
+    # novel-diversity clustering step. Two novelty bands are merged when their
+    # ranges overlap or fall within this tolerance.
+    merge_band_tolerance: float = Field(
+        default=2.0,
+        ge=0.0,
+        le=20.0,
+        description=(
+            "Percentage-point tolerance for merging adjacent novelty bands "
+            "during novel-cluster aggregation. Two bands are merged when "
+            "current.novelty_max >= next.novelty_min - tolerance. "
+            "Default 2.0 preserves prior behavior; 0.0 requires strict overlap."
+        ),
+    )
+
     # Bayesian classification configuration
     bayesian: BayesianConfig = Field(
         default_factory=BayesianConfig,

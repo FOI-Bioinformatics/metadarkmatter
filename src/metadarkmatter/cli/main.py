@@ -72,7 +72,7 @@ def main(
 
 
 # Import subcommands
-from metadarkmatter.cli import aai, ani, blast, blastx, download, kraken2, mapping, mmseqs2, proteins, report, score, tree, validate, visualize
+from metadarkmatter.cli import aai, ani, blast, blastx, doctor, download, kraken2, mapping, mmseqs2, proteins, report, score, tree, validate, visualize
 from metadarkmatter.cli import map as map_cmd  # Alias to avoid shadowing builtin
 
 # Register subcommands
@@ -91,6 +91,7 @@ app.add_typer(report.app, name="report")
 app.add_typer(mapping.app, name="util")
 app.add_typer(tree.app, name="tree")
 app.add_typer(validate.app, name="validate")
+app.add_typer(doctor.app, name="doctor")
 
 
 if __name__ == "__main__":

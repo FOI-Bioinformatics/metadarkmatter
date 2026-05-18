@@ -92,7 +92,8 @@ class TestToolExecutionError:
 
     def test_error_truncates_long_stderr(self):
         """Should truncate very long error output."""
-        long_stderr = "x" * 1000
+        # Truncation threshold is 4000 chars; use a longer payload to trigger it.
+        long_stderr = "x" * 8000
         error = ToolExecutionError(
             tool_name="test",
             command=["test"],
