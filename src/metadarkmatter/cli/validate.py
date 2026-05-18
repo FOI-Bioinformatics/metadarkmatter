@@ -16,6 +16,12 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from metadarkmatter.core.sequence_validation import (
+    ValidationResult,
+    validate_fasta,
+    validate_fastq,
+)
+
 app = typer.Typer(
     name="validate",
     help="Validate input files for the metadarkmatter pipeline",
@@ -291,3 +297,70 @@ def ani(
         raise typer.Exit(code=1)
     else:
         console.print("[green]ANI matrix is valid[/green]")
+
+
+def _report_sequence_result(result: ValidationResult, kind: str) -> None:
+    """Render a ValidationResult to the console and exit on failure."""
+    console.print(f"File: {result.path}")
+    console.print(f"Records sampled: {result.record_count}")
+    if result.sample_record_id:
+        console.print(f"First record id: {result.sample_record_id}")
+    if result.issues:
+        console.print(
+            Panel(
+                "\n".join(result.issues),
+                title=f"{kind} issues found",
+                border_style="red",
+            )
+        )
+        raise typer.Exit(code=1)
+    console.print(f"[green]{kind} file is valid[/green]")
+
+
+@app.command()
+def fasta(
+    input: Path = typer.Option(
+        ..., "--input", "-i", help="FASTA file (.fa/.fasta/.fna, optionally .gz)"
+    ),
+    max_records: int = typer.Option(
+        0,
+        "--max-records",
+        help="Stop after this many records (0 = read whole file).",
+        min=0,
+    ),
+    sequence_type: str = typer.Option(
+        "nucleotide",
+        "--sequence-type",
+        "-t",
+        help="Allowed-character set: 'nucleotide' or 'protein'.",
+    ),
+) -> None:
+    """Validate a FASTA file (streaming, dependency-free)."""
+    if sequence_type not in ("nucleotide", "protein"):
+        console.print(
+            f"[red]--sequence-type must be 'nucleotide' or 'protein', "
+            f"got '{sequence_type}'[/red]"
+        )
+        raise typer.Exit(code=2)
+
+    cap = max_records if max_records > 0 else None
+    result = validate_fasta(input, max_records=cap, sequence_type=sequence_type)
+    _report_sequence_result(result, "FASTA")
+
+
+@app.command()
+def fastq(
+    input: Path = typer.Option(
+        ..., "--input", "-i", help="FASTQ file (.fq/.fastq, optionally .gz)"
+    ),
+    max_records: int = typer.Option(
+        0,
+        "--max-records",
+        help="Stop after this many records (0 = read whole file).",
+        min=0,
+    ),
+) -> None:
+    """Validate a FASTQ file (4-line record structure)."""
+    cap = max_records if max_records > 0 else None
+    result = validate_fastq(input, max_records=cap)
+    _report_sequence_result(result, "FASTQ")
