@@ -316,7 +316,10 @@ def generate_report(
                     )
 
                 out.print(f"  [green]Loaded {len(recruitment_df):,} alignments[/green]")
-        except (ImportError, FileNotFoundError, OSError, ValueError) as e:
+        except (ImportError, FileNotFoundError, OSError, ValueError, RuntimeError) as e:
+            # RuntimeError covers pysam / htslib parse failures on corrupt
+            # or truncated BAM files - degrade gracefully to a report
+            # without recruitment plots rather than failing the whole run.
             console.print(f"[yellow]Warning: Could not extract from BAM: {e}[/yellow]")
 
     # Step 3: Generate report

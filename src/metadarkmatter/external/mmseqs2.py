@@ -19,11 +19,18 @@ from __future__ import annotations
 
 import logging
 import shutil
+import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, ClassVar
 
-from metadarkmatter.external.base import ExternalTool, validate_path_safe
+from metadarkmatter.external.base import (
+    ExternalTool,
+    ToolExecutionError,
+    ToolTimeoutError,
+    validate_path_safe,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -484,9 +491,6 @@ class MMseqs2(ExternalTool):
         timeout: float | None,
     ) -> dict[str, Any]:
         """Execute the multi-step MMseqs2 search workflow."""
-        import subprocess
-        import time
-
         # Setup query database path
         if query_db is None:
             query_db = tmp_dir / "queryDB"
@@ -499,6 +503,36 @@ class MMseqs2(ExternalTool):
         exe = str(self.get_executable())
         dbtype = search_type - 1  # 3->2 for nucleotide, 2->1 for protein
 
+        def _run_step(cmd: list[str]) -> float:
+            """Run an MMseqs2 sub-command and translate failures.
+
+            Wraps subprocess.run so a non-zero exit or a timeout raises
+            the same friendly exceptions the rest of the codebase uses.
+            """
+            step_start = time.perf_counter()
+            try:
+                subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout,
+                    check=True,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise ToolTimeoutError(
+                    tool_name=self.TOOL_NAME,
+                    timeout_seconds=timeout or 0.0,
+                    command=cmd,
+                ) from exc
+            except subprocess.CalledProcessError as exc:
+                raise ToolExecutionError(
+                    tool_name=self.TOOL_NAME,
+                    command=cmd,
+                    return_code=exc.returncode,
+                    stderr=exc.stderr or "",
+                ) from exc
+            return time.perf_counter() - step_start
+
         total_start = time.perf_counter()
 
         # Step 1: Create query database (skip if exists)
@@ -509,16 +543,7 @@ class MMseqs2(ExternalTool):
                 str(query), str(query_db),
                 "--dbtype", str(dbtype),
             ]
-
-            start = time.perf_counter()
-            subprocess.run(
-                createdb_cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=True,
-            )
-            createdb_time = time.perf_counter() - start
+            createdb_time = _run_step(createdb_cmd)
 
         # Step 2: Run search
         search_cmd = [
@@ -534,15 +559,7 @@ class MMseqs2(ExternalTool):
         if min_identity is not None:
             search_cmd.extend(["--min-seq-id", str(min_identity / 100.0)])
 
-        start = time.perf_counter()
-        subprocess.run(
-            search_cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=True,
-        )
-        search_time = time.perf_counter() - start
+        search_time = _run_step(search_cmd)
 
         # Step 3: Convert to BLAST format
         format_str = ",".join(self.BLAST_FORMAT_COLUMNS)
@@ -553,15 +570,7 @@ class MMseqs2(ExternalTool):
             "--format-output", format_str,
         ]
 
-        start = time.perf_counter()
-        subprocess.run(
-            convertalis_cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=True,
-        )
-        convertalis_time = time.perf_counter() - start
+        convertalis_time = _run_step(convertalis_cmd)
 
         total_time = time.perf_counter() - total_start
 

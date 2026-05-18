@@ -745,11 +745,11 @@ class TestMMseqs2CreateDatabase:
 class TestMMseqs2Search:
     """Tests for MMseqs2.search convenience method."""
 
-    @patch("metadarkmatter.external.base.subprocess.run")
-    def test_search_calls_run_or_raise(
+    @patch("metadarkmatter.external.mmseqs2.subprocess.run")
+    def test_search_runs_multistep_workflow(
         self, mock_run: MagicMock, mock_mmseqs: MMseqs2, tmp_path: Path
     ):
-        """Should call run_or_raise with search mode."""
+        """Should invoke the three-step createdb / search / convertalis workflow."""
         mock_run.return_value = MagicMock(
             returncode=0, stdout="", stderr=""
         )
@@ -762,15 +762,16 @@ class TestMMseqs2Search:
             output=tmp_path / "out.tsv",
         )
 
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
-        assert "easy-search" in cmd
+        # Three subprocess calls: createdb, search, convertalis
+        assert mock_run.call_count == 3
+        subcommands = [call.args[0][1] for call in mock_run.call_args_list]
+        assert subcommands == ["createdb", "search", "convertalis"]
 
-    @patch("metadarkmatter.external.base.subprocess.run")
+    @patch("metadarkmatter.external.mmseqs2.subprocess.run")
     def test_search_with_all_parameters(
         self, mock_run: MagicMock, mock_mmseqs: MMseqs2, tmp_path: Path
     ):
-        """Should pass all search parameters through."""
+        """Should pass all search parameters through to the search step."""
         mock_run.return_value = MagicMock(
             returncode=0, stdout="", stderr=""
         )
@@ -789,23 +790,30 @@ class TestMMseqs2Search:
             search_type=2,
         )
 
-        cmd = mock_run.call_args[0][0]
-        assert "--threads" in cmd
-        assert "16" in cmd
-        assert "-s" in cmd
-        assert "7.0" in cmd
-        assert "--min-seq-id" in cmd
-        assert "0.8" in cmd
-        assert "--search-type" in cmd
-        assert "2" in cmd
+        # The 'search' step is the second of the three subprocess calls.
+        search_cmd = mock_run.call_args_list[1].args[0]
+        assert "search" in search_cmd
+        assert "--threads" in search_cmd
+        assert "16" in search_cmd
+        assert "-s" in search_cmd
+        assert "7.0" in search_cmd
+        assert "--min-seq-id" in search_cmd
+        assert "0.8" in search_cmd
+        assert "--search-type" in search_cmd
+        assert "2" in search_cmd
 
-    @patch("metadarkmatter.external.base.subprocess.run")
+    @patch("metadarkmatter.external.mmseqs2.subprocess.run")
     def test_search_raises_on_failure(
         self, mock_run: MagicMock, mock_mmseqs: MMseqs2, tmp_path: Path
     ):
-        """Should raise ToolExecutionError when search fails."""
-        mock_run.return_value = MagicMock(
-            returncode=1, stdout="", stderr="search failed"
+        """Should raise ToolExecutionError when an MMseqs2 step fails."""
+        # subprocess.run(check=True) raises CalledProcessError on non-zero
+        # exit; the multistep helper must translate that to our friendly
+        # ToolExecutionError.
+        mock_run.side_effect = subprocess.CalledProcessError(
+            returncode=1,
+            cmd=["mmseqs", "createdb"],
+            stderr="createdb failed",
         )
         query = tmp_path / "reads.fastq"
         query.write_text("@read1\nACGT\n+\nIIII\n")
@@ -817,15 +825,17 @@ class TestMMseqs2Search:
                 output=tmp_path / "out.tsv",
             )
 
-    @patch("metadarkmatter.external.base.subprocess.run")
-    def test_search_capture_output_false(
+    @patch("metadarkmatter.external.mmseqs2.subprocess.run")
+    def test_search_capture_output_kwarg_is_ignored(
         self, mock_run: MagicMock, mock_mmseqs: MMseqs2, tmp_path: Path
     ):
-        """Should support capture_output=False for batch processing."""
-        mock_run.return_value = MagicMock(returncode=0)
+        """Legacy capture_output=False is accepted for backwards compatibility."""
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
         query = tmp_path / "reads.fastq"
         query.write_text("@read1\nACGT\n+\nIIII\n")
 
+        # No exception should be raised; the kwarg is kept as a no-op for
+        # callers from before the multistep refactor.
         mock_mmseqs.search(
             query=query,
             database=tmp_path / "db",
@@ -833,8 +843,9 @@ class TestMMseqs2Search:
             capture_output=False,
         )
 
-        call_kwargs = mock_run.call_args.kwargs
-        assert call_kwargs.get("stdout") == subprocess.DEVNULL
+        # Each step always captures output internally for diagnostics.
+        for call in mock_run.call_args_list:
+            assert call.kwargs.get("capture_output") is True
 
 
 # =========================================================================
@@ -1034,11 +1045,11 @@ class TestMMseqs2SearchMultistep:
     def test_search_step_failure_raises(
         self, mock_run: MagicMock, mock_mmseqs: MMseqs2, tmp_path: Path
     ):
-        """Should raise CalledProcessError when search step fails."""
+        """Should translate CalledProcessError into ToolExecutionError."""
 
         def side_effect(cmd, **kwargs):
             if "search" in cmd and "createdb" not in cmd and "convertalis" not in cmd:
-                raise subprocess.CalledProcessError(1, cmd)
+                raise subprocess.CalledProcessError(1, cmd, stderr="search failed")
             return MagicMock(returncode=0, stdout="", stderr="")
 
         mock_run.side_effect = side_effect
@@ -1049,7 +1060,7 @@ class TestMMseqs2SearchMultistep:
         database.touch()
         output = tmp_path / "results.tsv"
 
-        with pytest.raises(subprocess.CalledProcessError):
+        with pytest.raises(ToolExecutionError):
             mock_mmseqs.search_multistep(
                 query=query,
                 database=database,
