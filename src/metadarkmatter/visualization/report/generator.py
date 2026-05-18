@@ -258,6 +258,10 @@ class ReportConfig:
     max_table_rows: int = 10000  # Configurable via CLI --max-table-rows
     max_scatter_points: int = 50000
     include_plotlyjs: str = "cdn"  # 'cdn', 'embed', or path
+    # Asset mode for embedded JS dependencies (Plotly, D3). 'offline' inlines
+    # the JS from the Python package and any vendored assets so the report is
+    # fully self-contained; 'cdn' uses remote script tags (smaller file).
+    report_mode: str = "offline"  # 'offline' or 'cdn'
 
     # Histogram bin sizes (None = auto-calculate based on nbins)
     novelty_bin_size: float | None = None  # e.g., 1.0 for 1% bins
@@ -2649,7 +2653,9 @@ document.addEventListener('DOMContentLoaded', function() {
             )
 
             # PHYLOTREE_JS_TEMPLATE uses {{ and }} for JS braces, call .format() to convert
-            return section_html + PHYLOTREE_JS_TEMPLATE.format()
+            from metadarkmatter.visualization.report.assets import get_d3_script_tag
+            d3_script_tag = get_d3_script_tag(self.config.report_mode)
+            return section_html + PHYLOTREE_JS_TEMPLATE.format(d3_script_tag=d3_script_tag)
 
         except ImportError as e:
             logger.warning(f"Phylogeny dependencies not available: {e}")
@@ -2817,13 +2823,16 @@ document.addEventListener('DOMContentLoaded', function() {
     def _build_plotly_cdn_script(self) -> str:
         """Build the Plotly.js script tag based on config.
 
-        Returns CDN script tag when include_plotlyjs='cdn', or empty string
-        when Plotly is embedded via plotly figure html export.
+        Uses the report-mode setting to decide between an inline copy of
+        plotly.js (from the installed plotly Python package) and the public
+        CDN. The 'include_plotlyjs' value 'embed' is treated as a request to
+        keep this tag empty because the JS is already inlined elsewhere.
         """
-        if self.config.include_plotlyjs == "cdn":
-            return '    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>'
-        # For 'embed' or path modes, Plotly JS is included inline by _build_plotly_js
-        return ""
+        from metadarkmatter.visualization.report.assets import get_plotly_script_tag
+
+        if self.config.include_plotlyjs == "embed":
+            return ""
+        return get_plotly_script_tag(self.config.report_mode)
 
     def _build_plotly_js(self) -> str:
         """Build Plotly.js initialization code for all plots."""

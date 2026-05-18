@@ -135,6 +135,15 @@ def generate_report(
         "--no-phylogeny",
         help="Skip phylogeny tab generation (faster for large datasets).",
     ),
+    report_mode: str = typer.Option(
+        "offline",
+        "--report-mode",
+        help=(
+            "Asset bundling mode: 'offline' inlines Plotly (and vendored D3) "
+            "for a self-contained HTML file, 'cdn' uses remote script tags "
+            "(smaller file but needs network access to render)."
+        ),
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose", "-v",
@@ -322,6 +331,13 @@ def generate_report(
         task = progress.add_task(description="Building visualizations...", total=None)
 
         try:
+            if report_mode not in ("offline", "cdn"):
+                console.print(
+                    f"[red]Invalid --report-mode '{report_mode}'. "
+                    "Use 'offline' or 'cdn'.[/red]"
+                )
+                raise typer.Exit(code=2)
+
             config = ReportConfig(
                 sample_name=sample_name,
                 title=title,
@@ -333,6 +349,7 @@ def generate_report(
                 max_phylo_references=max_phylo_references,
                 skip_phylogeny=no_phylogeny,
                 user_tree_path=tree,
+                report_mode=report_mode,
                 plot_config=PlotConfig(),
                 thresholds=ThresholdConfig(),
             )
@@ -732,3 +749,52 @@ def summarize_novel_diversity(
     out.print(f"  - Genera with novel species: {summary.genera_with_novel_species}")
     out.print(f"  - Families with novel genera: {summary.families_with_novel_genera}")
     out.print(f"\n[dim]Output: {output}[/dim]\n")
+
+
+@app.command(name="vendor-d3")
+def vendor_d3(
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite the cached D3 asset if it already exists.",
+    ),
+    timeout: float = typer.Option(
+        30.0,
+        "--timeout",
+        help="HTTP timeout in seconds.",
+    ),
+) -> None:
+    """Download d3.v7.min.js into the package's report assets directory.
+
+    Once cached, reports generated with --report-mode offline will inline
+    the local copy, allowing the phylogeny tab to render without network
+    access. This is intended as a one-time step on an internal lab machine.
+    """
+    import httpx
+    from metadarkmatter.visualization.report.assets import (
+        D3_CDN_URL,
+        D3_FILENAME,
+    )
+    from metadarkmatter.visualization.report import assets as _assets
+
+    target = Path(_assets.__file__).parent / D3_FILENAME
+    if target.exists() and not force:
+        console.print(
+            f"[yellow]D3 already vendored at {target}. "
+            "Use --force to overwrite.[/yellow]"
+        )
+        return
+
+    console.print(f"Downloading D3 from {D3_CDN_URL} ...")
+    try:
+        response = httpx.get(D3_CDN_URL, timeout=timeout, follow_redirects=True)
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        console.print(f"[red]Download failed: {exc}[/red]")
+        raise typer.Exit(code=1) from None
+
+    target.write_bytes(response.content)
+    size_kb = target.stat().st_size / 1024
+    console.print(
+        f"[green]Vendored D3 to {target} ({size_kb:.1f} KB).[/green]"
+    )

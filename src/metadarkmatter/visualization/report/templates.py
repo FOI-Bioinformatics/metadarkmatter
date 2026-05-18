@@ -1608,17 +1608,17 @@ PHYLOGENY_SECTION_TEMPLATE: str = '''
 '''
 
 PHYLOTREE_JS_TEMPLATE: str = '''
-<script src="https://d3js.org/d3.v7.min.js"></script>
+{d3_script_tag}
 <script>
 // Phylogenetic tree visualization using D3.js
 (function() {{
     'use strict';
 
-    // Check if D3.js loaded (CDN may be unavailable)
+    // Check if D3.js loaded (vendored copy or CDN may be unavailable)
     if (typeof d3 === 'undefined') {{
         var container = document.getElementById('phylogeny-tree');
         if (container) {{
-            container.innerHTML = '<p style="color:#666;padding:2em;">Phylogenetic tree requires D3.js (CDN unavailable). Check your internet connection.</p>';
+            container.innerHTML = '<p style="color:#666;padding:2em;">Phylogenetic tree requires D3.js. Run \\'metadarkmatter report vendor-d3\\' to embed D3 locally, or check your internet connection.</p>';
         }}
         return;
     }}
