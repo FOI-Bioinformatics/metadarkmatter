@@ -53,8 +53,10 @@ Before publishing a result we recommend the following steps:
 2. Run `metadarkmatter doctor > doctor.txt` and archive the output
    alongside the result. This records Python version, package
    versions, and external-tool versions and paths.
-3. Pass an explicit `--seed` to any subcommand that exposes one, so
-   any random-state-dependent steps are bit-reproducible.
+3. Set `METADARKMATTER_SEED=<integer>` if you want to use a non-default
+   seed; every randomness-using site in metadarkmatter (plot
+   subsampling, adaptive GMM fits) reads this single variable, defaulting
+   to 42 when unset.
 4. For pipeline-level reproducibility, record the SHA of the
    metadarkmatter commit and the exact CLI invocation.
 

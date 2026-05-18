@@ -2781,7 +2781,8 @@ document.addEventListener('DOMContentLoaded', function() {
         plot_df = self.df
         effective_max = max_points or self.config.max_scatter_points
         if len(plot_df) > effective_max:
-            plot_df = plot_df.sample(n=effective_max, seed=42)
+            from metadarkmatter.core.random import get_seed
+            plot_df = plot_df.sample(n=effective_max, seed=get_seed())
 
         fig = go.Figure()
         for call, color in categories.items():

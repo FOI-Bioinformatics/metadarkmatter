@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from metadarkmatter.core.random import get_seed
+
 if TYPE_CHECKING:
     from metadarkmatter.core.classification.ani_matrix import ANIMatrix
     from metadarkmatter.models.config import ScoringConfig
@@ -116,7 +118,7 @@ def detect_species_boundary(
             covariance_type="full",
             max_iter=200,
             n_init=5,
-            random_state=42,
+            random_state=get_seed(),
         )
         gmm.fit(ani_array)
 
@@ -320,7 +322,7 @@ def detect_genus_boundary(
             covariance_type="full",
             max_iter=200,
             n_init=5,
-            random_state=42,
+            random_state=get_seed(),
         )
         gmm.fit(ani_array)
 

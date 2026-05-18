@@ -14,6 +14,8 @@ from typing import Literal
 
 import polars as pl
 
+from metadarkmatter.core.random import get_seed
+
 try:
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
@@ -123,7 +125,7 @@ class RecruitmentPlotGenerator:
 
         # Subsample if too many points
         if len(plot_data) > max_points:
-            plot_data = plot_data.sample(n=max_points, seed=42)
+            plot_data = plot_data.sample(n=max_points, seed=get_seed())
 
         # Create figure
         fig = go.Figure()
@@ -269,7 +271,7 @@ class RecruitmentPlotGenerator:
             genome_data = self.data.filter(pl.col("genome_name") == genome_name)
 
             if len(genome_data) > max_points_per_genome:
-                genome_data = genome_data.sample(n=max_points_per_genome, seed=42)
+                genome_data = genome_data.sample(n=max_points_per_genome, seed=get_seed())
 
             # Add identity bands
             if show_bands and len(genome_data) > 0:
