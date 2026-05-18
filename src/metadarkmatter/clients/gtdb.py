@@ -7,11 +7,15 @@ retrieving representative genome accessions by taxonomic group.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+import os
 import re
 import time
 from collections import Counter
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Self
 from urllib.parse import quote
 
@@ -27,6 +31,26 @@ GTDB_API_BASE = "https://gtdb-api.ecogenomic.org"
 DEFAULT_MAX_RETRIES = 3
 DEFAULT_RETRY_DELAY = 1.0  # seconds
 DEFAULT_RETRY_BACKOFF = 2.0  # exponential multiplier
+
+# On-disk cache defaults
+DEFAULT_CACHE_TTL_SECONDS = 7 * 24 * 3600  # 7 days
+USE_DEFAULT_CACHE = object()  # Sentinel: opt in to the default cache directory.
+_CACHE_ENV_VAR = "METADARKMATTER_GTDB_CACHE_DIR"
+
+
+def _default_cache_dir() -> Path | None:
+    """Resolve the default cache directory.
+
+    Honours the ``METADARKMATTER_GTDB_CACHE_DIR`` environment variable.
+    An empty string in that variable disables caching entirely. When
+    unset, defaults to ``~/.cache/metadarkmatter/gtdb``.
+    """
+    env_value = os.environ.get(_CACHE_ENV_VAR)
+    if env_value is not None:
+        if env_value.strip() == "":
+            return None
+        return Path(env_value).expanduser()
+    return Path.home() / ".cache" / "metadarkmatter" / "gtdb"
 
 
 class GTDBAPIError(MetadarkmatterError):
@@ -120,6 +144,8 @@ class GTDBClient:
         max_retries: int = DEFAULT_MAX_RETRIES,
         retry_delay: float = DEFAULT_RETRY_DELAY,
         retry_backoff: float = DEFAULT_RETRY_BACKOFF,
+        cache_dir: Path | str | None | object = None,
+        cache_ttl: float | None = DEFAULT_CACHE_TTL_SECONDS,
     ):
         """Initialize GTDB client.
 
@@ -128,11 +154,27 @@ class GTDBClient:
             max_retries: Maximum retry attempts for transient failures.
             retry_delay: Initial delay between retries in seconds.
             retry_backoff: Exponential backoff multiplier for retries.
+            cache_dir: Directory for caching successful API responses.
+                Default ``None`` disables caching. Pass an explicit path
+                or the sentinel :data:`USE_DEFAULT_CACHE` to enable it; the
+                latter honours ``$METADARKMATTER_GTDB_CACHE_DIR`` and falls
+                back to ``~/.cache/metadarkmatter/gtdb``.
+            cache_ttl: Cache lifetime in seconds. Entries older than this are
+                refreshed from the API. Pass ``None`` to cache indefinitely.
         """
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.retry_backoff = retry_backoff
+
+        if cache_dir is USE_DEFAULT_CACHE:
+            resolved = _default_cache_dir()
+        elif cache_dir is None:
+            resolved = None
+        else:
+            resolved = Path(cache_dir).expanduser()
+        self.cache_dir: Path | None = resolved
+        self.cache_ttl = cache_ttl
         self._client: httpx.Client | None = None
 
     def _get_client(self) -> httpx.Client:
@@ -211,11 +253,55 @@ class GTDBClient:
             species_counts=self._count_by_rank(genomes, "species"),
         )
 
+    def _cache_path(self, endpoint: str, params: dict[str, str]) -> Path | None:
+        """Return the on-disk cache file for the given request, or None."""
+        if self.cache_dir is None:
+            return None
+        key_input = endpoint + "?" + "&".join(
+            f"{k}={params[k]}" for k in sorted(params)
+        )
+        digest = hashlib.sha256(key_input.encode("utf-8")).hexdigest()[:32]
+        return self.cache_dir / f"{digest}.json"
+
+    def _read_cache(self, cache_file: Path) -> Any | None:
+        """Read cached response if fresh, otherwise None."""
+        try:
+            payload = json.loads(cache_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.debug("Cache read failed for %s: %s", cache_file, exc)
+            return None
+        if self.cache_ttl is not None:
+            timestamp = payload.get("timestamp", 0)
+            if (time.time() - timestamp) > self.cache_ttl:
+                return None
+        return payload.get("data")
+
+    def _write_cache(
+        self,
+        cache_file: Path,
+        endpoint: str,
+        params: dict[str, str],
+        data: Any,
+    ) -> None:
+        """Write a successful response to the on-disk cache."""
+        try:
+            cache_file.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "endpoint": endpoint,
+                "params": params,
+                "timestamp": time.time(),
+                "data": data,
+            }
+            cache_file.write_text(json.dumps(payload), encoding="utf-8")
+        except OSError as exc:
+            logger.warning("Could not write GTDB cache to %s: %s", cache_file, exc)
+
     def _get(self, endpoint: str, params: dict[str, str]) -> Any:
-        """Make GET request to GTDB API with retry logic.
+        """Make GET request to GTDB API with retry logic and on-disk caching.
 
         Implements exponential backoff for transient failures (5xx errors,
-        connection errors, rate limiting).
+        connection errors, rate limiting) and caches successful responses
+        in :attr:`cache_dir` keyed by endpoint and parameters.
 
         Args:
             endpoint: API endpoint path
@@ -227,6 +313,13 @@ class GTDBClient:
         Raises:
             GTDBAPIError: If request fails after all retries
         """
+        cache_file = self._cache_path(endpoint, params)
+        if cache_file is not None and cache_file.is_file():
+            cached = self._read_cache(cache_file)
+            if cached is not None:
+                logger.debug("GTDB cache hit: %s", cache_file)
+                return cached
+
         client = self._get_client()
         last_exception: Exception | None = None
         delay = self.retry_delay
@@ -235,7 +328,10 @@ class GTDBClient:
             try:
                 response = client.get(endpoint, params=params)
                 response.raise_for_status()
-                return response.json()
+                data = response.json()
+                if cache_file is not None:
+                    self._write_cache(cache_file, endpoint, params, data)
+                return data
 
             except httpx.HTTPStatusError as e:
                 last_exception = e

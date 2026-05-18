@@ -27,6 +27,7 @@ from metadarkmatter.clients.gtdb import (
     GTDBAPIError,
     GTDBClient,
     InvalidTaxonFormatError,
+    USE_DEFAULT_CACHE,
 )
 from metadarkmatter.external import NCBIDatasets, ToolNotFoundError
 from metadarkmatter.models.genomes import AccessionList, GenomeAccession
@@ -128,8 +129,11 @@ def list_genomes(
         console.print("\n[green]Dry run complete. No requests were made.[/green]")
         raise typer.Exit(code=0)
 
-    # Query GTDB API
-    client = GTDBClient()
+    # Query GTDB API. Use the on-disk cache by default to make repeated
+    # 'download genomes list' invocations fast and resilient to brief
+    # network interruptions; the env var METADARKMATTER_GTDB_CACHE_DIR can
+    # override the location, or set it to empty to disable.
+    client = GTDBClient(cache_dir=USE_DEFAULT_CACHE)
 
     try:
         with spinner_progress("Querying GTDB API...", console, quiet):
