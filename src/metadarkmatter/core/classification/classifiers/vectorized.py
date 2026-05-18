@@ -606,8 +606,10 @@ class VectorizedClassifier:
                 pl.col("weighted_bitscore").max().alias("max_weighted_bitscore"),
                 # Keep original max_bitscore for compatibility
                 pl.col("bitscore").max().alias("max_bitscore"),
-                # Second-best weighted_bitscore for gap calculation
-                pl.col("weighted_bitscore").get(1).alias("second_weighted_bitscore"),
+                # Second-best weighted_bitscore for gap calculation. Use
+                # slice(1, 1).first() rather than .get(1) so single-hit
+                # groups yield null instead of raising on polars >= 1.37.
+                pl.col("weighted_bitscore").slice(1, 1).first().alias("second_weighted_bitscore"),
                 pl.col("pident")
                 .filter(pl.col("weighted_bitscore") == pl.col("weighted_bitscore").max())
                 .first()

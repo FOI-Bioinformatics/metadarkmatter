@@ -27,7 +27,7 @@ classifiers = [
 keywords = ["metagenomics", "eDNA", "taxonomy", "ANI", "microbial-ecology", "environmental-monitoring"]
 
 dependencies = [
-    "polars>=1.0.0,<1.37",
+    "polars>=1.36.0",
     "pyarrow>=15.0.0",
     "numpy>=1.26.0",
     "scipy>=1.11.0",
