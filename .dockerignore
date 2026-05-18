@@ -1,0 +1,38 @@
+# Keep the container build context small and predictable.
+
+# Version control and tooling
+.git/
+.github/
+.gitignore
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.cache/
+
+# Local virtualenvs (built fresh inside the image via uv.lock)
+.venv/
+venv/
+
+# Build / dist artefacts
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.pyc
+*.pyo
+
+# Local test outputs
+htmlcov/
+.coverage
+coverage.xml
+test_phylogeny_report.html
+results/
+
+# Editor metadata
+.vscode/
+.idea/
+*.swp
+
+# Container artefacts (avoid recursive copy if user has stale image)
+*.tar
+*.tar.gz

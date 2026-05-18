@@ -60,8 +60,29 @@ Before publishing a result we recommend the following steps:
 4. For pipeline-level reproducibility, record the SHA of the
    metadarkmatter commit and the exact CLI invocation.
 
+## Container image
+
+A `Containerfile` at the repository root builds an internal-lab image
+with Python 3.12, the locked Python environment, and all external
+bioinformatics tools pre-installed from bioconda. Build and run:
+
+```bash
+podman build -t metadarkmatter:dev .
+# or: docker build -t metadarkmatter:dev .
+
+podman run --rm -v "$PWD/data:/data" metadarkmatter:dev doctor
+podman run --rm -v "$PWD/data:/data" metadarkmatter:dev \
+    score classify --alignment /data/sample.blast.tsv.gz \
+                   --ani /data/ani_matrix.csv \
+                   --output /data/classifications.csv
+```
+
+The build step runs `metadarkmatter doctor` as a smoke test so a broken
+image fails the build instead of failing at first use. The image is
+not pushed to a public registry; pass a build tag suited to the local
+infrastructure (e.g. an internal registry path).
+
 ## Out of scope
 
 A public Docker image and PyPI release are not currently planned;
-metadarkmatter is operated as an internal lab tool. A
-`Containerfile` for in-lab use is on the roadmap.
+metadarkmatter is operated as an internal lab tool.
