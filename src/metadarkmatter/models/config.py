@@ -59,6 +59,19 @@ class BayesianConfig(BaseModel):
             "Reads with entropy above this value are flagged as low confidence."
         ),
     )
+    # Per-category 2D Gaussian parameters. When present, these override
+    # the hand-tuned defaults derived from the ScoringConfig thresholds.
+    # Produced by scripts/calibrate_bayesian.py from a labelled corpus.
+    # Format: {category_name: {novelty_mean, uncertainty_mean,
+    #                          novelty_sigma, uncertainty_sigma}}.
+    category_params: dict[str, dict[str, float]] | None = Field(
+        default=None,
+        description=(
+            "Calibrated per-category Gaussian parameters. When None, the "
+            "hand-tuned defaults derived from the ScoringConfig thresholds "
+            "are used."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_priors_sum(self) -> Self:
@@ -752,6 +765,8 @@ def _flatten_yaml_config(raw: dict[str, Any]) -> dict[str, Any]:
         _map_if_present(modulation, "identity_gap_boost", bay_kwargs, "identity_gap_boost")
         _map_if_present(modulation, "single_hit_boost", bay_kwargs, "single_hit_boost")
         _map_if_present(bayesian_raw, "entropy_threshold", bay_kwargs, "entropy_threshold")
+        if "category_params" in bayesian_raw and bayesian_raw["category_params"]:
+            bay_kwargs["category_params"] = bayesian_raw["category_params"]
         flat["bayesian"] = BayesianConfig(**bay_kwargs)
 
     # Filters section
@@ -830,6 +845,11 @@ def _build_yaml_structure(config: "ScoringConfig") -> dict[str, Any]:
                 "single_hit_boost": config.bayesian.single_hit_boost,
             },
             "entropy_threshold": config.bayesian.entropy_threshold,
+            "category_params": (
+                {k: dict(v) for k, v in config.bayesian.category_params.items()}
+                if config.bayesian.category_params
+                else None
+            ),
         },
         "filters": {
             "min_alignment_length": config.min_alignment_length,

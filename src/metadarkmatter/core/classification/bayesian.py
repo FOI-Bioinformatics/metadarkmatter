@@ -92,6 +92,9 @@ def build_category_params(config: ScoringConfig) -> list[CategoryParams]:
 
     Means are placed at the midpoints of threshold ranges; sigmas are
     range/3 + epsilon to provide adequate overlap near boundaries.
+    When ``config.bayesian.category_params`` is set (produced by
+    ``scripts/calibrate_bayesian.py``), those fitted values override
+    the hand-tuned defaults for every category they specify.
 
     Args:
         config: Scoring configuration with threshold values.
@@ -99,6 +102,20 @@ def build_category_params(config: ScoringConfig) -> list[CategoryParams]:
     Returns:
         List of CategoryParams in _CATEGORY_NAMES_6 order.
     """
+    fitted = config.bayesian.category_params or {}
+
+    def _merge(default: CategoryParams) -> CategoryParams:
+        if default.name not in fitted:
+            return default
+        spec = fitted[default.name]
+        return CategoryParams(
+            name=default.name,
+            novelty_mean=spec.get("novelty_mean", default.novelty_mean),
+            uncertainty_mean=spec.get("uncertainty_mean", default.uncertainty_mean),
+            novelty_sigma=spec.get("novelty_sigma", default.novelty_sigma),
+            uncertainty_sigma=spec.get("uncertainty_sigma", default.uncertainty_sigma),
+        )
+
     eff = config.get_effective_thresholds()
 
     n_known_max = eff["novelty_known_max"]
@@ -111,7 +128,7 @@ def build_category_params(config: ScoringConfig) -> list[CategoryParams]:
     u_gen_max = eff["uncertainty_novel_genus_max"]
     u_conserved = eff["uncertainty_conserved_min"]
 
-    return [
+    defaults = [
         # Known Species: low divergence, confident placement
         CategoryParams(
             name="Known Species",
@@ -161,6 +178,7 @@ def build_category_params(config: ScoringConfig) -> list[CategoryParams]:
             uncertainty_sigma=5.0,
         ),
     ]
+    return [_merge(p) for p in defaults]
 
 
 # ---------------------------------------------------------------------------
