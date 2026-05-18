@@ -2214,3 +2214,131 @@ def sensitivity(
         pl.DataFrame(rows).write_csv(output, separator="\t")
 
     out.print(f"\n[green]Sensitivity results written to:[/green] {output}")
+
+
+@app.command(name="evaluate")
+def evaluate(
+    predictions: Path = typer.Option(
+        ...,
+        "--predictions",
+        "-p",
+        help=(
+            "Classification CSV/Parquet produced by 'score classify'. "
+            "Must contain a 'taxonomic_call' column; 'confidence_score' "
+            "is required for calibration metrics."
+        ),
+        exists=True,
+        dir_okay=False,
+    ),
+    truth_column: str = typer.Option(
+        "true_category",
+        "--truth-column",
+        help="Name of the ground-truth column in the predictions file.",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help=(
+            "Optional JSON path for the full evaluation result; without it "
+            "only the console summary is printed."
+        ),
+    ),
+    n_confidence_bins: int = typer.Option(
+        10,
+        "--bins",
+        help="Number of equal-width confidence bins for ECE (default 10).",
+        min=2,
+        max=100,
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Suppress progress and summary output."
+    ),
+) -> None:
+    """Score classifications against a labelled ground-truth column.
+
+    Reports top-1 accuracy, per-category precision and recall, a
+    confusion matrix, and (when 'confidence_score' is present) the
+    expected calibration error and a reliability histogram. Use this
+    after 'score classify' to close the calibration loop produced by
+    'scripts/calibrate_bayesian.py' and 'scripts/calibrate_entropy.py'.
+    """
+    import json
+
+    from metadarkmatter.core.classification.evaluation import (
+        evaluate_classifications,
+    )
+
+    out = QuietConsole(console, quiet=quiet)
+    df = read_dataframe(predictions)
+    if truth_column not in df.columns:
+        console.print(
+            f"[red]Truth column '{truth_column}' missing from "
+            f"{predictions}.[/red]"
+        )
+        raise typer.Exit(code=1)
+    if "taxonomic_call" not in df.columns:
+        console.print(
+            "[red]Predictions file must contain a 'taxonomic_call' column.[/red]"
+        )
+        raise typer.Exit(code=1)
+
+    has_conf = "confidence_score" in df.columns
+    result = evaluate_classifications(
+        df,
+        truth_column=truth_column,
+        prediction_column="taxonomic_call",
+        confidence_column="confidence_score" if has_conf else None,
+        n_confidence_bins=n_confidence_bins,
+    )
+
+    out.print(f"\n[bold]Evaluation[/bold]  ({result.n_rows:,} rows)")
+    out.print(f"  Overall accuracy: [bold]{result.overall_accuracy * 100:.2f}%[/bold]")
+    if result.expected_calibration_error is not None:
+        out.print(
+            f"  Expected calibration error: "
+            f"[bold]{result.expected_calibration_error * 100:.2f}%[/bold]"
+        )
+
+    table = Table(title="Per-category", show_header=True, header_style="bold")
+    table.add_column("Category")
+    table.add_column("Support", justify="right")
+    table.add_column("Predicted", justify="right")
+    table.add_column("Precision", justify="right")
+    table.add_column("Recall", justify="right")
+    for row in result.per_category:
+        table.add_row(
+            row.category,
+            str(row.support),
+            str(row.predicted),
+            f"{row.precision * 100:.1f}%",
+            f"{row.recall * 100:.1f}%",
+        )
+    out.print(table)
+
+    if output is not None:
+        payload = {
+            "n_rows": result.n_rows,
+            "overall_accuracy": result.overall_accuracy,
+            "expected_calibration_error": result.expected_calibration_error,
+            "per_category": [
+                {
+                    "category": r.category,
+                    "support": r.support,
+                    "predicted": r.predicted,
+                    "correct": r.correct,
+                    "precision": r.precision,
+                    "recall": r.recall,
+                }
+                for r in result.per_category
+            ],
+            "confusion": result.confusion,
+            "confidence_bins": {
+                "centers": result.confidence_bin_centers,
+                "accuracy": result.confidence_bin_accuracy,
+                "counts": result.confidence_bin_counts,
+            },
+        }
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(payload, indent=2))
+        out.print(f"[green]JSON written to {output}[/green]")

@@ -104,12 +104,31 @@ def _probe_package(name: str) -> str:
         return "not installed"
 
 
+_ENV_VARS = (
+    ("METADARKMATTER_SEED", "global random seed (default 42)"),
+    ("METADARKMATTER_GTDB_CACHE_DIR", "GTDB on-disk cache (empty = disabled)"),
+)
+
+
 @app.callback(invoke_without_command=True)
 def doctor() -> None:
     """Print a diagnostic report of the metadarkmatter environment."""
+    import os
+
     console.print(f"[bold]metadarkmatter[/bold] {__version__}")
     console.print(f"Python {sys.version.split()[0]} ({sys.executable})")
     console.print(f"Platform: {platform.platform()}")
+    console.print()
+
+    env_table = Table(title="Environment variables", show_header=True, header_style="bold")
+    env_table.add_column("Variable")
+    env_table.add_column("Value")
+    env_table.add_column("Purpose", overflow="fold")
+    for var, purpose in _ENV_VARS:
+        raw = os.environ.get(var)
+        display = raw if raw is not None else "[dim]unset (default)[/dim]"
+        env_table.add_row(var, display, purpose)
+    console.print(env_table)
     console.print()
 
     pkg_table = Table(title="Python dependencies", show_header=True, header_style="bold")
