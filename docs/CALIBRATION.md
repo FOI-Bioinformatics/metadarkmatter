@@ -93,6 +93,35 @@ metadarkmatter score classify \
 hand-tuned defaults for any category the fitted dictionary does not
 specify. This means a partially-fitted config is always safe to use.
 
+## Entropy → confidence recalibration
+
+The Bayesian classifier reports a 0-100 confidence score derived from
+posterior entropy. By default the mapping is linear:
+``(1 - entropy / log2(6)) * 100``. ``scripts/calibrate_entropy.py``
+replaces this with an empirical curve fitted to the same labelled
+corpus:
+
+```bash
+python scripts/calibrate_entropy.py \
+    --benchmark benchmarks/synthetic.tsv \
+    --base-config configs/bayesian_calibrated.yaml \
+    --output configs/bayesian_calibrated.yaml \
+    --bins 20
+```
+
+The script computes posterior entropy for every labelled row (using
+the current Gaussian parameters), then fits an isotonic regression of
+accuracy on entropy (or a per-bin monotone-enforced fallback when
+scikit-learn is not installed). The output is a list of
+``[entropy, confidence]`` knots written into
+``bayesian.entropy_calibration``; the classifier interpolates between
+them at lookup time and clips to ``[0, 100]``.
+
+When ``entropy_calibration`` is ``None`` (the default), the linear
+mapping is used unchanged. Partially-calibrated configs are safe:
+``category_params`` and ``entropy_calibration`` are independent fields
+and either may be set without the other.
+
 ## Known limitations
 
 - The calibration treats the labels as ground truth; if the corpus is
@@ -101,5 +130,7 @@ specify. This means a partially-fitted config is always safe to use.
 - Only the means and standard deviations are fitted; the priors and
   the prior-modulation boosts are taken from ``BayesianConfig``
   defaults unless explicitly overridden in the base config.
-- The entropy→confidence map remains linear; an isotonic recalibration
-  step is planned (Phase 1.3 of the production-readiness roadmap).
+- The diagonal-covariance Gaussian assumption is unchanged; categories
+  flagged with high ``|r(N,U)|`` would benefit from a full-covariance
+  treatment that is not currently implemented in the runtime
+  classifier.

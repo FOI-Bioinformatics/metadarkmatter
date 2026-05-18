@@ -200,19 +200,39 @@ def _shannon_entropy(posteriors: np.ndarray) -> np.ndarray:
     return -np.sum(posteriors * np.log2(safe_p), axis=1)
 
 
-def entropy_to_confidence(entropy: np.ndarray | float) -> np.ndarray | float:
+def entropy_to_confidence(
+    entropy: np.ndarray | float,
+    calibration: list[list[float]] | None = None,
+) -> np.ndarray | float:
     """
     Convert posterior entropy to a 0-100 confidence score.
 
-    confidence = (1 - entropy / log2(6)) * 100
+    With no calibration provided, uses the linear default
+    ``(1 - entropy / log2(6)) * 100``. When ``calibration`` is supplied
+    it must be a list of ``[entropy, confidence]`` pairs sorted by
+    entropy; values are mapped by piecewise-linear interpolation and
+    clipped to ``[0, 100]``. Calibrations are produced by
+    ``scripts/calibrate_entropy.py``.
 
     Args:
         entropy: Shannon entropy value(s).
+        calibration: Optional empirical entropy -> confidence mapping
+            as ``[[entropy, confidence], ...]``.
 
     Returns:
         Confidence score(s) on 0-100 scale.
     """
-    return (1.0 - np.asarray(entropy) / _MAX_ENTROPY_6) * 100.0
+    arr = np.asarray(entropy, dtype=float)
+    if calibration:
+        cal = np.asarray(calibration, dtype=float)
+        # Sort defensively so callers do not have to.
+        order = np.argsort(cal[:, 0])
+        xs = cal[order, 0]
+        ys = cal[order, 1]
+        mapped = np.interp(arr, xs, ys)
+        mapped = np.clip(mapped, 0.0, 100.0)
+        return mapped if arr.ndim else float(mapped)
+    return (1.0 - arr / _MAX_ENTROPY_6) * 100.0
 
 
 # ---------------------------------------------------------------------------
@@ -515,8 +535,10 @@ class BayesianClassifier:
             genus_uncertainty_threshold=self.config.genus_uncertainty_ambiguous_min,
         )
 
-        # Confidence from entropy
-        confidence = entropy_to_confidence(entropy)
+        # Confidence from entropy (uses empirical calibration if present)
+        confidence = entropy_to_confidence(
+            entropy, calibration=self.config.bayesian.entropy_calibration
+        )
 
         return df.with_columns([
             pl.Series("taxonomic_call", refined.tolist()),

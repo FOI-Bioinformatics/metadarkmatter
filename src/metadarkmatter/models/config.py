@@ -72,6 +72,20 @@ class BayesianConfig(BaseModel):
             "are used."
         ),
     )
+    # Optional empirical entropy -> confidence calibration as a list of
+    # [entropy, confidence] pairs. When set, entropy_to_confidence() uses
+    # piecewise-linear interpolation between these points instead of the
+    # default linear (1 - entropy / log2(6)) * 100 mapping. Produced by
+    # scripts/calibrate_entropy.py from accuracy-vs-entropy on a labelled
+    # corpus.
+    entropy_calibration: list[list[float]] | None = Field(
+        default=None,
+        description=(
+            "Optional empirical entropy -> confidence calibration as a "
+            "list of [entropy, confidence] knots. None uses the default "
+            "linear mapping."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_priors_sum(self) -> Self:
@@ -767,6 +781,11 @@ def _flatten_yaml_config(raw: dict[str, Any]) -> dict[str, Any]:
         _map_if_present(bayesian_raw, "entropy_threshold", bay_kwargs, "entropy_threshold")
         if "category_params" in bayesian_raw and bayesian_raw["category_params"]:
             bay_kwargs["category_params"] = bayesian_raw["category_params"]
+        if (
+            "entropy_calibration" in bayesian_raw
+            and bayesian_raw["entropy_calibration"]
+        ):
+            bay_kwargs["entropy_calibration"] = bayesian_raw["entropy_calibration"]
         flat["bayesian"] = BayesianConfig(**bay_kwargs)
 
     # Filters section
@@ -848,6 +867,11 @@ def _build_yaml_structure(config: "ScoringConfig") -> dict[str, Any]:
             "category_params": (
                 {k: dict(v) for k, v in config.bayesian.category_params.items()}
                 if config.bayesian.category_params
+                else None
+            ),
+            "entropy_calibration": (
+                [list(pair) for pair in config.bayesian.entropy_calibration]
+                if config.bayesian.entropy_calibration
                 else None
             ),
         },
