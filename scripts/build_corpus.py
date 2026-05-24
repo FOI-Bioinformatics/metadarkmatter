@@ -98,19 +98,28 @@ def download_and_fetch_genomes(family: str, out_dir: Path, threads: int) -> Path
     return genome_dir
 
 
-def compute_full_ani(genome_dir: Path, out_dir: Path, threads: int) -> Path:
+def compute_full_ani(
+    genome_dir: Path,
+    out_dir: Path,
+    threads: int,
+    backend: str,
+) -> Path:
     """Step 1.2 continued: full-family ANI matrix."""
     ani_path = out_dir / "ani_full.csv"
     if ani_path.exists():
         logger.info("Skipping ANI compute (%s already exists).", ani_path)
         return ani_path
-    _run([
+    cmd = [
         "metadarkmatter", "ani", "compute",
         "--genomes", str(genome_dir),
         "--output", str(ani_path),
         "--threads", str(threads),
-        "--fastani-batches", "4",
-    ])
+        "--backend", backend,
+    ]
+    # --fastani-batches is only meaningful for the fastani backend.
+    if backend in ("fastani", "auto"):
+        cmd.extend(["--fastani-batches", "4"])
+    _run(cmd)
     return ani_path
 
 
@@ -316,6 +325,16 @@ def main() -> int:
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--ani-backend",
+        choices=("auto", "fastani", "skani"),
+        default="auto",
+        help=(
+            "ANI computation backend (default 'auto' picks the first tool "
+            "found on PATH). Use 'skani' explicitly when fastANI is not "
+            "installed locally."
+        ),
+    )
+    parser.add_argument(
         "--skip-download",
         action="store_true",
         help="Reuse existing genomes/ANI under --output-dir.",
@@ -334,7 +353,7 @@ def main() -> int:
             logger.error("metadarkmatter CLI not on PATH; install the package first.")
             return 2
         genome_dir = download_and_fetch_genomes(args.family, out_dir, args.threads)
-        ani_path = compute_full_ani(genome_dir, out_dir, args.threads)
+        ani_path = compute_full_ani(genome_dir, out_dir, args.threads, args.ani_backend)
     else:
         genome_dir = out_dir / "genomes"
         ani_path = out_dir / "ani_full.csv"
