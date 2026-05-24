@@ -89,8 +89,15 @@ def main() -> None:
     parser.add_argument(
         "--min-samples",
         type=int,
-        default=20,
-        help="Minimum per-category sample count to attempt a fit (default 20).",
+        default=5000,
+        help=(
+            "Minimum per-category sample count to attempt a fit (default 5000). "
+            "Categories below this threshold keep the hand-tuned defaults. "
+            "Empirical evidence (docs/CALIBRATION_RESULTS.md): fits on a few "
+            "thousand samples overfit and harm cross-family transfer; a high "
+            "floor regularises by leaving under-supported categories at "
+            "well-tested defaults. Lower for exploratory analysis."
+        ),
     )
     parser.add_argument(
         "--sigma-floor",

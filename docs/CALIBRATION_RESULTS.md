@@ -91,14 +91,51 @@ Three pieces of evidence point to the same explanation:
    cross-validation accuracy criterion measured on a held-out
    family.
 
+## v2 follow-up: raising ``--min-samples`` did not preserve the cross-cal gain
+
+After observing the v1 cross-cal wins, ``--min-samples`` was raised
+from 100 to a default of 5000 and the cross matrix re-evaluated. The
+expectation was that under-supported categories would fall back to
+hand-tuned defaults and stabilise the result.
+
+| v2 calibration → eval | Pseudomonas | Francisellaceae |
+|---|---|---|
+| Baseline | 26.99% | 22.24% |
+| v2 self | 24.30% | 13.40% |
+| v2 cross | 17.46% | 13.03% |
+
+Compared to v1:
+
+| Metric | v1 | v2 | Δ |
+|---|---|---|---|
+| Cross on Pseudomonas | 38.20% | 17.46% | **-20.74 pp** |
+| Self on Pseudomonas | 20.33% | 24.30% | +3.97 pp |
+| Self on Francisellaceae | 14.23% | 13.40% | -0.83 pp |
+
+The v1 "cross beats self by 18 pp on Pseudomonas" result did **not**
+survive raising ``--min-samples``. v2 self-cal on Pseudomonas
+improved (closer to baseline, the more regularised behaviour we
+wanted), but v2 cross-cal regressed sharply. The most plausible
+explanation: the v1 cross win was driven by the spurious-helpful
+fitted Ambiguous Gaussian from Francisella (a 2,034-sample fit
+that happened to fit Pseudomonas's Ambiguous reads well). With v2
+defaulting Ambiguous in both YAMLs, that accident is gone.
+
+Revised conclusion: on these two small corpora, no calibration
+configuration consistently beats the baseline. **The v1 cross
+result was overfitting noise, not generalisation.** A third
+family with a more balanced category distribution is now in
+flight to test whether a calibration fit on a richer corpus
+behaves differently.
+
 ## Caveats
 
 - Both corpora are small (10-11 holdout genomes, ~36k reads each)
-  and heavily skewed toward Novel Species. Larger, more category-
-  balanced corpora may not show the same self-overfit pattern.
+  and heavily skewed toward Novel Species.
 - ECE comparisons across self/cross are confounded by the
   entropy-curve collapse in both self-runs (``ECE ≈ 1 - accuracy``
   when confidence is uniformly near zero). The accuracy numbers
   remain meaningful.
-- The cross-family test is a 2x2; a third family is needed before
-  generalising the "cross beats self" claim.
+- The cross-family test was a 2x2; preliminary results from a
+  100-genome g__Lactobacillus corpus (5 of 6 categories populated)
+  will be added in a follow-up update.
