@@ -34,6 +34,12 @@ import polars as pl
 
 REQUIRED_INPUT_COLUMNS = ("read_id", "novelty_index", "placement_uncertainty")
 
+# Per-read ANI label thresholds. These mirror build_corpus.py so the
+# two scripts agree on what counts as Known/Novel Species/Genus.
+ANI_KNOWN_SPECIES = 96.0
+ANI_NOVEL_SPECIES = 80.0
+ANI_NOVEL_GENUS = 75.0
+
 
 def split_accession(read_id: str) -> str:
     """Recover the source genome accession from a tagged read header.
@@ -45,6 +51,69 @@ def split_accession(read_id: str) -> str:
     if "__" not in read_id:
         return "unknown"
     return read_id.split("__", 1)[0]
+
+
+def _category_from_ani(ani: float) -> str:
+    """Map a single ANI value to a Bayesian category.
+
+    Used by ``per_read`` label mode where each read's truth is the
+    ANI between the source target and the reference the classifier
+    picked for that read. Species Boundary and Ambiguous are not
+    produced from a single ANI value alone; they require the
+    classifier's own Stage 2 reasoning to identify and would need
+    second-best context that this mode does not have.
+    """
+    if ani >= ANI_KNOWN_SPECIES:
+        return "Known Species"
+    if ani >= ANI_NOVEL_SPECIES:
+        return "Novel Species"
+    if ani >= ANI_NOVEL_GENUS:
+        return "Novel Genus"
+    return "Unclassified"
+
+
+def _load_ani_matrix(path: Path) -> dict[str, dict[str, float]]:
+    """Load a metadarkmatter ANI CSV into a nested dict for O(1) lookup."""
+    df = pl.read_csv(path)
+    rows = df.to_dicts()
+    ref_genomes = df.columns[1:]
+    matrix: dict[str, dict[str, float]] = {}
+    for row in rows:
+        # The first column is conventionally named 'genome' but is just
+        # the row label; fall back to the first column name in case the
+        # convention changes.
+        src = row[df.columns[0]]
+        matrix[src] = {g: float(row[g]) for g in ref_genomes}
+    return matrix
+
+
+def _apply_per_read_labels(
+    df: pl.DataFrame,
+    ani_matrix: dict[str, dict[str, float]],
+) -> pl.DataFrame:
+    """Compute a per-read true_category column.
+
+    For every row we look up ``ANI(source_accession, best_match_genome)``
+    and map the value through ``_category_from_ani``. Reads whose
+    source-target pair is missing from the matrix (e.g. an off-target
+    hit outside the family) get the conservative ``Unclassified``
+    label.
+    """
+
+    def label(source: str | None, predicted: str | None) -> str:
+        if source is None or predicted is None:
+            return "Unclassified"
+        ani = ani_matrix.get(source, {}).get(predicted, 0.0)
+        return _category_from_ani(ani)
+
+    return df.with_columns(
+        pl.struct(["source_accession", "best_match_genome"])
+        .map_elements(
+            lambda row: label(row.get("source_accession"), row.get("best_match_genome")),
+            return_dtype=pl.Utf8,
+        )
+        .alias("true_category")
+    )
 
 
 def main() -> int:
@@ -77,6 +146,28 @@ def main() -> int:
         action="store_false",
         help="Drop confidence_score and taxonomic_call (metrics-only TSV).",
     )
+    parser.add_argument(
+        "--label-mode",
+        choices=("per_genome", "per_read"),
+        default="per_genome",
+        help=(
+            "How to assign truth labels. 'per_genome' (default) uses the "
+            "label from --labels for every read produced by a given source "
+            "target. 'per_read' looks up the actual ANI between the source "
+            "target and the genome the classifier picked for each read, "
+            "producing a finer-grained truth that accounts for reads "
+            "hitting conserved regions across species. Requires --ani-matrix."
+        ),
+    )
+    parser.add_argument(
+        "--ani-matrix",
+        type=Path,
+        default=None,
+        help=(
+            "Path to the full-family ANI matrix (e.g. ani_full.csv from "
+            "build_corpus.py). Required when --label-mode=per_read."
+        ),
+    )
     args = parser.parse_args()
 
     # Auto-detect format from the extension.
@@ -105,14 +196,33 @@ def main() -> int:
         .map_elements(split_accession, return_dtype=pl.Utf8)
         .alias("source_accession"),
     )
-    joined = df.join(
-        labels.select(
-            pl.col("target_accession").alias("source_accession"),
-            pl.col("true_category"),
-        ),
-        on="source_accession",
-        how="inner",
-    )
+
+    # Restrict to reads from labelled targets so the eval is well-defined.
+    target_set = set(labels["target_accession"].to_list())
+    df = df.filter(pl.col("source_accession").is_in(target_set))
+
+    if args.label_mode == "per_read":
+        if args.ani_matrix is None:
+            raise SystemExit(
+                "--label-mode=per_read requires --ani-matrix pointing at "
+                "the full-family ANI CSV from build_corpus.py."
+            )
+        if "best_match_genome" not in df.columns:
+            raise SystemExit(
+                "per_read mode requires a 'best_match_genome' column in "
+                "the classifications file."
+            )
+        ani_matrix = _load_ani_matrix(args.ani_matrix)
+        joined = _apply_per_read_labels(df, ani_matrix)
+    else:
+        joined = df.join(
+            labels.select(
+                pl.col("target_accession").alias("source_accession"),
+                pl.col("true_category"),
+            ),
+            on="source_accession",
+            how="inner",
+        )
 
     if joined.is_empty():
         raise SystemExit(
