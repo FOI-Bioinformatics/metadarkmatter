@@ -39,6 +39,8 @@ class ContigIdMapping:
         cls,
         genome_dir: Path,
         pattern: str = "*.fna",
+        *,
+        allow_duplicates: bool = False,
     ) -> ContigIdMapping:
         """Generate mapping from genome FASTA directory.
 
@@ -48,13 +50,22 @@ class ContigIdMapping:
         Args:
             genome_dir: Directory containing genome FASTA files
             pattern: Glob pattern for genome files
+            allow_duplicates: When False (default), raise ValueError if any
+                contig ID appears in more than one genome file. Duplicate
+                contig IDs silently overwrite each other in the mapping,
+                which has historically caused silent data loss in
+                multi-genome pipelines. Pass True only when you have an
+                independent reason to tolerate the collision (e.g. a
+                reference assembly that legitimately repeats a contig
+                across files).
 
         Returns:
             ContigIdMapping instance
 
         Raises:
             FileNotFoundError: If genome_dir does not exist
-            ValueError: If no genome files found
+            ValueError: If no genome files found, or if duplicate contig
+                IDs are detected and ``allow_duplicates`` is False.
         """
         if not genome_dir.exists():
             raise FileNotFoundError(f"Genome directory not found: {genome_dir}")
@@ -110,6 +121,15 @@ class ContigIdMapping:
                 continue
 
         if duplicates:
+            if not allow_duplicates:
+                sample = ", ".join(duplicates[:5])
+                msg = (
+                    f"Found {len(duplicates)} duplicate contig IDs across "
+                    f"genome files (sample: {sample}). Re-run with "
+                    "allow_duplicates=True to tolerate this, or fix the "
+                    "input so each contig appears in exactly one genome."
+                )
+                raise ValueError(msg)
             logger.warning(
                 "Found %d duplicate contig IDs (last genome wins): %s...",
                 len(duplicates),

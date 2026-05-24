@@ -84,7 +84,9 @@ class TestGenerateMapping:
             )
 
         assert result.exit_code == 0
-        mock_from_dir.assert_called_once_with(genomes_dir, pattern="*.fa")
+        mock_from_dir.assert_called_once_with(
+            genomes_dir, pattern="*.fa", allow_duplicates=False
+        )
 
     def test_quiet_mode(self, runner: CliRunner, tmp_path: Path) -> None:
         """Should suppress output when quiet flag is set."""

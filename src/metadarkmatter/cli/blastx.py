@@ -25,6 +25,7 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
+from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.cli.utils import QuietConsole, spinner_progress
 from metadarkmatter.external import ToolExecutionError
 from metadarkmatter.external.diamond import Diamond
@@ -189,7 +190,7 @@ def make_database(
         out.print(f"[bold]Step 1:[/bold] Concatenating proteins from {proteins}...")
         panproteome_fasta = output.parent / f"{output.name}_panproteome.faa"
 
-        if dry_run:
+        if dry_run or is_dry_run():
             console.print(
                 f"  [dim]Would concatenate proteins matching "
                 f"'{protein_pattern}' to {panproteome_fasta}[/dim]"
@@ -221,7 +222,7 @@ def make_database(
 
     diamond = Diamond()
 
-    if dry_run:
+    if dry_run or is_dry_run():
         result = diamond.run(
             mode="makedb",
             input_fasta=input_fasta,
@@ -422,7 +423,7 @@ def align_reads(
     # For compressed output, we write to temp then compress
     temp_output = output.with_suffix("").with_suffix(".tsv") if should_compress else output
 
-    if dry_run:
+    if dry_run or is_dry_run():
         result = diamond.run(
             mode="blastx",
             query=query,

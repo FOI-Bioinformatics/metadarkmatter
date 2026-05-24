@@ -801,3 +801,55 @@ def vendor_d3(
     console.print(
         f"[green]Vendored D3 to {target} ({size_kb:.1f} KB).[/green]"
     )
+
+
+@app.command(name="vendor-cdn-sri")
+def vendor_cdn_sri(
+    timeout: float = typer.Option(
+        30.0,
+        "--timeout",
+        help="HTTP timeout in seconds.",
+    ),
+) -> None:
+    """Download and hash the CDN assets so the report can attach SRI integrity.
+
+    Reports generated with --report-mode cdn currently emit a bare
+    <script src=...> tag for Plotly and D3. After running this command,
+    those tags include integrity="sha384-..." crossorigin="anonymous",
+    so a browser will refuse to execute a tampered or unexpected file
+    from the CDN. The cached digests live next to the package's
+    bundled assets (cdn_sri.json) and are reused on every report.
+    """
+    import hashlib
+    import json
+
+    import httpx
+    from metadarkmatter.visualization.report.assets import (
+        D3_CDN_URL,
+        PLOTLY_CDN_URL,
+        SRI_CACHE_FILENAME,
+    )
+    from metadarkmatter.visualization.report import assets as _assets
+
+    target = Path(_assets.__file__).parent / SRI_CACHE_FILENAME
+
+    digests: dict[str, str] = {}
+    for key, url in (("plotly", PLOTLY_CDN_URL), ("d3", D3_CDN_URL)):
+        console.print(f"Fetching {url} ...")
+        try:
+            response = httpx.get(url, timeout=timeout, follow_redirects=True)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            console.print(f"[red]{key}: download failed: {exc}[/red]")
+            raise typer.Exit(code=1) from None
+        import base64
+
+        sha384 = hashlib.sha384(response.content).digest()
+        digests[key] = base64.b64encode(sha384).decode("ascii")
+        console.print(
+            f"  [green]{key}: sha384-{digests[key]}[/green] "
+            f"({len(response.content) / 1024:.1f} KB)"
+        )
+
+    target.write_text(json.dumps(digests, indent=2), encoding="utf-8")
+    console.print(f"[green]Wrote SRI cache to {target}[/green]")

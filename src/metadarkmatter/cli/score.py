@@ -449,6 +449,17 @@ def classify(
         "--streaming",
         help="Use streaming mode for very large files (100M+ alignments)",
     ),
+    chunk_size: int = typer.Option(
+        1_000_000,
+        "--chunk-size",
+        help=(
+            "Rows per streaming batch (default 1,000,000). Larger values "
+            "trade memory for fewer batches; smaller values cap RAM use "
+            "for memory-constrained machines. Range 100 to 100,000,000."
+        ),
+        min=100,
+        max=100_000_000,
+    ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -1111,6 +1122,7 @@ def classify(
                     blast_path=alignment,
                     output_path=output,
                     output_format=output_format,
+                    partition_size=chunk_size,
                     progress_callback=streaming_progress,
                 )
 

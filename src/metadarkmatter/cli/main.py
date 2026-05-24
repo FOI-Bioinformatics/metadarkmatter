@@ -17,6 +17,7 @@ from rich.console import Console
 
 from metadarkmatter import __version__
 from metadarkmatter.core.logging_config import setup_logging
+from metadarkmatter.core.runtime import set_dry_run
 
 app = typer.Typer(
     name="metadarkmatter",
@@ -60,6 +61,15 @@ def main(
         "--log-file",
         help="Log file path",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help=(
+            "Process-wide dry-run flag. Subcommands that support dry-run "
+            "honour it; equivalent to setting MDM_DRY_RUN=1 in the "
+            "environment."
+        ),
+    ),
 ) -> None:
     """
     Metadarkmatter: ANI-weighted placement for detecting novel microbial diversity.
@@ -69,6 +79,8 @@ def main(
     and detect novel bacterial taxa using whole-genome competitive read recruitment.
     """
     setup_logging(log_level, log_format, log_file)
+    if dry_run:
+        set_dry_run(True)
 
 
 # Import subcommands

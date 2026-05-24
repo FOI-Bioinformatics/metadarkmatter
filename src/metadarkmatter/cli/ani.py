@@ -16,6 +16,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
+from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.cli.utils import QuietConsole
 from metadarkmatter.core.ani_matrix_builder import (
     ani_dict_to_csv,
@@ -133,6 +134,19 @@ def compute(
         "--backend",
         "-b",
         help="ANI computation backend: fastani, skani, or auto",
+    ),
+    fastani_batches: int = typer.Option(
+        1,
+        "--fastani-batches",
+        help=(
+            "Run fastANI as N parallel subprocess batches over query chunks. "
+            "Default 1 uses a single fastANI process with internal threading. "
+            "Higher values (e.g. 4 or 8) often speed up large all-vs-all "
+            "runs because each batch owns its own memory. Ignored by the "
+            "skani backend."
+        ),
+        min=1,
+        max=64,
     ),
     sensitivity: ANISensitivity = typer.Option(
         ANISensitivity.SENSITIVE,
@@ -312,7 +326,7 @@ def compute(
     # Create output directory
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    if dry_run:
+    if dry_run or is_dry_run():
         out.print("\n[cyan]DRY RUN - Commands that would be executed:[/cyan]")
         if selected_backend == ANIBackend.SKANI:
             out.print(
@@ -388,13 +402,28 @@ def compute(
 
                 fastani = FastANI()
                 try:
-                    result = fastani.run_or_raise(
-                        query_list=list_file,
-                        reference_list=list_file,
-                        output=raw_output,
-                        threads=threads,
-                        matrix=True,
-                    )
+                    if fastani_batches > 1:
+                        # Batched parallel mode bypasses run_or_raise so it
+                        # does not emit a "result" object; manufacture a
+                        # dummy result-like value for the path that prints it.
+                        fastani.compute_parallel_batches(
+                            query_list=list_file,
+                            reference_list=list_file,
+                            output=raw_output,
+                            tmp_dir=tmp_path,
+                            threads=threads,
+                            batches=fastani_batches,
+                        )
+                        from types import SimpleNamespace
+                        result = SimpleNamespace(command_string=f"fastANI x{fastani_batches} batches", stderr="")
+                    else:
+                        result = fastani.run_or_raise(
+                            query_list=list_file,
+                            reference_list=list_file,
+                            output=raw_output,
+                            threads=threads,
+                            matrix=True,
+                        )
                 except ToolExecutionError as e:
                     console.print(f"\n[red]fastANI failed:[/red]\n{e.message}")
                     raise typer.Exit(code=1) from None

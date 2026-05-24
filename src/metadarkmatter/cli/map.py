@@ -12,6 +12,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.cli.utils import QuietConsole, spinner_progress
 from metadarkmatter.external import (
     Bowtie2,
@@ -236,7 +237,7 @@ def map_reads(
         need_concatenate = False
 
     # Dry run mode
-    if dry_run:
+    if dry_run or is_dry_run():
         console.print(
             "[bold cyan]DRY RUN MODE[/bold cyan] - Commands shown but not executed\n"
         )
@@ -266,7 +267,7 @@ def map_reads(
     if need_concatenate:
         out.print("[bold]Step 1:[/bold] Concatenating reference genomes...")
 
-        if dry_run:
+        if dry_run or is_dry_run():
             console.print(
                 f"  [dim]Would concatenate genomes matching "
                 f"'{genome_pattern}' from {genomes}[/dim]"
@@ -296,7 +297,7 @@ def map_reads(
 
         builder = Bowtie2Build()
 
-        if dry_run:
+        if dry_run or is_dry_run():
             result = builder.run(
                 reference=pangenome_path,
                 index_prefix=index_prefix,
@@ -328,7 +329,7 @@ def map_reads(
 
     aligner = Bowtie2()
 
-    if dry_run:
+    if dry_run or is_dry_run():
         result = aligner.run(
             index_prefix=index_prefix,
             reads_1=reads_1,
@@ -378,7 +379,7 @@ def map_reads(
 
     samtools = Samtools()
 
-    if dry_run:
+    if dry_run or is_dry_run():
         console.print("  [dim]Would run: samtools view -> sort -> index[/dim]")
         console.print("\n[green]Dry run complete. No files were created.[/green]")
         raise typer.Exit(code=0)

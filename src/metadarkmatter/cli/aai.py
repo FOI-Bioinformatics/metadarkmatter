@@ -19,6 +19,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
+from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.cli.utils import QuietConsole
 from metadarkmatter.external import ToolExecutionError
 
@@ -202,7 +203,7 @@ def compute(
     # Create output directory
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    if dry_run:
+    if dry_run or is_dry_run():
         out.print("\n[cyan]DRY RUN - Steps that would be executed:[/cyan]")
         out.print("  1. Concatenate protein files with genome-prefixed headers")
         out.print("  2. Create Diamond database from concatenated proteins")

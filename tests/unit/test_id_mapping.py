@@ -244,14 +244,22 @@ class TestContigIdMappingEdgeCases:
         result = empty.transform_column(df, "sseqid")
         assert result["sseqid"].to_list() == ["id1", "id2"]
 
-    def test_duplicate_contigs_last_wins(self, temp_dir: Path):
-        """When duplicate contig IDs exist, last genome file should win."""
-        # Create two genome files with overlapping contig ID
+    def test_duplicate_contigs_raise_by_default(self, temp_dir: Path):
+        """Duplicate contig IDs across genome files are an error by default."""
         (temp_dir / "GCF_000111111.1_genomic.fna").write_text(">contig1\nATGC\n")
         (temp_dir / "GCF_000222222.1_genomic.fna").write_text(">contig1\nGCAT\n")
 
-        # This should log a warning but not fail
-        mapping = ContigIdMapping.from_genome_dir(temp_dir)
+        import pytest
+
+        with pytest.raises(ValueError, match="duplicate contig IDs"):
+            ContigIdMapping.from_genome_dir(temp_dir)
+
+    def test_duplicate_contigs_last_wins_with_opt_in(self, temp_dir: Path):
+        """allow_duplicates=True restores the historical last-wins behaviour."""
+        (temp_dir / "GCF_000111111.1_genomic.fna").write_text(">contig1\nATGC\n")
+        (temp_dir / "GCF_000222222.1_genomic.fna").write_text(">contig1\nGCAT\n")
+
+        mapping = ContigIdMapping.from_genome_dir(temp_dir, allow_duplicates=True)
 
         # Last one wins (alphabetical order means 222222 comes after 111111)
         assert len(mapping) == 1

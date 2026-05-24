@@ -22,6 +22,7 @@ from rich.progress import (
 )
 from rich.table import Table
 
+from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.cli.utils import QuietConsole
 
 app = typer.Typer(
@@ -312,7 +313,7 @@ def predict(
             pass  # Metadata loading failed, continue without species info
 
     # Dry run
-    if dry_run:
+    if dry_run or is_dry_run():
         out.print("\n[cyan]DRY RUN - Genomes that would be processed:[/cyan]")
 
         table = Table(show_header=True, header_style="bold")

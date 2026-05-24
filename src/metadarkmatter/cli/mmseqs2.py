@@ -21,6 +21,7 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
+from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.cli.utils import QuietConsole, spinner_progress
 from metadarkmatter.external import ToolExecutionError
 from metadarkmatter.external.mmseqs2 import MMseqs2
@@ -163,7 +164,7 @@ def make_database(
         pangenome_fasta = output.parent / f"{output.name}_pangenome.fasta"
         contig_mapping_path = output.parent / f"{output.name}_contig_mapping.tsv"
 
-        if dry_run:
+        if dry_run or is_dry_run():
             console.print(
                 f"  [dim]Would concatenate genomes matching "
                 f"'{genome_pattern}' to {pangenome_fasta}[/dim]"
@@ -199,7 +200,7 @@ def make_database(
 
     mmseqs = MMseqs2()
 
-    if dry_run:
+    if dry_run or is_dry_run():
         result = mmseqs.run(
             mode="createdb",
             input_fasta=input_fasta,
@@ -556,7 +557,7 @@ def search_reads(
     # For compressed output, we write to temp then compress
     temp_output = output.with_suffix("").with_suffix(".tsv") if should_compress else output
 
-    if dry_run:
+    if dry_run or is_dry_run():
         _cleanup_temp_query()
         console.print("\n[dim]Would run the following MMseqs2 workflow:[/dim]")
         if has_paired_end:

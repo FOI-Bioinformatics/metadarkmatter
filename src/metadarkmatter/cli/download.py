@@ -22,6 +22,7 @@ from rich.progress import (
 )
 from rich.table import Table
 
+from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.cli.utils import QuietConsole, spinner_progress
 from metadarkmatter.clients.gtdb import (
     GTDBAPIError,
@@ -123,7 +124,7 @@ def list_genomes(
     out.print("\n[bold blue]GTDB Genome Query[/bold blue]\n")
     out.print(f"Querying GTDB API for [bold]{taxon}[/bold]...")
 
-    if dry_run:
+    if dry_run or is_dry_run():
         console.print(f"\n[dim]Would query: https://gtdb-api.ecogenomic.org/taxon/{taxon}/genomes[/dim]")
         console.print(f"[dim]Parameters: sp_reps_only={str(representatives_only).lower()}[/dim]")
         console.print("\n[green]Dry run complete. No requests were made.[/green]")
@@ -386,7 +387,7 @@ def fetch_genomes(
     out.print(f"  {len(accessions_to_download):,} genomes to download")
 
     # Dry run mode
-    if dry_run:
+    if dry_run or is_dry_run():
         console.print("\n[bold cyan]DRY RUN MODE[/bold cyan]")
         console.print(
             f"\n[dim]Would download {len(accessions_to_download):,} genomes "

@@ -13,6 +13,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.cli.utils import (
     QuietConsole,
     extract_sample_name,
@@ -169,7 +170,7 @@ def classify_reads(
     # Run Kraken2
     kraken = Kraken2()
 
-    if dry_run:
+    if dry_run or is_dry_run():
         console.print("\n[bold cyan]DRY RUN MODE[/bold cyan]\n")
         result = kraken.run(
             reads_1=reads_1,
@@ -396,7 +397,7 @@ def extract_reads(
     out.print(f"  Include children: {include_children}")
 
     # Parse Kraken report to show expected reads
-    if not dry_run:
+    if not (dry_run or is_dry_run()):
         try:
             report = KrakenReport(kraken_report)
             clade_reads = report.get_clade_reads(taxid)
@@ -408,7 +409,7 @@ def extract_reads(
     # Run extraction
     extractor = ExtractKrakenReads()
 
-    if dry_run:
+    if dry_run or is_dry_run():
         console.print("\n[bold cyan]DRY RUN MODE[/bold cyan]\n")
         result = extractor.run(
             kraken_output=kraken_output,

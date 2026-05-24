@@ -59,6 +59,17 @@ def generate_mapping(
             help="Glob pattern for genome files",
         ),
     ] = "*.fna",
+    allow_duplicates: Annotated[
+        bool,
+        typer.Option(
+            "--allow-duplicates",
+            help=(
+                "Tolerate contig IDs that appear in more than one genome "
+                "file. By default duplicate IDs are an error to prevent "
+                "silent data loss."
+            ),
+        ),
+    ] = False,
     quiet: Annotated[
         bool,
         typer.Option(
@@ -88,7 +99,9 @@ def generate_mapping(
         with spinner_progress(
             "Scanning genome files...", console, quiet
         ) as _progress:
-            mapping = ContigIdMapping.from_genome_dir(genomes, pattern=pattern)
+            mapping = ContigIdMapping.from_genome_dir(
+                genomes, pattern=pattern, allow_duplicates=allow_duplicates
+            )
 
         # Save to file
         mapping.to_tsv(output)
