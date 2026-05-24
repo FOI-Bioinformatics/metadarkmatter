@@ -57,10 +57,10 @@ logger = logging.getLogger(__name__)
 
 # Label thresholds. These mirror the package defaults and are written here
 # (not imported) so the corpus labels stay fixed even if the package
-# thresholds are tuned later.
-ANI_KNOWN_SPECIES = 96.0
-ANI_NOVEL_SPECIES = 80.0
-ANI_NOVEL_GENUS = 75.0
+# thresholds are tuned later. Configurable via CLI flags.
+DEFAULT_ANI_KNOWN_SPECIES = 96.0
+DEFAULT_ANI_NOVEL_SPECIES = 80.0
+DEFAULT_ANI_NOVEL_GENUS = 75.0
 # A target is labelled "Species Boundary" when its best and second-best
 # reference ANIs are within this band - signals ambiguous placement.
 SPECIES_BOUNDARY_GAP = 1.5
@@ -179,7 +179,14 @@ def stratified_split(
     return sorted(references), sorted(targets)
 
 
-def categorise(best_ani: float, second_ani: float | None) -> str:
+def categorise(
+    best_ani: float,
+    second_ani: float | None,
+    *,
+    ani_known_species: float = DEFAULT_ANI_KNOWN_SPECIES,
+    ani_novel_species: float = DEFAULT_ANI_NOVEL_SPECIES,
+    ani_novel_genus: float = DEFAULT_ANI_NOVEL_GENUS,
+) -> str:
     """Map nearest-reference ANI to one of the six Bayesian categories.
 
     The label is derived from genome-level ANI alone, independent of
@@ -187,19 +194,24 @@ def categorise(best_ani: float, second_ani: float | None) -> str:
     best reference is very close to the best (ambiguous placement) and
     the best is itself near the species line; Ambiguous fires at lower
     ANI with a similar gap pattern.
+
+    Thresholds default to the values that pair with
+    ``ScoringConfig.novelty_known_max``; lower ``ani_known_species`` to
+    95.0 for a GTDB-compatible boundary that yields more Known Species
+    labels on representative-only corpora.
     """
     gap = (best_ani - second_ani) if second_ani is not None else float("inf")
-    near_boundary = abs(best_ani - ANI_KNOWN_SPECIES) <= 2.0
+    near_boundary = abs(best_ani - ani_known_species) <= 2.0
 
-    if best_ani >= ANI_KNOWN_SPECIES:
+    if best_ani >= ani_known_species:
         if near_boundary and gap < SPECIES_BOUNDARY_GAP:
             return "Species Boundary"
         return "Known Species"
-    if best_ani >= ANI_NOVEL_SPECIES:
-        if gap < AMBIGUOUS_GAP and best_ani < ANI_KNOWN_SPECIES - 2.0:
+    if best_ani >= ani_novel_species:
+        if gap < AMBIGUOUS_GAP and best_ani < ani_known_species - 2.0:
             return "Ambiguous"
         return "Novel Species"
-    if best_ani >= ANI_NOVEL_GENUS:
+    if best_ani >= ani_novel_genus:
         return "Novel Genus"
     return "Unclassified"
 
@@ -209,6 +221,10 @@ def assign_labels(
     targets: list[str],
     genomes: list[str],
     matrix: np.ndarray,
+    *,
+    ani_known_species: float = DEFAULT_ANI_KNOWN_SPECIES,
+    ani_novel_species: float = DEFAULT_ANI_NOVEL_SPECIES,
+    ani_novel_genus: float = DEFAULT_ANI_NOVEL_GENUS,
 ) -> pl.DataFrame:
     """For each target, find nearest reference ANI and label the row."""
     idx = {g: i for i, g in enumerate(genomes)}
@@ -227,7 +243,13 @@ def assign_labels(
         else:
             nearest, best_ani = ref_anis[0]
             second_ani = ref_anis[1][1] if len(ref_anis) > 1 else None
-        label = categorise(best_ani, second_ani)
+        label = categorise(
+            best_ani,
+            second_ani,
+            ani_known_species=ani_known_species,
+            ani_novel_species=ani_novel_species,
+            ani_novel_genus=ani_novel_genus,
+        )
         rows.append(
             {
                 "target_accession": target,
@@ -325,6 +347,28 @@ def main() -> int:
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
+        "--ani-known-species",
+        type=float,
+        default=DEFAULT_ANI_KNOWN_SPECIES,
+        help=(
+            f"ANI threshold for Known Species (default {DEFAULT_ANI_KNOWN_SPECIES}). "
+            "Set to 95.0 for the GTDB species boundary; on a corpus of "
+            "GTDB representatives this yields more Known Species labels."
+        ),
+    )
+    parser.add_argument(
+        "--ani-novel-species",
+        type=float,
+        default=DEFAULT_ANI_NOVEL_SPECIES,
+        help=f"ANI threshold for Novel Species (default {DEFAULT_ANI_NOVEL_SPECIES}).",
+    )
+    parser.add_argument(
+        "--ani-novel-genus",
+        type=float,
+        default=DEFAULT_ANI_NOVEL_GENUS,
+        help=f"ANI threshold for Novel Genus (default {DEFAULT_ANI_NOVEL_GENUS}).",
+    )
+    parser.add_argument(
         "--ani-backend",
         choices=("auto", "fastani", "skani"),
         default="auto",
@@ -373,7 +417,15 @@ def main() -> int:
     (out_dir / "reference_genomes.txt").write_text("\n".join(references) + "\n")
     (out_dir / "target_genomes.txt").write_text("\n".join(targets) + "\n")
 
-    labels = assign_labels(references, targets, genomes, matrix)
+    labels = assign_labels(
+        references,
+        targets,
+        genomes,
+        matrix,
+        ani_known_species=args.ani_known_species,
+        ani_novel_species=args.ani_novel_species,
+        ani_novel_genus=args.ani_novel_genus,
+    )
     labels.write_csv(out_dir / "target_to_label.tsv", separator="\t")
     logger.info(
         "Wrote %d target labels:\n%s",
