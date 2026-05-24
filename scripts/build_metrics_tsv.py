@@ -53,7 +53,13 @@ def split_accession(read_id: str) -> str:
     return read_id.split("__", 1)[0]
 
 
-def _category_from_ani(ani: float) -> str:
+def _category_from_ani(
+    ani: float,
+    *,
+    known_species: float = ANI_KNOWN_SPECIES,
+    novel_species: float = ANI_NOVEL_SPECIES,
+    novel_genus: float = ANI_NOVEL_GENUS,
+) -> str:
     """Map a single ANI value to a Bayesian category.
 
     Used by ``per_read`` label mode where each read's truth is the
@@ -63,11 +69,11 @@ def _category_from_ani(ani: float) -> str:
     classifier's own Stage 2 reasoning to identify and would need
     second-best context that this mode does not have.
     """
-    if ani >= ANI_KNOWN_SPECIES:
+    if ani >= known_species:
         return "Known Species"
-    if ani >= ANI_NOVEL_SPECIES:
+    if ani >= novel_species:
         return "Novel Species"
-    if ani >= ANI_NOVEL_GENUS:
+    if ani >= novel_genus:
         return "Novel Genus"
     return "Unclassified"
 
@@ -90,6 +96,10 @@ def _load_ani_matrix(path: Path) -> dict[str, dict[str, float]]:
 def _apply_per_read_labels(
     df: pl.DataFrame,
     ani_matrix: dict[str, dict[str, float]],
+    *,
+    known_species: float = ANI_KNOWN_SPECIES,
+    novel_species: float = ANI_NOVEL_SPECIES,
+    novel_genus: float = ANI_NOVEL_GENUS,
 ) -> pl.DataFrame:
     """Compute a per-read true_category column.
 
@@ -104,7 +114,12 @@ def _apply_per_read_labels(
         if source is None or predicted is None:
             return "Unclassified"
         ani = ani_matrix.get(source, {}).get(predicted, 0.0)
-        return _category_from_ani(ani)
+        return _category_from_ani(
+            ani,
+            known_species=known_species,
+            novel_species=novel_species,
+            novel_genus=novel_genus,
+        )
 
     return df.with_columns(
         pl.struct(["source_accession", "best_match_genome"])
@@ -168,6 +183,29 @@ def main() -> int:
             "build_corpus.py). Required when --label-mode=per_read."
         ),
     )
+    parser.add_argument(
+        "--ani-known-species",
+        type=float,
+        default=ANI_KNOWN_SPECIES,
+        help=(
+            f"ANI threshold for Known Species in per_read mode "
+            f"(default {ANI_KNOWN_SPECIES}). Match the value passed to "
+            "build_corpus.py so per-genome and per-read labels stay "
+            "consistent."
+        ),
+    )
+    parser.add_argument(
+        "--ani-novel-species",
+        type=float,
+        default=ANI_NOVEL_SPECIES,
+        help=f"Novel Species threshold in per_read mode (default {ANI_NOVEL_SPECIES}).",
+    )
+    parser.add_argument(
+        "--ani-novel-genus",
+        type=float,
+        default=ANI_NOVEL_GENUS,
+        help=f"Novel Genus threshold in per_read mode (default {ANI_NOVEL_GENUS}).",
+    )
     args = parser.parse_args()
 
     # Auto-detect format from the extension.
@@ -213,7 +251,13 @@ def main() -> int:
                 "the classifications file."
             )
         ani_matrix = _load_ani_matrix(args.ani_matrix)
-        joined = _apply_per_read_labels(df, ani_matrix)
+        joined = _apply_per_read_labels(
+            df,
+            ani_matrix,
+            known_species=args.ani_known_species,
+            novel_species=args.ani_novel_species,
+            novel_genus=args.ani_novel_genus,
+        )
     else:
         joined = df.join(
             labels.select(
