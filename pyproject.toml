@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "metadarkmatter"
-version = "0.1.0"
+version = "0.2.0"
 description = "ANI-weighted placement uncertainty for detecting novel microbial diversity in environmental eDNA samples"
 readme = "README.md"
 license = "MIT"

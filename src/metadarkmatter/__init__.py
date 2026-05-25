@@ -6,7 +6,7 @@ water samples, and other environmental sources to characterize microbial diversi
 and detect novel bacterial taxa using whole-genome competitive read recruitment.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "Metadarkmatter Team"
 
 from metadarkmatter.core.ani_placement import ANIWeightedClassifier
