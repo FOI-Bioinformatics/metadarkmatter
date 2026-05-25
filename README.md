@@ -65,30 +65,48 @@ Complete workflow for detecting novel diversity in Francisellaceae:
 
 ```bash
 # 1. Download reference genomes from GTDB
+#    Writes two files: genomes.tsv (accession list) and genome_metadata.tsv
+#    (taxonomy + representative mapping consumed by steps 5).
 mdm download genomes list "f__Francisellaceae" --output genomes.tsv
 mdm download genomes fetch --accessions genomes.tsv --output-dir genomes/
 
-# 2. Extract target family reads (requires Kraken2 database)
+# 2. Extract target family reads.
+#    Requires a pre-built Kraken2 database. Building one from scratch
+#    needs ~10 GB of NCBI taxonomy plus the chosen reference genomes;
+#    see https://github.com/DerrickWood/kraken2/wiki for db construction.
 mdm kraken2 classify --reads-1 sample_R1.fastq.gz --kraken-db db/ --output kraken_out/
 mdm kraken2 extract --kraken-output kraken_out/sample.kraken \
   --reads-1 sample_R1.fastq.gz --taxid 119060 --output extraction/
 
-# 3. Build BLAST database and align
+# 3. Build BLAST database and align.
+#    Default --task is blastn (word_size 7), tuned for divergent recruitment
+#    but slow on large reference sets. For corpora dominated by 80-100%
+#    ANI hits, --task dc-megablast gives ~10x speedup with similar
+#    sensitivity in that range.
 mdm blast makedb --genomes genomes/ --output blastdb/pangenome
 mdm blast align --query extraction/reads_R1.fastq.gz \
   --database blastdb/pangenome --output sample.blast.tsv.gz --threads 16
+# Optionally add --task dc-megablast for closely-related references.
 
-# 4. Compute ANI matrix
+# 4. Compute ANI matrix.
+#    Picks the first ANI tool found on PATH (fastANI by default, skani
+#    if fastANI is unavailable). Run 'mdm doctor' to inspect tooling.
 mdm ani compute --genomes genomes/ --output ani_matrix.csv --threads 16
 
-# 5. Classify reads and generate report
+# 5. Classify reads and generate report.
+#    --metadata uses genome_metadata.tsv from step 1; the family is
+#    inferred automatically for family-validation classification.
 mdm score classify --alignment sample.blast.tsv.gz --ani ani_matrix.csv \
   --metadata genome_metadata.tsv --output classifications.csv
 mdm report generate --classifications classifications.csv \
   --metadata genome_metadata.tsv --output report.html
 ```
 
-**Note:** Both `metadarkmatter` and `mdm` commands are available. See [Tutorial](docs/TUTORIAL_ENVIRONMENTAL_SPECIES.md) for detailed walkthrough.
+**Note:** Both `metadarkmatter` and `mdm` commands are available. Run
+`mdm doctor` to verify Python deps, external tools, and project
+environment variables before kicking off a long pipeline run. See the
+[Tutorial](docs/TUTORIAL_ENVIRONMENTAL_SPECIES.md) for a detailed
+walkthrough.
 
 ## Commands
 
