@@ -128,14 +128,108 @@ family with a more balanced category distribution is now in
 flight to test whether a calibration fit on a richer corpus
 behaves differently.
 
+## v3: third family (g__Lactobacillus) and the full 3x3 matrix
+
+A third corpus was built from g__Lactobacillus (100 GTDB
+representatives, 25 holdout targets, **5 of 6 categories populated**:
+Known Species, Novel Species, Species Boundary, Ambiguous,
+Unclassified — every category except Novel Genus). dc-megablast was
+used for the alignment step because default blastn was too slow for
+the larger reference set; 2.7M alignments, 89k reads classified.
+
+Empirical Gaussian fits (--min-samples 5000):
+
+| Category | N | mu_N | mu_U | sigma_N | sigma_U | r(N, U) |
+|---|---|---|---|---|---|---|
+| Known Species | 12,286 | 4.82 | 2.99 | 6.61 | 5.49 | +0.118 |
+| Novel Species | 43,236 | 10.37 | 5.12 | 8.19 | 9.10 | -0.012 |
+| Species Boundary | 13,760 | 2.64 | 5.09 | 3.89 | 5.69 | +0.076 |
+| Ambiguous | 13,951 | 13.80 | 7.89 | 6.87 | 10.29 | -0.064 |
+| Unclassified | 5,873 | 17.57 | 9.72 | 7.05 | 12.22 | **-0.384 !** |
+
+Second category to be flagged |r| > 0.3 (Unclassified, -0.384).
+
+### The 3x3 cross matrix (top-1 accuracy)
+
+| Calibration ↓ / Eval → | F | P | L |
+|---|---|---|---|
+| **Baseline** | **22.24%** | **26.99%** | **27.10%** |
+| F-cal (v2) | 13.40% | 17.46% | 19.14% |
+| P-cal (v2) | 13.03% | 24.30% | 18.82% |
+| L-cal | 3.58% | 2.22% | 21.99% |
+
+**Every off-baseline cell regresses.** No calibration configuration —
+self or cross — improves accuracy over the baseline on any corpus.
+L-cal is catastrophically bad on F and P (~3% and ~2% accuracy).
+
+### Why L-cal destroys F and P accuracy
+
+The fitted L Species Boundary Gaussian has ``mu_N = 2.64``: empirically
+Species Boundary reads in Lactobacillus have low novelty (they come
+from genomes with a close 95-96% ANI neighbour, so reads mostly
+match well). The package default Species Boundary Gaussian has
+``mu_N = 12.0`` — positioned mid-novelty as a catch-all.
+
+When L-cal is applied to F or P alignments, every low-novelty read
+(in F/P these are mostly Known Species truth) now matches the
+relocated Species Boundary Gaussian and gets misclassified. The
+overall accuracy collapses.
+
+Similar story for L's Unclassified fit at ``mu_N = 17.57`` vs default
+``30.0`` — pulled toward Novel Species territory.
+
+## Revised conclusion
+
+The current calibration approach — refitting per-category 2D Gaussian
+means and sigmas from a labelled corpus — does **not** improve
+classification accuracy on any of the three small corpora we tried.
+
+The mechanism is that the per-genome ANI label does not map cleanly
+to a per-read ``(novelty_index, placement_uncertainty)`` location.
+Different categories' reads occupy overlapping regions of (N, U)
+space because conserved/divergent gene content varies across the
+reads of a single source genome. Fitting Gaussians to empirical (N, U)
+distributions of differently-labelled reads pulls category means
+into one another's threshold regions, breaking the classifier's
+ability to discriminate.
+
+The diagonal-covariance assumption is only part of the problem;
+Lactobacillus's correlations were all |r| < 0.4 yet the fitted
+config still regressed. The deeper issue is that the categories
+themselves are defined by genome-level ANI thresholds rather than
+by clusters in read-level (N, U) space.
+
+### Concrete implications
+
+1. **Do not ship a calibrated default.** None of the three calibrated
+   YAMLs improve on the hand-tuned defaults.
+
+2. **The shipment criteria in ``docs/CALIBRATION.md`` correctly
+   reject all three candidates.** Keep them as is.
+
+3. **The calibration scripts are valuable as diagnostic tools** —
+   they reveal the (N, U) distribution per category, which is
+   informative even when the fitted parameters cannot be shipped.
+   Empirical r(N, U) flags categories where the diagonal Gaussian
+   underfits (Pseudomonas Ambiguous -0.338, Lactobacillus
+   Unclassified -0.384 in this run).
+
+4. **A genuinely improved Bayesian classifier likely requires**
+   either (a) labels defined directly in (N, U) space (clustering
+   per-read metrics rather than per-genome ANI), or (b) a richer
+   feature set than just (N, U) per read, or (c) acknowledging the
+   current six categories are a per-genome taxonomy that cannot be
+   recovered exactly from per-read evidence.
+
 ## Caveats
 
-- Both corpora are small (10-11 holdout genomes, ~36k reads each)
-  and heavily skewed toward Novel Species.
-- ECE comparisons across self/cross are confounded by the
-  entropy-curve collapse in both self-runs (``ECE ≈ 1 - accuracy``
-  when confidence is uniformly near zero). The accuracy numbers
-  remain meaningful.
-- The cross-family test was a 2x2; preliminary results from a
-  100-genome g__Lactobacillus corpus (5 of 6 categories populated)
-  will be added in a follow-up update.
+- All three corpora are small (10-25 holdout genomes). A much larger
+  benchmark might support fitting categories empirically. But the
+  3.6% accuracy from L-cal on F suggests the issue is structural
+  rather than statistical.
+- ECE comparisons across self/cross are confounded by entropy-curve
+  collapse in the self-runs. Accuracy numbers are the reliable signal.
+- Three families are enough to invalidate the "calibration improves
+  accuracy" hypothesis. The "calibration improves ECE in exchange
+  for accuracy" finding from v1 is still valid for self-runs;
+  cross-runs offer no consistent benefit.
