@@ -87,8 +87,28 @@ of each category's threshold region.
 - *Calibration*: the means and sigmas are not fitted to labelled data, so
   posterior probabilities are not calibrated — they preserve the ranking
   of categories but should not be used as probabilities in formal
-  inference without first running the calibration pipeline described in
-  Phase 1 of the production-readiness plan.
+  inference without first running the calibration pipeline.
+
+**Empirical evidence (added after calibration validation).** Three
+synthetic-but-labelled corpora (f__Francisellaceae, g__Pseudomonas,
+g__Lactobacillus) ran the full calibration pipeline; the per-category
+empirical Pearson correlations are summarised below. Values |r| > 0.3
+(flagged with `!`) violate the diagonal-covariance assumption.
+
+| Category | F r(N,U) | P r(N,U) | L r(N,U) |
+|---|---|---|---|
+| Known Species | — | -0.250 | +0.118 |
+| Novel Species | +0.081 | -0.296 | -0.012 |
+| Species Boundary | — | — | +0.076 |
+| Ambiguous | +0.239 | **-0.338 !** | -0.064 |
+| Unclassified | -0.054 | — | **-0.384 !** |
+
+Two of the eleven fitted categories cross the 0.3 threshold. The
+diagonal-Gaussian assumption is empirically defensible for most
+categories but materially underfits at least two; a full-covariance
+extension would be warranted if calibration on a larger corpus were
+revived. See ``docs/CALIBRATION_RESULTS.md`` for the full matrix and
+the deeper structural issue documented in section 13 below.
 
 ## 5. Prior modulation for Ambiguous
 
@@ -213,3 +233,68 @@ sampling) accept a `random_state` seed.
 **Failure modes.** External tools (FastANI, MMseqs2, Diamond) may be
 non-deterministic across runs due to multi-threading; pin tool versions
 and thread counts when bit-identical reruns are required.
+
+## 13. Per-genome labels map cleanly to per-read (N, U) clusters
+
+**Assumption (the load-bearing one for calibration).** A read drawn
+from a source genome labelled with a per-genome category C tends to
+produce ``(novelty_index, placement_uncertainty)`` values that fall
+near the same locus in (N, U) space as the package's hand-tuned
+Gaussian for C. Equivalently: the six categories form well-separated
+clusters in (N, U) space when reads are grouped by their source
+genome's per-genome ANI category.
+
+**Source.** Implicit in the design of the Bayesian classifier — if
+this assumption held, calibrating the per-category Gaussian means
+from labelled data would be an unambiguously useful exercise.
+
+**Empirical verdict: REFUTED on three synthetic corpora.** Running
+the calibration pipeline end-to-end on f__Francisellaceae,
+g__Pseudomonas, and g__Lactobacillus and evaluating the resulting
+configs in a 3x3 cross-family matrix shows every fitted YAML
+regresses accuracy versus the hand-tuned defaults, in some cases
+catastrophically (Lactobacillus's calibrated config drops
+Francisellaceae accuracy from 22% to 3.6%).
+
+**Mechanism.** A single source genome produces reads from both
+conserved and divergent regions. Conserved-region reads from a
+"Novel Species" genome match a reference at high identity (low N);
+divergent-region reads from the same genome match at low identity
+(high N). The per-genome label is "Novel Species" for all of them,
+but their (N, U) values span a wide range that overlaps with Known
+Species, Species Boundary, and even Conserved Region territory.
+
+Concrete example from Lactobacillus: "Species Boundary" target
+genomes (best reference ~95-96% ANI) produce reads whose mean
+novelty is ``mu_N = 2.64``, very close to "Known Species" territory.
+The package default Gaussian places Species Boundary at
+``mu_N = 12.0`` (mid-range, catch-all). Replacing the default with
+the empirical 2.64 reassigns every low-novelty read in another
+corpus (which is mostly Known Species truth) to Species Boundary,
+collapsing overall accuracy.
+
+**Failure modes.**
+- *Calibration is not a tuning lever*. Fitting per-category Gaussian
+  means from per-genome-labelled data does not improve accuracy on
+  any corpus tested.
+- *Cross-corpus transfer is worse than self-transfer in the L→F and
+  L→P directions*. The richer Lactobacillus fit happens to relocate
+  Gaussians furthest from the defaults, which produces the largest
+  damage when applied to a different corpus.
+
+**Practical consequence.** Ship the hand-tuned defaults. Use the
+calibration scripts (``scripts/calibrate_bayesian.py``,
+``scripts/calibrate_entropy.py``) as diagnostic tools — the per-
+category empirical mean, sigma, and correlation r(N, U) are
+informative for understanding category overlap — but do not commit
+the fitted YAMLs as a default config.
+
+**Open question.** A more faithful labelling scheme might use
+per-read truth derived from ``ANI(source_target, best_match_genome)``
+for each read individually rather than the source genome's
+per-genome category. ``scripts/build_metrics_tsv.py --label-mode
+per_read`` implements this; preliminary results on small corpora
+(see ``docs/CALIBRATION_RESULTS.md``) show it produces more
+internally consistent metrics but does not change the structural
+finding. A targeted experiment with per-read labels on a larger
+corpus would be the natural next step if revisiting calibration.
