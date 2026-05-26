@@ -460,6 +460,17 @@ def classify(
         min=100,
         max=100_000_000,
     ),
+    strict_ani: bool = typer.Option(
+        False,
+        "--strict-ani",
+        help=(
+            "Refuse to load an ANI matrix whose forward and reverse entries "
+            "disagree by more than 0.5 ANI units. Default is to warn and "
+            "continue, which matches historical behaviour. Use this on "
+            "untrusted matrices to catch silent overwrites of placement "
+            "uncertainty inputs."
+        ),
+    ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -647,7 +658,9 @@ def classify(
         # Show ANI matrix info
         console.print(f"\n[bold]ANI Matrix:[/bold] {ani}")
         try:
-            ani_matrix = ANIMatrix.from_file(ani)
+            ani_matrix = ANIMatrix.from_file(
+                ani, symmetry_check="strict" if strict_ani else "warn"
+            )
             console.print(f"  Genomes: {len(ani_matrix.genomes)}")
         except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
             console.print(f"  [red]Error loading: {e}[/red]")
@@ -879,7 +892,9 @@ def classify(
     ) as progress:
         progress.add_task(description="Loading ANI matrix...", total=None)
         try:
-            ani_matrix = ANIMatrix.from_file(ani)
+            ani_matrix = ANIMatrix.from_file(
+                ani, symmetry_check="strict" if strict_ani else "warn"
+            )
             num_genomes = len(ani_matrix.genomes)
         except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
             console.print(f"\n[red]Error loading ANI matrix: {e}[/red]")

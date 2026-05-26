@@ -475,3 +475,67 @@ class TestMemoryUsage:
         """Memory usage should always be positive for nonempty matrix."""
         matrix = ANIMatrix(three_genome_dict)
         assert matrix.memory_usage_bytes() > 0
+
+
+# =============================================================================
+# Symmetry validation
+# =============================================================================
+
+
+class TestSymmetryCheck:
+    """Coverage for the symmetry guard added to ANIMatrix.__init__."""
+
+    @pytest.fixture
+    def asymmetric_dict(self) -> dict[str, dict[str, float]]:
+        """ANI(A,B)=96.0 but ANI(B,A)=80.0 -- 16-point disagreement."""
+        return {
+            "GCF_A": {"GCF_A": 100.0, "GCF_B": 96.0},
+            "GCF_B": {"GCF_A": 80.0, "GCF_B": 100.0},
+        }
+
+    def test_warn_mode_logs_warning(self, asymmetric_dict, caplog):
+        """Default 'warn' mode should log a warning but not raise."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            matrix = ANIMatrix(asymmetric_dict)
+        assert any("not symmetric" in rec.message for rec in caplog.records)
+        # Matrix is still usable; one of the two directions survives.
+        assert matrix.get_ani("GCF_A", "GCF_B") in (96.0, 80.0)
+
+    def test_strict_mode_raises(self, asymmetric_dict):
+        """'strict' should raise so callers cannot proceed with bad data."""
+        with pytest.raises(ValueError, match="not symmetric"):
+            ANIMatrix(asymmetric_dict, symmetry_check="strict")
+
+    def test_off_mode_silent(self, asymmetric_dict, caplog):
+        """'off' should accept asymmetric input without complaint."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            ANIMatrix(asymmetric_dict, symmetry_check="off")
+        assert not any("not symmetric" in rec.message for rec in caplog.records)
+
+    def test_tolerance_accepts_small_jitter(self, caplog):
+        """Sub-tolerance disagreement (fastANI/skani noise) should pass."""
+        import logging
+
+        d = {
+            "GCF_A": {"GCF_A": 100.0, "GCF_B": 96.0},
+            "GCF_B": {"GCF_A": 96.3, "GCF_B": 100.0},
+        }
+        with caplog.at_level(logging.WARNING):
+            ANIMatrix(d)  # default tolerance 0.5
+        assert not any("not symmetric" in rec.message for rec in caplog.records)
+
+    def test_symmetric_input_clean(self, three_genome_dict, caplog):
+        """Existing symmetric fixtures must not trigger the warning."""
+        import logging
+
+        with caplog.at_level(logging.WARNING):
+            ANIMatrix(three_genome_dict)
+        assert not any("not symmetric" in rec.message for rec in caplog.records)
+
+    def test_invalid_mode_rejected(self, three_genome_dict):
+        with pytest.raises(ValueError, match="symmetry_check must be"):
+            ANIMatrix(three_genome_dict, symmetry_check="banana")

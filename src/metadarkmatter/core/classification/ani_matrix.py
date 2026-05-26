@@ -8,6 +8,7 @@ usage and O(1) lookup performance.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,6 +16,12 @@ import numpy as np
 
 from metadarkmatter.core.constants import ANI_DEFAULT_UNRELATED
 from metadarkmatter.core.parsers import ANIMatrixParser
+
+logger = logging.getLogger(__name__)
+
+# fastANI / skani typically reproduce the same pair within ~0.5 ANI units.
+# Asymmetries larger than this likely indicate a corrupt or merged matrix.
+DEFAULT_SYMMETRY_TOLERANCE = 0.5
 
 if TYPE_CHECKING:
     import polars as pl
@@ -41,6 +48,8 @@ class ANIMatrix:
         self,
         ani_dict: dict[str, dict[str, float]],
         default_ani: float = ANI_DEFAULT_UNRELATED,
+        symmetry_check: str = "warn",
+        symmetry_tolerance: float = DEFAULT_SYMMETRY_TOLERANCE,
     ) -> None:
         """
         Initialize ANI matrix from nested dictionary.
@@ -55,7 +64,26 @@ class ANIMatrix:
                 the value is stored as 0.0. This parameter specifies what value
                 to return instead, representing the expected ANI for distant
                 organisms within the same family.
+            symmetry_check: One of "off", "warn" (default), or "strict". When
+                "warn" or "strict", scan the input dict for pairs where
+                ANI(a,b) and ANI(b,a) both exist and differ by more than
+                ``symmetry_tolerance``. "warn" logs a warning and keeps the
+                last-written value; "strict" raises ValueError. The check is
+                a guard against silent overwrites — the nested-dict ingest
+                stores only one direction per pair and an asymmetric input
+                would otherwise be accepted without warning.
+            symmetry_tolerance: Maximum allowed |ANI(a,b) - ANI(b,a)| before
+                the symmetry check triggers (default 0.5; matches fastANI /
+                skani numerical noise).
         """
+        if symmetry_check not in ("off", "warn", "strict"):
+            raise ValueError(
+                f"symmetry_check must be 'off', 'warn', or 'strict' (got {symmetry_check!r})"
+            )
+
+        if symmetry_check != "off":
+            self._check_input_symmetry(ani_dict, symmetry_tolerance, symmetry_check)
+
         self._default_ani = default_ani
 
         # Sort genomes for consistent indexing
@@ -85,21 +113,81 @@ class ANIMatrix:
                     j = self._genome_to_idx[genome2]
                     self._ani_array[i, j] = ani_value
 
+    @staticmethod
+    def _check_input_symmetry(
+        ani_dict: dict[str, dict[str, float]],
+        tolerance: float,
+        mode: str,
+    ) -> None:
+        """Verify ANI(a,b) ~= ANI(b,a) for every pair present in both directions.
+
+        The constructor stores only one direction per (a,b) pair in the
+        underlying NumPy array, so an asymmetric input would be silently
+        accepted with only one value retained. This guard surfaces the
+        problem at load time. Limited to pairs present in both directions
+        in the input — missing reverse entries are not an asymmetry, just
+        an absence.
+        """
+        asymmetries: list[tuple[str, str, float, float]] = []
+        for g1, inner in ani_dict.items():
+            for g2, v_fwd in inner.items():
+                if g1 == g2:
+                    continue
+                reverse = ani_dict.get(g2)
+                if reverse is None:
+                    continue
+                v_rev = reverse.get(g1)
+                if v_rev is None:
+                    continue
+                if abs(float(v_fwd) - float(v_rev)) > tolerance:
+                    asymmetries.append((g1, g2, float(v_fwd), float(v_rev)))
+
+        if not asymmetries:
+            return
+
+        sample = asymmetries[:5]
+        sample_str = ", ".join(
+            f"{a}->{b}: {v1:.2f} vs {v2:.2f}" for a, b, v1, v2 in sample
+        )
+        msg = (
+            f"ANI matrix is not symmetric within tolerance {tolerance}: "
+            f"{len(asymmetries)} pair(s) disagree. Examples: {sample_str}. "
+            "Only one direction per pair is retained, which can corrupt "
+            "placement uncertainty. Regenerate the matrix from fastANI/skani "
+            "or pass symmetry_check='off' to suppress this check."
+        )
+        if mode == "strict":
+            raise ValueError(msg)
+        logger.warning(msg)
+
     @classmethod
-    def from_file(cls, path: Path, default_ani: float = ANI_DEFAULT_UNRELATED) -> ANIMatrix:
+    def from_file(
+        cls,
+        path: Path,
+        default_ani: float = ANI_DEFAULT_UNRELATED,
+        symmetry_check: str = "warn",
+        symmetry_tolerance: float = DEFAULT_SYMMETRY_TOLERANCE,
+    ) -> ANIMatrix:
         """
         Load ANI matrix from file.
 
         Args:
             path: Path to ANI matrix CSV/TSV
             default_ani: Default ANI value for missing/uncomputed pairs (default: 70.0)
+            symmetry_check: See ``ANIMatrix.__init__`` (default "warn").
+            symmetry_tolerance: See ``ANIMatrix.__init__`` (default 0.5).
 
         Returns:
             ANIMatrix instance
         """
         parser = ANIMatrixParser(path)
         ani_dict = parser.to_dict()
-        return cls(ani_dict, default_ani=default_ani)
+        return cls(
+            ani_dict,
+            default_ani=default_ani,
+            symmetry_check=symmetry_check,
+            symmetry_tolerance=symmetry_tolerance,
+        )
 
     @classmethod
     def from_dataframe(cls, df: pl.DataFrame, default_ani: float = ANI_DEFAULT_UNRELATED) -> ANIMatrix:
