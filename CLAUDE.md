@@ -162,6 +162,7 @@ See [Tutorial](docs/TUTORIAL_ENVIRONMENTAL_SPECIES.md) Step 7 for detailed decis
 - **[docs/WORKFLOW.md](docs/WORKFLOW.md)** - Detailed workflow guidance and database strategies
 - **[docs/CLASSIFICATION_STATISTICS.md](docs/CLASSIFICATION_STATISTICS.md)** - Statistical framework and literature references
 - **[docs/STATISTICAL_ASSUMPTIONS.md](docs/STATISTICAL_ASSUMPTIONS.md)** - Load-bearing modelling assumptions, sources, and empirically observed failure modes
+- **[docs/STATISTICS_AUDIT.md](docs/STATISTICS_AUDIT.md)** - 2026-05 audit of classifier math, ANI symmetry fix, calibration guardrails, and the per-read calibration experiment orchestrator (`scripts/run_per_read_calibration.sh`)
 - **[docs/CALIBRATION.md](docs/CALIBRATION.md)** - Bayesian calibration pipeline (build benchmark -> fit Gaussians -> fit entropy -> evaluate)
 - **[docs/CALIBRATION_RESULTS.md](docs/CALIBRATION_RESULTS.md)** - Three-family validation. **Hand-tuned defaults beat every fitted YAML; do not ship calibrated configs as the default.** Calibration scripts remain as diagnostic tools.
 - **[docs/EXTERNAL_TOOLS.md](docs/EXTERNAL_TOOLS.md)** - Tested external tool versions and reproducibility checklist

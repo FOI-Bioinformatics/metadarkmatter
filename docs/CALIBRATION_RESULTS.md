@@ -233,3 +233,77 @@ by clusters in read-level (N, U) space.
   accuracy" hypothesis. The "calibration improves ECE in exchange
   for accuracy" finding from v1 is still valid for self-runs;
   cross-runs offer no consistent benefit.
+
+## Cross-family validation gate (operational)
+
+Any future fitted YAML proposed for `configs/` must clear the gate
+below. The gate is asymmetric by design: it is built to reject
+overstated novelty, not to certify universal correctness. Headline
+accuracy alone is not a sufficient pass criterion because calibration
+can raise accuracy while simultaneously inflating the rate at which
+true Known Species reads are called Novel Species or Novel Genus.
+
+### Procedure
+
+1. Pick three families spanning the family-size and divergence range.
+   `f__Francisellaceae`, `f__Pseudomonadaceae`, `f__Lactobacillaceae`
+   are the working defaults because they cover the failure cases
+   already documented above.
+2. For each family `F`, run
+   `scripts/run_per_read_calibration.sh F corpora/F` to produce
+   `corpora/F/bayesian_per_read.yaml` and the per-read metrics TSV.
+3. For each test family `X != F`, run
+   `metadarkmatter score classify --config corpora/F/bayesian_per_read.yaml`
+   over `corpora/X` and run `metadarkmatter score evaluate
+   --predictions corpora/X/metrics_with_F_config.tsv
+   --truth-column true_category`.
+4. Compare against the hand-tuned-defaults baseline for the same
+   test family.
+
+This yields a 3 x 3 matrix of (train_family, test_family) results;
+ignore the diagonal (trivially good self-fit).
+
+### Pass criteria
+
+Let `baseline_X` be the hand-tuned defaults evaluated on family `X`,
+and `cal_F_X` be the fit-from-F config evaluated on `X`. Define:
+
+- `acc` = top-1 accuracy.
+- `fnr_ks` = `P(predicted in {Novel Species, Novel Genus} | true = Known Species)`.
+  This is the **overstated-novelty metric**.
+- `fnr_ng` = `P(predicted = Novel Genus | true = Novel Species)`.
+
+For every off-diagonal cell (F, X):
+
+1. `acc(cal_F_X) >= acc(baseline_X) - 0.02` (no worse than 2pp).
+2. `fnr_ks(cal_F_X) <= fnr_ks(baseline_X) * 1.10` (false-novel rate
+   on Known Species rises at most 10% relative).
+3. `fnr_ng(cal_F_X) <= fnr_ng(baseline_X) * 1.10`.
+4. `acc(cal_F_X) >= acc(baseline_X)` on at least 2 of 3 off-diagonal
+   cells.
+
+Ship the YAML only if all four conditions hold. Pasting the 3 x 3
+matrix into this document is the evidence requirement.
+
+### Robustness checks before reading the matrix
+
+- Seed sweep on one family: re-run the orchestrator with
+  `METADARKMATTER_SEED` set to three different values. If fitted
+  category means jitter by more than the fitted sigmas, the corpus
+  is too small; increase per-target depth before doing the
+  cross-family run.
+- Per-category sigma vs centroid spacing: within each true category,
+  the empirical (N, U) sigma should be at least 2x the gap between
+  adjacent category centroids. Overconfident Gaussians are the
+  mechanism by which calibration overstates novelty.
+
+### Why the bar is set here
+
+Three families is the minimum that lets you distinguish "this
+calibration genuinely generalises" from "this calibration is just
+less bad on the family it was fit on." Five would be better; the
+information per added family drops fast and simulation cost grows
+linearly. The 10% relative tolerance on `fnr_ks` / `fnr_ng` matches
+the noise level seen across the existing self-runs in this document,
+so a passing config is one whose novelty inflation is indistinguishable
+from natural per-family variance.
