@@ -402,7 +402,7 @@ The HTML report will include a Bayesian Confidence tab with entropy distribution
 
 See [METHODS.md](METHODS.md) Section 10 for the likelihood model and interpretation.
 
-### Family Validation (`--target-family`)
+### Family Validation (auto-inferred from `--metadata`, or `--target-family`)
 
 When running BLAST or MMseqs2 against a broad database (e.g., all bacteria rather than a single family), reads may produce hits outside the target family. Family validation detects these off-target reads.
 
@@ -413,7 +413,18 @@ When running BLAST or MMseqs2 against a broad database (e.g., all bacteria rathe
 4. Remaining reads are classified using only in-family hits
 
 **Usage:**
+
+The recommended invocation passes `--metadata` and lets the classifier infer the target family from the most common entry in the `family` column. Pass `--target-family` only when you need to override that choice.
+
 ```bash
+# Common case: auto-infer from metadata.
+metadarkmatter score classify \
+    --alignment broad_results.tsv.gz \
+    --ani family_ani_matrix.csv \
+    --metadata genome_metadata.tsv \
+    --output classifications.csv
+
+# Override: pin the target family explicitly.
 metadarkmatter score classify \
     --alignment broad_results.tsv.gz \
     --ani family_ani_matrix.csv \
@@ -428,11 +439,11 @@ metadarkmatter score classify \
 - `external_best_genome`: Best-matching genome outside the family
 - `external_best_identity`: Percent identity of best external hit
 
-If `--target-family` is not provided but `--metadata` is, the most common family is inferred automatically.
+Off-target reads carry `placement_uncertainty = null` (the matched genome is outside the ANI matrix so a uncertainty value would be misleading) and a fixed `confidence_score = 10.0` with `low_confidence = True`. Filter downstream on `taxonomic_call == "Off-target"` rather than on uncertainty.
 
 ### Threshold Sensitivity Analysis
 
-Assess whether classification results are robust to threshold choice using the library API:
+Available both as a CLI command (`metadarkmatter score sensitivity --classifications <csv> --output <tsv>`) and as a library API:
 
 ```python
 from metadarkmatter.core.classification.sensitivity import run_sensitivity_analysis

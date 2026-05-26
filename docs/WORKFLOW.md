@@ -753,10 +753,12 @@ When you run alignment against a database broader than a single family (e.g., al
 blastn -query family_reads.fa -db all_bacteria_db -outfmt 6 -out broad_results.tsv
 
 # 2. Classify with family validation
+#    The target family is auto-inferred from --metadata; pass
+#    --target-family "f__Francisellaceae" explicitly to override.
 metadarkmatter score classify \
     --alignment broad_results.tsv \
     --ani family_ani_matrix.csv \
-    --target-family "f__Francisellaceae" \
+    --metadata genome_metadata.tsv \
     --family-ratio-threshold 0.8 \
     --genomes genomes/ \
     --output classifications.csv
@@ -768,7 +770,7 @@ metadarkmatter report generate \
     --output report.html
 ```
 
-Reads classified as "Off-target" have a better match outside the target family, indicating they may have been misassigned by Kraken2 or another upstream classifier.
+Reads classified as "Off-target" have a better match outside the target family, indicating they may have been misassigned by Kraken2 or another upstream classifier. Off-target rows carry `placement_uncertainty = null` and a fixed `confidence_score = 10.0` (with `low_confidence = True`); filter on `taxonomic_call == "Off-target"` rather than uncertainty.
 
 ---
 

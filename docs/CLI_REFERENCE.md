@@ -391,18 +391,18 @@ Classify metagenomic reads from an alignment file (BLAST or MMseqs2).
 | `--format` | `-f` | TEXT | csv | Output format: 'csv' or 'parquet' |
 | `--verbose` | `-v` | FLAG | False | Enable verbose output |
 | `--quiet` | `-q` | FLAG | False | Suppress progress output (for scripting) |
-| `--target-family` | | TEXT | None | Target family for off-target detection (e.g., `f__Francisellaceae`) |
+| `--target-family` | | TEXT | None | Override the target family for off-target detection. Auto-inferred from `--metadata` when omitted (e.g., `f__Francisellaceae`). |
 | `--family-ratio-threshold` | | FLOAT | 0.8 | Bitscore ratio threshold for off-target detection (0.0-1.0) |
-| `--dry-run` | | FLAG | False | Validate inputs without processing |
+| `--dry-run` | | FLAG | False | Validate inputs without processing (honours `MDM_DRY_RUN=1` env var and the global top-level `--dry-run`) |
 
 #### Family Validation Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `--target-family` | TEXT | None | Target family for off-target read detection |
+| `--target-family` | TEXT | None | Override the target family for off-target read detection. Optional - leave unset and family validation will auto-infer from `--metadata`. |
 | `--family-ratio-threshold` | FLOAT | 0.8 | Bitscore ratio below which a read is classified as Off-target |
 
-When `--target-family` is provided, the classifier partitions BLAST hits into in-family (present in the ANI matrix) and external hits, then flags reads whose best in-family bitscore is substantially lower than their best overall bitscore. If `--target-family` is omitted but `--metadata` is provided, the most common family is inferred automatically.
+Family validation activates whenever metadarkmatter knows the target family: either explicitly via `--target-family` or auto-inferred from the most common entry in the `family` column of `--metadata`. The classifier partitions BLAST hits into in-family (genome present in the ANI matrix) and external hits, then flags reads whose best in-family bitscore is substantially lower than their best overall bitscore. Off-target reads carry `placement_uncertainty = null` and `confidence_score = 10.0` with `low_confidence = True`; filter on `taxonomic_call == "Off-target"` downstream.
 
 #### Advanced Classification Options
 
@@ -531,6 +531,15 @@ metadarkmatter score classify \
 
 **Family Validation (broad-database alignment)**
 ```bash
+# Recommended: auto-infer the target family from --metadata.
+metadarkmatter score classify \
+    --alignment broad_results.tsv.gz \
+    --ani family_ani_matrix.csv \
+    --metadata genome_metadata.tsv \
+    --family-ratio-threshold 0.8 \
+    --output classifications.csv
+
+# Override: pin the target family explicitly.
 metadarkmatter score classify \
     --alignment broad_results.tsv.gz \
     --ani family_ani_matrix.csv \
@@ -560,6 +569,8 @@ metadarkmatter score classify \
 
 **Full Advanced Classification**
 ```bash
+# Target family auto-inferred from --metadata; --target-family
+# can be added to override.
 metadarkmatter score classify \
     --alignment sample.blast.tsv.gz \
     --ani genomes.ani.csv \
@@ -567,8 +578,7 @@ metadarkmatter score classify \
     --output sample_classifications.csv \
     --bayesian \
     --adaptive-thresholds \
-    --qc-output sample_qc.json \
-    --target-family "f__Francisellaceae"
+    --qc-output sample_qc.json
 ```
 
 ---
