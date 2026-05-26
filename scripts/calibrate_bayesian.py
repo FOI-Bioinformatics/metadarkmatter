@@ -123,7 +123,47 @@ def main() -> None:
             "covariance assumption may be too restrictive (default 0.3)."
         ),
     )
+    parser.add_argument(
+        "--label-mode",
+        choices=("per_genome", "per_read"),
+        required=True,
+        help=(
+            "How the benchmark TSV was labelled. Required so the operator "
+            "acknowledges the source. 'per_genome' is documented to regress "
+            "accuracy on every test corpus (docs/CALIBRATION_RESULTS.md; "
+            "STATISTICAL_ASSUMPTIONS.md sec 13); use 'per_read' (produced "
+            "by scripts/build_metrics_tsv.py --label-mode per_read) for any "
+            "fit intended to compete with the hand-tuned defaults."
+        ),
+    )
+    parser.add_argument(
+        "--i-have-validated",
+        action="store_true",
+        help=(
+            "Required when --output writes inside configs/. Asserts the "
+            "operator has run cross-family validation per "
+            "docs/CALIBRATION_RESULTS.md (no family worse than -2pp vs "
+            "the hand-tuned defaults). Without this flag, configs/ "
+            "writes are refused to keep an unvalidated YAML from becoming "
+            "the package default."
+        ),
+    )
     args = parser.parse_args()
+
+    # Tripwire: refuse to overwrite shipped defaults from an unvalidated fit.
+    out_resolved = args.output.resolve()
+    if "configs" in out_resolved.parts and not args.i_have_validated:
+        raise SystemExit(
+            f"Refusing to write {args.output} inside configs/ without "
+            "--i-have-validated. See docs/CALIBRATION_RESULTS.md for the "
+            "cross-family validation gate."
+        )
+    if args.label_mode == "per_genome":
+        print(
+            "WARNING: per_genome labels regress accuracy on every test "
+            "corpus documented in docs/CALIBRATION_RESULTS.md. Treat the "
+            "output as a diagnostic artefact, not a shipping config.\n"
+        )
 
     df = pl.read_csv(args.benchmark, separator="\t")
     required = {"novelty_index", "placement_uncertainty", "true_category"}

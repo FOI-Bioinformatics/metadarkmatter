@@ -112,6 +112,7 @@ def test_calibrate_bayesian_writes_loadable_yaml(tmp_path: Path) -> None:
         "--benchmark", str(bench),
         "--output", str(yaml_out),
         "--min-samples", "20",
+        "--label-mode", "per_read",
     )
     assert r2.returncode == 0, r2.stderr
 
@@ -146,6 +147,7 @@ def test_calibration_skips_undersampled_categories(tmp_path: Path) -> None:
         "--benchmark", str(bench),
         "--output", str(yaml_out),
         "--min-samples", "20",
+        "--label-mode", "per_read",
     )
     assert result.returncode == 0, result.stderr
 
