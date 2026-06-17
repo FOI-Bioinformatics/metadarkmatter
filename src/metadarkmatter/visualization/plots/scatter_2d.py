@@ -8,7 +8,7 @@ classification regions overlaid.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import plotly.graph_objects as go
 
@@ -239,8 +239,8 @@ class NoveltyUncertaintyScatter(BasePlot):
         )
 
         # Set axis ranges
-        max_novelty = max(30, plot_data["novelty_index"].max() * 1.1)
-        max_uncertainty = max(20, plot_data["placement_uncertainty"].max() * 1.1)
+        max_novelty = max(30.0, cast(float, plot_data["novelty_index"].max()) * 1.1)
+        max_uncertainty = max(20.0, cast(float, plot_data["placement_uncertainty"].max()) * 1.1)
 
         fig.update_xaxes(range=[0, max_novelty])
         fig.update_yaxes(range=[0, max_uncertainty])
@@ -527,7 +527,7 @@ class ConfidenceNoveltyScatter(BasePlot):
         )
 
         # Set axis ranges
-        max_novelty = max(30, plot_data["novelty_index"].max() * 1.1)
+        max_novelty = max(30.0, cast(float, plot_data["novelty_index"].max()) * 1.1)
 
         fig.update_xaxes(range=[0, max_novelty])
         fig.update_yaxes(range=[0, 105])

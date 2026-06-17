@@ -118,7 +118,7 @@ class StreamingBlastParser:
     """
 
     # Schema for 14-column format (with qlen and qcov, e.g. MMseqs2 extended output)
-    BLAST_SCHEMA_EXTENDED: ClassVar[dict[str, pl.DataType]] = {
+    BLAST_SCHEMA_EXTENDED: ClassVar[dict[str, type[pl.DataType]]] = {
         "qseqid": pl.Utf8,
         "sseqid": pl.Utf8,
         "pident": pl.Float64,
@@ -136,7 +136,7 @@ class StreamingBlastParser:
     }
 
     # Schema for 13-column format (with qlen)
-    BLAST_SCHEMA: ClassVar[dict[str, pl.DataType]] = {
+    BLAST_SCHEMA: ClassVar[dict[str, type[pl.DataType]]] = {
         "qseqid": pl.Utf8,
         "sseqid": pl.Utf8,
         "pident": pl.Float64,
@@ -153,7 +153,7 @@ class StreamingBlastParser:
     }
 
     # Schema for 12-column format (without qlen)
-    BLAST_SCHEMA_LEGACY: ClassVar[dict[str, pl.DataType]] = {
+    BLAST_SCHEMA_LEGACY: ClassVar[dict[str, type[pl.DataType]]] = {
         "qseqid": pl.Utf8,
         "sseqid": pl.Utf8,
         "pident": pl.Float64,

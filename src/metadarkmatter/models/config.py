@@ -10,11 +10,37 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Literal, Self
+from typing import Any, Literal, Self, TypedDict
 
 from pydantic import BaseModel, Field, model_validator
 
 logger = logging.getLogger(__name__)
+
+
+class EffectiveThresholds(TypedDict):
+    """Precise return type for :meth:`ScoringConfig.get_effective_thresholds`.
+
+    Every classification threshold is a float; only ``identity_gap_thresholds``
+    is a tuple. Giving each key its real type (instead of the previous
+    ``dict[str, float | tuple[float, ...]]``) lets mypy verify the arithmetic
+    and comparisons in the classifier modules that consume these values.
+    """
+
+    novelty_known_max: float
+    novelty_novel_species_min: float
+    novelty_novel_species_max: float
+    novelty_novel_genus_min: float
+    novelty_novel_genus_max: float
+    uncertainty_known_max: float
+    uncertainty_novel_species_max: float
+    uncertainty_novel_genus_max: float
+    uncertainty_conserved_min: float
+    margin_divisor_known: float
+    margin_divisor_novel_species: float
+    margin_divisor_novel_genus: float
+    identity_gap_thresholds: tuple[float, ...]
+    identity_score_base: float
+    identity_score_range: float
 
 
 # Default uniform priors over 6 Bayesian categories
@@ -533,7 +559,7 @@ class ScoringConfig(BaseModel):
 
         return self
 
-    def get_effective_thresholds(self) -> dict[str, float | tuple[float, ...]]:
+    def get_effective_thresholds(self) -> EffectiveThresholds:
         """
         Get effective novelty, uncertainty, and confidence score thresholds.
 

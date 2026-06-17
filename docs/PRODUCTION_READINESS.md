@@ -84,19 +84,25 @@ removed the biggest onboarding friction:
 
 ### Deferred mypy error codes (technical debt to ratchet back)
 
-To make mypy blocking without a multi-session strict cleanup, the following
-high-volume, low-signal codes are disabled in `[tool.mypy]` (mostly Polars
-expression typing and untyped third-party libraries). Re-enable
-incrementally, ideally starting by giving `ScoringConfig.get_effective_thresholds`
-a precise `TypedDict` return type (the root cause of most `operator`/`dict-item`
-errors in `thresholds.py` / `bayesian.py`):
+To make mypy blocking without a multi-session strict cleanup, a set of
+high-volume codes were initially deferred in `[tool.mypy]`. They are being
+re-enabled incrementally.
 
-`operator`, `dict-item`, `arg-type`, `assignment`, `override`, `attr-defined`,
+**Re-enabled (2026-06):** `operator` and `dict-item` (171 errors). Root causes
+fixed: `ScoringConfig.get_effective_thresholds` now returns an
+`EffectiveThresholds` `TypedDict` instead of `dict[str, float | tuple[...]]`
+(cleared ~105 errors across `thresholds.py` / `bayesian.py` / the classifiers);
+the polars schema dicts in `parsers.py` are typed `dict[str, type[pl.DataType]]`;
+and the over-broad `Series.max()` results in the plot modules are cast to float.
+
+**Still deferred:** `arg-type`, `assignment`, `override`, `attr-defined`,
 `no-untyped-call`, `type-arg`, `prop-decorator`, `no-any-return`,
-`import-untyped`, `no-untyped-def`, `misc`, `str-bytes-safe`.
+`import-untyped`, `no-untyped-def`, `misc`, `str-bytes-safe` (largely untyped
+third-party libraries — BioPython, Plotly — and broad strict checks).
 
 The enforced core (`call-arg`, `return-value`, `call-overload`,
-`import-not-found`, `unused-ignore`, etc.) is what caught the `mdm map` bug.
+`import-not-found`, `unused-ignore`, plus `operator`/`dict-item`) is what caught
+the `mdm map` bug.
 
 ## What's still open
 

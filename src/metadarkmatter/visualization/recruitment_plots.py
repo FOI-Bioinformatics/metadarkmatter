@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 import polars as pl
 
@@ -132,7 +132,7 @@ class RecruitmentPlotGenerator:
 
         # Add identity bands as background shapes
         if show_bands:
-            x_max = plot_data["position"].max() or 1e6
+            x_max = cast(float, plot_data["position"].max() or 1e6)
 
             for band in self.bands:
                 fig.add_shape(
@@ -275,7 +275,7 @@ class RecruitmentPlotGenerator:
 
             # Add identity bands
             if show_bands and len(genome_data) > 0:
-                x_max = genome_data["position"].max() or 1e6
+                x_max = cast(float, genome_data["position"].max() or 1e6)
 
                 for band in self.bands:
                     fig.add_shape(
