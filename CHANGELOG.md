@@ -4,6 +4,52 @@ All notable changes to metadarkmatter are recorded here. The format
 loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versions use [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Production-readiness and UX hardening pass.
+
+### Added
+
+- `metadarkmatter run pipeline` — single end-to-end orchestration command
+  that chains download -> kraken2 extract -> align -> ANI -> classify ->
+  report. Reuses the existing subcommands as steps, with a structured output
+  directory, per-step checkpointing (skips steps whose outputs already exist),
+  `--from` resume, `--dry-run` planning, and a `run_manifest.json` recording
+  provenance and per-step status/timing. Driven by CLI flags or a `--config`
+  YAML (`PipelineConfig`).
+- Centralized CLI error handling: `MetadarkmatterError` subclasses now print a
+  clean `message` + `suggestion`; common library/runtime errors are translated
+  to friendly messages; full tracebacks are shown only under the new global
+  `--debug` flag (`MDM_DEBUG=1`).
+- Shared CLI option types (`cli/options.py`) for consistent
+  `--quiet/--verbose/--dry-run/--threads`.
+- CI: macOS matrix leg, experimental Python 3.13 leg, a `pip-audit`
+  dependency-vulnerability job, and a tool-dependent job that runs the
+  determinism guard plus integration/e2e tests against bioconda tools.
+- `.pre-commit-config.yaml` (ruff + mypy mirror of CI) and an internal,
+  tag-triggered `release.yml` (CHANGELOG/version check, container build+smoke,
+  GitHub release; no public publish).
+- Unit tests for the previously untested `core/ani_matrix_builder.py`, the
+  pipeline orchestrator, and the centralized error handler.
+
+### Changed
+
+- mypy is now **blocking** in CI. `strict` stays on with a documented set of
+  deferred error codes (mostly Polars-expression operator typing and untyped
+  third-party libraries); the enforced core catches signature/return/overload
+  bugs. See `docs/PRODUCTION_READINESS.md` for the deferred list.
+- Coverage gate is now enforced in CI (`--cov-fail-under=78`).
+- Removed redundant inline `try/except` blocks in `score classify` / `aai
+  validate` so typed errors flow to the centralized handler.
+
+### Fixed
+
+- `metadarkmatter map reads` against a genome directory crashed with a
+  `TypeError` (passed a non-existent `prefix_headers` argument to
+  `concatenate_genomes`). Surfaced by enabling blocking mypy.
+- Brought the lint baseline to green under ruff 0.15.13 (the lockfile's pinned
+  version), which had regressed to 469 reported issues.
+
 ## [0.2.0] — 2026-05-25
 
 Production-readiness release for internal lab use. Every numbered

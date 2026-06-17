@@ -61,6 +61,43 @@ calibrated.
 | — `score evaluate` + doctor env vars | shipped | 36d29c0 |
 | — Calibration validation (3-family 3×3 matrix) | shipped | 803ce41, 4a615b6 |
 
+## Production-readiness & UX hardening pass (2026-06)
+
+A follow-up pass tightened the gates the v0.2.0 audit had overstated and
+removed the biggest onboarding friction:
+
+- **`mdm run pipeline`** — single end-to-end orchestration command
+  (download -> extract -> align -> ANI -> classify -> report) with a
+  structured output directory, per-step checkpointing, `--from` resume,
+  `--dry-run`, and a `run_manifest.json`. Productizes
+  `scripts/run_pipeline.sh` by reusing the existing subcommands as steps.
+- **Centralized CLI errors** + global `--debug`; friendly messages instead
+  of tracebacks.
+- **CI is now actually enforced.** The lint baseline was red under the
+  lockfile's ruff 0.15.13 (469 issues) and is now green. mypy was running
+  with `continue-on-error: true` masking 336 strict errors; it is now
+  **blocking** — which immediately surfaced a real crash bug in
+  `mdm map reads` (a non-existent `prefix_headers` kwarg). The coverage
+  gate (`--cov-fail-under=78`) is enforced; macOS, an experimental 3.13
+  leg, a `pip-audit` job, and a tool-dependent integration/e2e job were
+  added.
+
+### Deferred mypy error codes (technical debt to ratchet back)
+
+To make mypy blocking without a multi-session strict cleanup, the following
+high-volume, low-signal codes are disabled in `[tool.mypy]` (mostly Polars
+expression typing and untyped third-party libraries). Re-enable
+incrementally, ideally starting by giving `ScoringConfig.get_effective_thresholds`
+a precise `TypedDict` return type (the root cause of most `operator`/`dict-item`
+errors in `thresholds.py` / `bayesian.py`):
+
+`operator`, `dict-item`, `arg-type`, `assignment`, `override`, `attr-defined`,
+`no-untyped-call`, `type-arg`, `prop-decorator`, `no-any-return`,
+`import-untyped`, `no-untyped-def`, `misc`, `str-bytes-safe`.
+
+The enforced core (`call-arg`, `return-value`, `call-overload`,
+`import-not-found`, `unused-ignore`, etc.) is what caught the `mdm map` bug.
+
 ## What's still open
 
 Three follow-up items, all bounded:

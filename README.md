@@ -61,7 +61,28 @@ conda activate metadarkmatter
 
 ## Quick Start
 
-Complete workflow for detecting novel diversity in Francisellaceae:
+### One command (recommended)
+
+`mdm run pipeline` chains the whole workflow (download -> extract -> align ->
+ANI -> classify -> report) with per-step checkpointing, `--from` resume, and a
+`run_manifest.json`. Re-running skips steps whose outputs already exist; add
+`--dry-run` to preview the plan without executing.
+
+```bash
+mdm run pipeline \
+  --family f__Francisellaceae --family-taxid 119060 \
+  --reads-1 sample_R1.fastq.gz --reads-2 sample_R2.fastq.gz \
+  --kraken-db db/ --output-dir results/run01
+
+# Already have references and extracted reads? Skip download + Kraken2:
+mdm run pipeline --genomes genomes/ --extracted-reads-1 reads_R1.fastq.gz \
+  --output-dir results/run02
+```
+
+### Manual, step by step
+
+The same pipeline run as individual commands (useful for tuning a single
+stage). Complete workflow for detecting novel diversity in Francisellaceae:
 
 ```bash
 # 1. Download reference genomes from GTDB
@@ -112,6 +133,7 @@ walkthrough.
 
 | Command | Description |
 |---------|-------------|
+| `run pipeline` | Run the full pipeline end-to-end (checkpointed, resumable) |
 | `download genomes list` | Query GTDB for family genomes (creates metadata) |
 | `download genomes fetch` | Download genomes from NCBI |
 | `kraken2 classify` | Run Kraken2 classification |
