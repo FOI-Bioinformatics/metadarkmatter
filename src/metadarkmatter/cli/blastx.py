@@ -82,15 +82,12 @@ def _concatenate_proteins(
 
             genome_count += 1
 
-            # Handle gzipped files
-            if str(protein_file).endswith(".gz"):
-                open_func = gzip.open
-                mode = "rt"
-            else:
-                open_func = open
-                mode = "r"
-
-            with open_func(protein_file, mode) as in_f:
+            # Handle gzipped files (both branches yield a text handle)
+            with (
+                gzip.open(protein_file, "rt")
+                if str(protein_file).endswith(".gz")
+                else protein_file.open("r")
+            ) as in_f:
                 for line in in_f:
                     if line.startswith(">"):
                         # Extract original protein ID (first word after >)

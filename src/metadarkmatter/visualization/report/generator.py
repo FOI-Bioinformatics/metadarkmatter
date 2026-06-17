@@ -12,7 +12,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import polars as pl
 
@@ -108,7 +108,9 @@ def _safe_float(value: object) -> float | None:
     if value is None:
         return None
     try:
-        return float(value)
+        # value is `object` (often a polars Series.mean() with a wide stub
+        # type); the try/except guards genuinely non-numeric inputs.
+        return float(cast(Any, value))
     except (ValueError, TypeError):
         return None
 
@@ -351,9 +353,9 @@ class ReportGenerator:
                             counts.get("len", []), strict=True))
 
         # Mean metrics
-        mean_novelty = self.df["novelty_index"].mean() or 0.0
-        mean_uncertainty = self.df["placement_uncertainty"].mean() or 0.0
-        mean_identity = self.df["top_hit_identity"].mean() or 0.0
+        mean_novelty = _safe_float(self.df["novelty_index"].mean()) or 0.0
+        mean_uncertainty = _safe_float(self.df["placement_uncertainty"].mean()) or 0.0
+        mean_identity = _safe_float(self.df["top_hit_identity"].mean()) or 0.0
 
         # Compute diversity groupings
         known_species = count_map.get("Known Species", 0)
@@ -413,20 +415,20 @@ class ReportGenerator:
         if has_inferred_uncertainty:
             inferred_df = self.df.filter(pl.col("inferred_uncertainty").is_not_null())
             if len(inferred_df) > 0:
-                mean_inferred_uncertainty = inferred_df["inferred_uncertainty"].mean() or 0.0
+                mean_inferred_uncertainty = _safe_float(inferred_df["inferred_uncertainty"].mean()) or 0.0
 
         if has_enhanced_scoring:
             if "alignment_quality" in self.df.columns:
-                mean_alignment_quality = self.df["alignment_quality"].mean() or 0.0
+                mean_alignment_quality = _safe_float(self.df["alignment_quality"].mean()) or 0.0
             if "identity_confidence" in self.df.columns:
-                mean_identity_confidence = self.df["identity_confidence"].mean() or 0.0
+                mean_identity_confidence = _safe_float(self.df["identity_confidence"].mean()) or 0.0
             if "placement_confidence" in self.df.columns:
-                mean_placement_confidence = self.df["placement_confidence"].mean() or 0.0
+                mean_placement_confidence = _safe_float(self.df["placement_confidence"].mean()) or 0.0
             if "discovery_score" in self.df.columns:
                 discovery_df = self.df.filter(pl.col("discovery_score").is_not_null())
                 novel_with_discovery_score = len(discovery_df)
                 if novel_with_discovery_score > 0:
-                    mean_discovery_score = discovery_df["discovery_score"].mean() or 0.0
+                    mean_discovery_score = _safe_float(discovery_df["discovery_score"].mean()) or 0.0
                     high_priority_discoveries = len(
                         discovery_df.filter(pl.col("discovery_score") >= 75)
                     )
@@ -443,7 +445,7 @@ class ReportGenerator:
 
         if has_bayesian:
             total_n = len(self.df) if len(self.df) > 0 else 1
-            mean_posterior_entropy = self.df["posterior_entropy"].mean() or 0.0
+            mean_posterior_entropy = _safe_float(self.df["posterior_entropy"].mean()) or 0.0
             high_confidence_count = len(
                 self.df.filter(pl.col("posterior_entropy") < 1.0)
             )
@@ -1182,7 +1184,7 @@ class ReportGenerator:
                     cat_df = self.df.filter(pl.col("taxonomic_call") == map_cat)
                     if len(cat_df) > 0:
                         cats.append(map_cat)
-                        means.append(cat_df[col_name].mean() or 0.0)
+                        means.append(_safe_float(cat_df[col_name].mean()) or 0.0)
                 if means:
                     bar_fig.add_trace(go.Bar(
                         x=cats,
@@ -2571,6 +2573,7 @@ document.addEventListener('DOMContentLoaded', function() {
             )
 
             # Build or load tree
+            newick: str | None
             if user_tree_path is not None:
                 newick = load_user_tree(user_tree_path, ani_matrix_pd)
                 tree_source_note = "Tree source: user-provided Newick file."
@@ -2886,16 +2889,16 @@ def generate_report(
         theme: Color theme ('light' or 'dark')
     """
     # Load classifications
-    classifications = read_dataframe(classifications_path)
+    classifications = read_dataframe(Path(classifications_path))
 
     # Load optional data
     ani_matrix = None
     if ani_matrix_path:
-        ani_matrix = read_dataframe(ani_matrix_path)
+        ani_matrix = read_dataframe(Path(ani_matrix_path))
 
     recruitment_data = None
     if recruitment_data_path:
-        recruitment_data = read_dataframe(recruitment_data_path)
+        recruitment_data = read_dataframe(Path(recruitment_data_path))
 
     # Create config
     config = ReportConfig(

@@ -23,10 +23,10 @@ from metadarkmatter.core.classification.bayesian import (
 from metadarkmatter.core.constants import (
     UNKNOWN_GENOME,
 )
-from metadarkmatter.core.io_utils import StreamingWriter
+from metadarkmatter.core.io_utils import OutputFormat, StreamingWriter
 from metadarkmatter.core.parsers import extract_genome_name_expr
 from metadarkmatter.models.classification import TAXONOMIC_TO_DIVERSITY
-from metadarkmatter.models.config import ScoringConfig
+from metadarkmatter.models.config import EffectiveThresholds, ScoringConfig
 
 if TYPE_CHECKING:
     from metadarkmatter.core.aai_matrix_builder import AAIMatrix
@@ -62,6 +62,13 @@ class VectorizedClassifier:
         vectorized = VectorizedClassifier(ani_matrix, config)
         df = vectorized.classify_file(blast_path)
     """
+
+    # Lookup tables built in __init__. The ANI lookup is always a DataFrame;
+    # the AAI lookups are None when no AAI matrix is provided.
+    _ani_lookup: pl.DataFrame
+    _ani_lookup_symmetric: pl.DataFrame
+    _aai_lookup: pl.DataFrame | None
+    _aai_lookup_symmetric: pl.DataFrame | None
 
     def __init__(
         self,
@@ -540,6 +547,8 @@ class VectorizedClassifier:
                     from metadarkmatter.core.classification.qc import (
                         compute_pre_qc,
                     )
+                    # raw_df/filtered_df are set whenever compute_qc is True.
+                    assert raw_df is not None and filtered_df is not None
                     qc = compute_pre_qc(raw_df, filtered_df, self.ani_matrix, self.config)
                     return off_target_df, qc
                 return off_target_df
@@ -548,6 +557,7 @@ class VectorizedClassifier:
                 from metadarkmatter.core.classification.qc import (
                     compute_pre_qc,
                 )
+                assert raw_df is not None and filtered_df is not None
                 qc = compute_pre_qc(raw_df, filtered_df, self.ani_matrix, self.config)
                 return empty, qc
             return empty
@@ -977,6 +987,7 @@ class VectorizedClassifier:
                 compute_post_qc,
                 compute_pre_qc,
             )
+            assert raw_df is not None and filtered_df is not None
             qc = compute_pre_qc(raw_df, filtered_df, self.ani_matrix, self.config)
             qc = compute_post_qc(qc, classification_result)
             return classification_result, qc
@@ -986,7 +997,7 @@ class VectorizedClassifier:
     def _compute_legacy_scores(
         self,
         result: pl.DataFrame,
-        eff: dict,
+        eff: EffectiveThresholds,
     ) -> pl.DataFrame:
         """Compute legacy sub-scores (opt-in via include_legacy_scores)."""
         result = result.with_columns([
@@ -1081,7 +1092,7 @@ class VectorizedClassifier:
         self,
         blast_path: Path,
         output_path: Path,
-        output_format: str = "parquet",
+        output_format: OutputFormat = "parquet",
         partition_size: int = 5_000_000,
         progress_callback: Callable[[int, int, float], None] | None = None,
     ) -> int:
@@ -1167,9 +1178,10 @@ class VectorizedClassifier:
                                 pending_df = pl.DataFrame(pending_data)
                                 complete_df = pl.concat([complete_df, pending_df])
 
-                        # Classify this partition
+                        # Classify this partition (no compute_qc -> DataFrame)
                         if not complete_df.is_empty():
                             result_df = self.classify_file(complete_df)
+                            assert isinstance(result_df, pl.DataFrame)
                             total_reads += len(result_df)
                             writer.write(result_df)
 
@@ -1193,6 +1205,7 @@ class VectorizedClassifier:
                 if remaining_data:
                     remaining_df = pl.DataFrame(remaining_data)
                     result_df = self.classify_file(remaining_df)
+                    assert isinstance(result_df, pl.DataFrame)
                     total_reads += len(result_df)
                     writer.write(result_df)
 

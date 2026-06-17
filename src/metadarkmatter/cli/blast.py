@@ -524,8 +524,8 @@ def align_reads(
     # Compress output if needed
     if should_compress and temp_output.exists():
         out.print("  Compressing output...")
-        with temp_output.open("rb") as f_in, gzip.open(output, "wb") as f_out:
-            f_out.writelines(f_in)
+        with temp_output.open("rb") as src_in, gzip.open(output, "wb") as gz_out:
+            gz_out.writelines(src_in)
         temp_output.unlink()
 
     # Count alignments

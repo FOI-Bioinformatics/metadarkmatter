@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import polars as pl
 import typer
@@ -34,7 +34,7 @@ from metadarkmatter.core.ani_placement import (
     VectorizedClassifier,
 )
 from metadarkmatter.core.id_mapping import ContigIdMapping
-from metadarkmatter.core.io_utils import read_dataframe, write_dataframe
+from metadarkmatter.core.io_utils import OutputFormat, read_dataframe, write_dataframe
 from metadarkmatter.core.metadata import GenomeMetadata
 from metadarkmatter.core.parsers import StreamingBlastParser, extract_genome_name_expr
 from metadarkmatter.models.classification import TaxonomicSummary
@@ -173,7 +173,7 @@ def validate_ani_genome_coverage(
 def validate_output_format_extension(
     output: Path,
     output_format: str,
-    console: Console,
+    console: Console | QuietConsole,
 ) -> Path:
     """
     Validate that output file extension matches the specified format.
@@ -216,7 +216,7 @@ def _finalize_classification(
     classification_df: pl.DataFrame | None,
     genome_metadata: Any,
     output: Path,
-    output_format: str,
+    output_format: OutputFormat,
 ) -> int:
     """
     Finalize classification: join metadata and write output.
@@ -620,6 +620,8 @@ def classify(
             f"Use 'csv' or 'parquet'.[/red]"
         )
         raise typer.Exit(code=1) from None
+    # Narrowed to the literal type after the membership check above.
+    output_format = cast(OutputFormat, output_format)
 
     # Validate output extension matches format
     output = validate_output_format_extension(output, output_format, out)
@@ -1151,8 +1153,10 @@ def classify(
                 compute_qc=qc_output is not None,
             )
             if qc_output is not None:
+                assert isinstance(result, tuple)
                 classification_df, qc_metrics = result
             else:
+                assert isinstance(result, pl.DataFrame)
                 classification_df = result
 
         num_classified = _finalize_classification(
@@ -1450,6 +1454,7 @@ def batch(
             f"Use 'csv' or 'parquet'.[/red]"
         )
         raise typer.Exit(code=1) from None
+    output_format = cast(OutputFormat, output_format)
 
     file_ext = ".parquet" if output_format == "parquet" else ".csv"
 
@@ -1632,6 +1637,7 @@ def batch(
 
         try:
             df = vectorized.classify_file(alignment_file)
+            assert isinstance(df, pl.DataFrame)
             num_classified = len(df)
 
             # Write results in specified format

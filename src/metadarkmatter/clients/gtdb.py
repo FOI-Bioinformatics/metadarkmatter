@@ -16,7 +16,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, Self, cast
 from urllib.parse import quote
 
 import httpx
@@ -172,7 +172,8 @@ class GTDBClient:
         elif cache_dir is None:
             resolved = None
         else:
-            resolved = Path(cache_dir).expanduser()
+            # Not the sentinel and not None: a real path-like value.
+            resolved = Path(cast("Path | str", cache_dir)).expanduser()
         self.cache_dir: Path | None = resolved
         self.cache_ttl = cache_ttl
         self._client: httpx.Client | None = None

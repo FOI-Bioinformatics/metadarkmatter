@@ -490,6 +490,8 @@ def search_reads(
     # Handle paired-end input by concatenating reads
     temp_query_file: Path | None = None
     if has_paired_end:
+        # Paired-end requires both mates; validated by the caller above.
+        assert query_1 is not None and query_2 is not None
         # Create temporary file for concatenated reads
         _, temp_path = tempfile.mkstemp(suffix=".fastq")
         temp_query_file = Path(temp_path)
@@ -499,6 +501,7 @@ def search_reads(
         out.print(f"  R1: {query_1}")
         out.print(f"  R2: {query_2}")
     else:
+        assert query is not None
         query_for_search = query
         out.print("[bold]Input:[/bold]")
         out.print(f"  Query: {query}")

@@ -461,7 +461,7 @@ def extract_reads(
         out.print("  [dim]Compressing output files...[/dim]")
 
         for temp_file, final_file in [(temp_r1, extracted_r1), (temp_r2, extracted_r2)]:
-            if temp_file and temp_file.exists():
+            if temp_file and temp_file.exists() and final_file is not None:
                 with temp_file.open("rb") as f_in, gzip.open(final_file, "wb") as f_out:
                     shutil.copyfileobj(f_in, f_out)
                 temp_file.unlink()  # Remove uncompressed file

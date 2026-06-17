@@ -267,8 +267,12 @@ class ANIWeightedClassifier:
             alignment_quality=alignment_quality,
         )
 
-        # Placement confidence - use inferred uncertainty for single-hit reads
-        effective_uncertainty = inferred_uncertainty if num_ambiguous_hits <= 1 else placement_uncertainty
+        # Placement confidence - use inferred uncertainty for single-hit reads.
+        # For single-hit reads inferred_uncertainty is always set above; the
+        # `or 0.0` keeps the type float and is a no-op at runtime.
+        effective_uncertainty = (
+            (inferred_uncertainty or 0.0) if num_ambiguous_hits <= 1 else placement_uncertainty
+        )
         effective_type = uncertainty_type or ("inferred" if num_ambiguous_hits <= 1 else "measured")
 
         placement_confidence = calculate_placement_confidence(

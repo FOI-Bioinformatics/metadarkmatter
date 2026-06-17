@@ -104,16 +104,13 @@ python_version = "3.11"
 strict = true
 warn_return_any = true
 plugins = ["pydantic.mypy"]
-# Pragmatic blocking gate: strict stays on, but the categories below are
-# deferred (untyped third-party libs and broad strict checks). The enforced core
-# catches signature/return/overload bugs (it surfaced a real prefix_headers kwarg
-# bug in cli/map.py) and now also `operator` + `dict-item` (re-enabled after
-# giving get_effective_thresholds a TypedDict return and fixing the polars schema
-# / Series.max() typings). Remaining codes are tracked as technical debt to
-# ratchet back on; see docs/PRODUCTION_READINESS.md.
+# Pragmatic blocking gate: strict stays on, with a shrinking set of deferred
+# codes (mostly untyped third-party libs and broad strict checks). Re-enabled so
+# far: operator, dict-item, arg-type, assignment (all fixed at root, not
+# suppressed). The enforced set caught a real prefix_headers kwarg bug in
+# cli/map.py. Remaining codes are tracked as technical debt to ratchet back on;
+# see docs/PRODUCTION_READINESS.md.
 disable_error_code = [
-    "arg-type",
-    "assignment",
     "override",
     "attr-defined",
     "no-untyped-call",

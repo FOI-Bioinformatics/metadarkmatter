@@ -438,6 +438,7 @@ class ExternalTool(ABC):
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     timeout=timeout,
+                    text=True,  # keep CompletedProcess[str] consistent with the capture branch
                 )
                 stdout = ""
                 stderr = ""

@@ -65,8 +65,9 @@ def apply_classification_thresholds(
     has_genus = "genus_uncertainty" in df.columns
     has_scope = "ambiguity_scope" in df.columns
 
-    # Build classification expression
-    classification = (
+    # Build classification expression. Annotated as Expr because the cascade
+    # reassigns through polars' Then/ChainedThen/Expr (all Expr subclasses).
+    classification: pl.Expr = (
         # Rule 0: Identity gap check
         pl.when(
             (pl.col("identity_gap").is_not_null())
@@ -196,7 +197,7 @@ def apply_legacy_thresholds(
     has_scope = "ambiguity_scope" in df.columns
 
     # Build classification expression (same cascade as apply_classification_thresholds)
-    classification = (
+    classification: pl.Expr = (
         # Rule 0: Identity gap check
         pl.when(
             (pl.col("identity_gap").is_not_null())

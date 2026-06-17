@@ -88,21 +88,28 @@ To make mypy blocking without a multi-session strict cleanup, a set of
 high-volume codes were initially deferred in `[tool.mypy]`. They are being
 re-enabled incrementally.
 
-**Re-enabled (2026-06):** `operator` and `dict-item` (171 errors). Root causes
-fixed: `ScoringConfig.get_effective_thresholds` now returns an
-`EffectiveThresholds` `TypedDict` instead of `dict[str, float | tuple[...]]`
-(cleared ~105 errors across `thresholds.py` / `bayesian.py` / the classifiers);
-the polars schema dicts in `parsers.py` are typed `dict[str, type[pl.DataType]]`;
-and the over-broad `Series.max()` results in the plot modules are cast to float.
+**Re-enabled (2026-06):**
 
-**Still deferred:** `arg-type`, `assignment`, `override`, `attr-defined`,
-`no-untyped-call`, `type-arg`, `prop-decorator`, `no-any-return`,
-`import-untyped`, `no-untyped-def`, `misc`, `str-bytes-safe` (largely untyped
-third-party libraries — BioPython, Plotly — and broad strict checks).
+- `operator` + `dict-item` (171 errors). `ScoringConfig.get_effective_thresholds`
+  now returns an `EffectiveThresholds` `TypedDict` instead of
+  `dict[str, float | tuple[...]]` (cleared ~105 across `thresholds.py` /
+  `bayesian.py` / the classifiers); the polars schema dicts in `parsers.py` are
+  typed `dict[str, type[pl.DataType]]`; the over-broad `Series.max()` results in
+  the plot modules are cast to float.
+- `arg-type` + `assignment` (59 errors). The classification cascade is annotated
+  `pl.Expr`; polars `Series.mean()` is routed through a float coercion;
+  `classify_file`'s `DataFrame | tuple` return is narrowed at call sites; the
+  `output_format` literal is propagated; and several genuinely-guarded
+  `Path | None` / `float | None` values are asserted or coerced. No suppressions.
 
-The enforced core (`call-arg`, `return-value`, `call-overload`,
-`import-not-found`, `unused-ignore`, plus `operator`/`dict-item`) is what caught
-the `mdm map` bug.
+**Still deferred:** `override`, `attr-defined`, `no-untyped-call`, `type-arg`,
+`prop-decorator`, `no-any-return`, `import-untyped`, `no-untyped-def`, `misc`,
+`str-bytes-safe` (largely untyped third-party libraries — BioPython, Plotly —
+and broad strict checks with lower bug-catching value).
+
+The enforced set (`call-arg`, `return-value`, `call-overload`,
+`import-not-found`, `unused-ignore`, `operator`, `dict-item`, `arg-type`,
+`assignment`) is what caught the `mdm map` bug.
 
 ## What's still open
 

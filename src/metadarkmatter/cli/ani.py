@@ -401,11 +401,13 @@ def compute(
                 raw_output = tmp_path / "fastani_output.txt"
 
                 fastani = FastANI()
+                # The batched path bypasses run_or_raise and has no ToolResult,
+                # so track the reported command/stderr strings directly rather
+                # than a result object of two incompatible types.
+                result_command: str
+                result_stderr: str = ""
                 try:
                     if fastani_batches > 1:
-                        # Batched parallel mode bypasses run_or_raise so it
-                        # does not emit a "result" object; manufacture a
-                        # dummy result-like value for the path that prints it.
                         fastani.compute_parallel_batches(
                             query_list=list_file,
                             reference_list=list_file,
@@ -414,24 +416,25 @@ def compute(
                             threads=threads,
                             batches=fastani_batches,
                         )
-                        from types import SimpleNamespace
-                        result = SimpleNamespace(command_string=f"fastANI x{fastani_batches} batches", stderr="")
+                        result_command = f"fastANI x{fastani_batches} batches"
                     else:
-                        result = fastani.run_or_raise(
+                        tool_result = fastani.run_or_raise(
                             query_list=list_file,
                             reference_list=list_file,
                             output=raw_output,
                             threads=threads,
                             matrix=True,
                         )
+                        result_command = tool_result.command_string
+                        result_stderr = tool_result.stderr
                 except ToolExecutionError as e:
                     console.print(f"\n[red]fastANI failed:[/red]\n{e.message}")
                     raise typer.Exit(code=1) from None
 
                 if verbose:
-                    out.print(f"\n[dim]Command: {result.command_string}[/dim]")
-                    if result.stderr.strip():
-                        out.print(f"[dim]Tool output: {result.stderr.strip()[:300]}[/dim]")
+                    out.print(f"\n[dim]Command: {result_command}[/dim]")
+                    if result_stderr.strip():
+                        out.print(f"[dim]Tool output: {result_stderr.strip()[:300]}[/dim]")
 
                 # Parse output
                 ani_dict = parse_fastani_output(raw_output)

@@ -8,7 +8,7 @@ to help users identify problematic inputs and interpret results.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import polars as pl
 
@@ -117,9 +117,9 @@ def compute_pre_qc(
     # Alignment statistics
     if not filtered_df.is_empty():
         if "length" in filtered_df.columns:
-            qc.mean_alignment_length = filtered_df["length"].mean()
+            qc.mean_alignment_length = cast(float, filtered_df["length"].mean() or 0.0)
         if "pident" in filtered_df.columns:
-            qc.mean_identity = filtered_df["pident"].mean()
+            qc.mean_identity = cast(float, filtered_df["pident"].mean() or 0.0)
 
     # Generate warnings
     if qc.filter_rate > 0.5:
