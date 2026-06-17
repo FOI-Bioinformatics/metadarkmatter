@@ -10,8 +10,9 @@ Uses mocked API responses for CI-safe testing.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -88,7 +89,7 @@ class TestDownloadGenomesList:
     def test_list_genus_francisella(
         self,
         mock_gtdb_response: dict,
-        run_download_list: Callable[..., "Result"],
+        run_download_list: Callable[..., Result],
         e2e_temp_dir: Path,
     ):
         """Should query and save accession list for g__Francisella."""
@@ -104,7 +105,7 @@ class TestDownloadGenomesList:
     def test_list_family_francisellaceae(
         self,
         mock_gtdb_family_response: dict,
-        run_download_list: Callable[..., "Result"],
+        run_download_list: Callable[..., Result],
         e2e_temp_dir: Path,
     ):
         """Should query and save accession list for f__Francisellaceae."""
@@ -119,7 +120,7 @@ class TestDownloadGenomesList:
     def test_list_with_metadata(
         self,
         mock_gtdb_response: dict,
-        run_download_list: Callable[..., "Result"],
+        run_download_list: Callable[..., Result],
         e2e_temp_dir: Path,
     ):
         """Should include extra columns with --include-metadata."""
@@ -136,7 +137,7 @@ class TestDownloadGenomesList:
     def test_list_verbose_output(
         self,
         mock_gtdb_response: dict,
-        run_download_list: Callable[..., "Result"],
+        run_download_list: Callable[..., Result],
     ):
         """Should show genus breakdown with --verbose."""
         result = run_download_list("g__Francisella", verbose=True)
@@ -148,7 +149,7 @@ class TestDownloadGenomesList:
     def test_list_quiet_mode(
         self,
         mock_gtdb_response: dict,
-        run_download_list: Callable[..., "Result"],
+        run_download_list: Callable[..., Result],
         e2e_temp_dir: Path,
     ):
         """Should produce minimal output with --quiet."""
@@ -161,7 +162,7 @@ class TestDownloadGenomesList:
 
     def test_list_dry_run(
         self,
-        run_download_list: Callable[..., "Result"],
+        run_download_list: Callable[..., Result],
         e2e_temp_dir: Path,
     ):
         """Should show query URL without making request in dry-run mode."""
@@ -177,7 +178,7 @@ class TestDownloadGenomesList:
 
     def test_list_invalid_taxon_format(
         self,
-        run_download_list: Callable[..., "Result"],
+        run_download_list: Callable[..., Result],
     ):
         """Should error on invalid taxon format."""
         result = run_download_list("Francisella")  # Missing g__ prefix
@@ -188,7 +189,7 @@ class TestDownloadGenomesList:
     def test_list_nonexistent_taxon(
         self,
         mock_gtdb_404: None,
-        run_download_list: Callable[..., "Result"],
+        run_download_list: Callable[..., Result],
     ):
         """Should handle 404 for unknown taxa."""
         result = run_download_list("g__FakeTaxonNotReal")
@@ -200,7 +201,7 @@ class TestDownloadGenomesList:
     def test_list_output_file_created(
         self,
         mock_gtdb_response: dict,
-        run_download_list: Callable[..., "Result"],
+        run_download_list: Callable[..., Result],
         e2e_temp_dir: Path,
     ):
         """Should create valid TSV file."""
@@ -215,7 +216,7 @@ class TestDownloadGenomesList:
     def test_list_tsv_roundtrip(
         self,
         mock_gtdb_response: dict,
-        run_download_list: Callable[..., "Result"],
+        run_download_list: Callable[..., Result],
         e2e_temp_dir: Path,
     ):
         """TSV can be read back with AccessionList.from_tsv()."""
@@ -238,7 +239,7 @@ class TestDownloadGenomesList:
     def test_list_genus_contains_only_target_genus(
         self,
         mock_gtdb_response: dict,
-        run_download_list: Callable[..., "Result"],
+        run_download_list: Callable[..., Result],
         e2e_temp_dir: Path,
     ):
         """All accessions in genus query should belong to that genus."""
@@ -253,7 +254,7 @@ class TestDownloadGenomesList:
     def test_list_family_contains_multiple_genera(
         self,
         mock_gtdb_family_response: dict,
-        run_download_list: Callable[..., "Result"],
+        run_download_list: Callable[..., Result],
         e2e_temp_dir: Path,
     ):
         """Family query should contain multiple genera."""
@@ -286,7 +287,7 @@ class TestDownloadGenomesFetch:
         self,
         sample_accession_tsv: Path,
         mock_ncbi_available: None,
-        run_download_fetch: Callable[..., "Result"],
+        run_download_fetch: Callable[..., Result],
     ):
         """Should show download plan without executing."""
         result = run_download_fetch(sample_accession_tsv, dry_run=True)
@@ -299,7 +300,7 @@ class TestDownloadGenomesFetch:
         self,
         sample_accession_tsv: Path,
         mock_ncbi_missing: None,
-        run_download_fetch: Callable[..., "Result"],
+        run_download_fetch: Callable[..., Result],
     ):
         """Should error when NCBI datasets CLI not installed."""
         result = run_download_fetch(sample_accession_tsv)
@@ -312,7 +313,7 @@ class TestDownloadGenomesFetch:
         self,
         sample_accession_tsv: Path,
         mock_ncbi_available: None,
-        run_download_fetch: Callable[..., "Result"],
+        run_download_fetch: Callable[..., Result],
         e2e_temp_dir: Path,
     ):
         """Should skip genomes that already exist."""
@@ -335,7 +336,7 @@ class TestDownloadGenomesFetch:
         self,
         sample_accession_tsv: Path,
         mock_ncbi_available: None,
-        run_download_fetch: Callable[..., "Result"],
+        run_download_fetch: Callable[..., Result],
         e2e_temp_dir: Path,
     ):
         """Should exit early when all genomes exist."""
@@ -344,7 +345,7 @@ class TestDownloadGenomesFetch:
 
         # Create files for all accessions in sample TSV
         for acc in ["GCF_000833475.1", "GCF_000156715.1", "GCF_001885235.1"]:
-            (output_dir / f"{acc}.fna").write_text(f">header\nACGT\n")
+            (output_dir / f"{acc}.fna").write_text(">header\nACGT\n")
 
         # Default is skip_if_exists=True
         result = run_download_fetch(sample_accession_tsv)
@@ -355,7 +356,7 @@ class TestDownloadGenomesFetch:
     def test_fetch_invalid_accession_file(
         self,
         tmp_path: Path,
-        run_download_fetch: Callable[..., "Result"],
+        run_download_fetch: Callable[..., Result],
     ):
         """Should error on invalid accession file."""
         # Create malformed TSV
@@ -368,7 +369,7 @@ class TestDownloadGenomesFetch:
 
     def test_fetch_nonexistent_file(
         self,
-        run_download_fetch: Callable[..., "Result"],
+        run_download_fetch: Callable[..., Result],
         e2e_temp_dir: Path,
     ):
         """Should error on nonexistent accession file."""
@@ -382,7 +383,7 @@ class TestDownloadGenomesFetch:
         self,
         sample_accession_tsv: Path,
         mock_ncbi_available: None,
-        run_download_fetch: Callable[..., "Result"],
+        run_download_fetch: Callable[..., Result],
     ):
         """Should show detailed output with --verbose."""
         result = run_download_fetch(
@@ -406,8 +407,8 @@ class TestDownloadWorkflow:
         self,
         mock_gtdb_response: dict,
         mock_ncbi_available: None,
-        run_download_list: Callable[..., "Result"],
-        run_download_fetch: Callable[..., "Result"],
+        run_download_list: Callable[..., Result],
+        run_download_fetch: Callable[..., Result],
         e2e_temp_dir: Path,
     ):
         """Full workflow: list genomes then fetch with dry-run."""
@@ -426,7 +427,7 @@ class TestDownloadWorkflow:
     def test_list_with_metadata_then_verify(
         self,
         mock_gtdb_response: dict,
-        run_download_list: Callable[..., "Result"],
+        run_download_list: Callable[..., Result],
         e2e_temp_dir: Path,
     ):
         """List with metadata and verify extra columns."""
@@ -457,7 +458,7 @@ class TestDownloadEdgeCases:
     def test_list_special_characters_in_species(
         self,
         mock_gtdb_response: dict,
-        run_download_list: Callable[..., "Result"],
+        run_download_list: Callable[..., Result],
         e2e_temp_dir: Path,
     ):
         """Should handle species names with underscores and special chars."""
@@ -474,7 +475,7 @@ class TestDownloadEdgeCases:
     def test_list_handles_gca_and_gcf_accessions(
         self,
         mock_gtdb_response: dict,
-        run_download_list: Callable[..., "Result"],
+        run_download_list: Callable[..., Result],
         e2e_temp_dir: Path,
     ):
         """Should handle both GCA and GCF accession prefixes."""
@@ -486,7 +487,7 @@ class TestDownloadEdgeCases:
 
         accession_strings = [acc.accession for acc in acc_list.accessions]
         gcf_count = sum(1 for a in accession_strings if a.startswith("GCF"))
-        gca_count = sum(1 for a in accession_strings if a.startswith("GCA"))
+        sum(1 for a in accession_strings if a.startswith("GCA"))
 
         # Both types should be handled
         assert gcf_count > 0, "Should have GCF accessions"
@@ -494,7 +495,7 @@ class TestDownloadEdgeCases:
 
     def test_empty_taxon_error(
         self,
-        run_download_list: Callable[..., "Result"],
+        run_download_list: Callable[..., Result],
     ):
         """Should handle empty taxon gracefully."""
         result = run_download_list("")

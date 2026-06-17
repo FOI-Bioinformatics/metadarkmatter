@@ -79,7 +79,7 @@ def run_sensitivity_analysis(
     for cat in categories:
         result.counts[cat] = []
 
-    for novelty_thresh, uncertainty_thresh in zip(novelty_values, uncertainty_values):
+    for novelty_thresh, uncertainty_thresh in zip(novelty_values, uncertainty_values, strict=False):
         # Create modified config with swept thresholds
         # Maintain continuous boundaries: species_min = known_max
         config = ScoringConfig(

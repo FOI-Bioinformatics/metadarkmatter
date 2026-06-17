@@ -528,8 +528,8 @@ class NovelDiversityAnalyzer:
         low_conf = sum(1 for c in clusters if c.confidence == "Low")
 
         # Unique genera/families with novel diversity
-        genera = set(c.nearest_genus for c in clusters if c.taxonomic_call == "Novel Species")
-        families = set(c.nearest_family for c in clusters if c.taxonomic_call == "Novel Genus")
+        genera = {c.nearest_genus for c in clusters if c.taxonomic_call == "Novel Species"}
+        families = {c.nearest_family for c in clusters if c.taxonomic_call == "Novel Genus"}
 
         # Cluster size statistics
         sizes = [c.read_count for c in clusters]

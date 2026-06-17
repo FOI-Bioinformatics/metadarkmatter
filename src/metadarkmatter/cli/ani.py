@@ -8,7 +8,7 @@ Provides subcommands:
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 import typer
@@ -16,7 +16,6 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
-from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.cli.utils import QuietConsole
 from metadarkmatter.core.ani_matrix_builder import (
     ani_dict_to_csv,
@@ -25,10 +24,11 @@ from metadarkmatter.core.ani_matrix_builder import (
     validate_ani_coverage,
 )
 from metadarkmatter.core.parsers import StreamingBlastParser
+from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.external import ToolExecutionError
 
 
-class ANIBackend(str, Enum):
+class ANIBackend(StrEnum):
     """ANI computation backend."""
 
     FASTANI = "fastani"
@@ -89,7 +89,7 @@ def _find_genome_files(
     return genome_files
 
 
-class ANISensitivity(str, Enum):
+class ANISensitivity(StrEnum):
     """ANI computation sensitivity preset."""
 
     DEFAULT = "default"

@@ -9,7 +9,7 @@ validate user-provided phylogenetic trees.
 from __future__ import annotations
 
 import logging
-from enum import Enum
+from enum import StrEnum
 from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class TreeMethod(str, Enum):
+class TreeMethod(StrEnum):
     """Phylogenetic tree building method."""
 
     NJ = "nj"

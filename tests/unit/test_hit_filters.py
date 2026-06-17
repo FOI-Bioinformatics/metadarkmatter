@@ -11,7 +11,6 @@ import tempfile
 from pathlib import Path
 
 import polars as pl
-import pytest
 
 from metadarkmatter.core.classification.ani_matrix import ANIMatrix
 from metadarkmatter.core.classification.classifiers.vectorized import VectorizedClassifier

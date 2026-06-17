@@ -7,15 +7,13 @@ that should still produce valid results.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
-import polars as pl
 import pytest
 
-from tests.factories import BlastDataFactory, ANIMatrixFactory
-from tests.utils.assertions import CLIAssertions, ClassificationAssertions
-
+from tests.factories import ANIMatrixFactory, BlastDataFactory
+from tests.utils.assertions import ClassificationAssertions, CLIAssertions
 
 pytestmark = pytest.mark.e2e
 
@@ -223,7 +221,7 @@ class TestConservedRegions:
         CLIAssertions.assert_success(result)
 
         output_path = e2e_temp_dir / "conserved.csv"
-        df = ClassificationAssertions.assert_all_validations(output_path)
+        ClassificationAssertions.assert_all_validations(output_path)
 
         # With high ANI between genomes, ambiguous hits should be conserved regions
         # or have low placement uncertainty

@@ -69,7 +69,7 @@ def generate_test_data(
     ani_data = {"genome": genomes}
     for i, g in enumerate(genomes):
         ani_values = []
-        for j, g2 in enumerate(genomes):
+        for j, _g2 in enumerate(genomes):
             if i == j:
                 ani_values.append(100.0)
             elif abs(i - j) == 1:
@@ -148,7 +148,7 @@ def main():
     print("=" * 70)
     print("METADARKMATTER CLASSIFIER BENCHMARK")
     print("=" * 70)
-    print(f"\nConfiguration:")
+    print("\nConfiguration:")
     print(f"  Reads: {args.reads:,}")
     print(f"  Genomes: {args.genomes}")
     print()

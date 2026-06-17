@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import gzip
 from dataclasses import dataclass, field
-from io import TextIOBase
 from pathlib import Path
 from typing import IO
 
@@ -162,8 +161,7 @@ def validate_fastq(
     with handle:
         record_lines: list[str] = []
         lineno = 0
-        for raw_line in handle:
-            lineno += 1
+        for lineno, raw_line in enumerate(handle, start=1):
             line = raw_line.rstrip("\r\n")
             record_lines.append(line)
             if len(record_lines) == 4:

@@ -1150,7 +1150,6 @@ class TestMultiVerboseAndFailures:
         without an unhandled exception.
         """
         import shutil
-        from unittest.mock import patch
 
         input_dir = temp_dir / "multi_input"
         input_dir.mkdir()
@@ -1735,7 +1734,7 @@ class TestSummarizeCommand:
         # Use a directory as output path to trigger a write error
         output = temp_dir / "output_is_dir"
         output.mkdir()
-        bad_output = output / ""  # Empty name will cause issues
+        output / ""  # Empty name will cause issues
 
         result = cli_runner.invoke(
             app,

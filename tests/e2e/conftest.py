@@ -8,8 +8,9 @@ helpers for comprehensive end-to-end testing.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -358,7 +359,7 @@ def mock_ncbi_available(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def run_download_list(e2e_runner: CliRunner, e2e_temp_dir: Path) -> Callable[..., "Result"]:
+def run_download_list(e2e_runner: CliRunner, e2e_temp_dir: Path) -> Callable[..., Result]:
     """Fixture to run download genomes list command."""
 
     def _run(
@@ -370,7 +371,7 @@ def run_download_list(e2e_runner: CliRunner, e2e_temp_dir: Path) -> Callable[...
         quiet: bool = False,
         dry_run: bool = False,
         extra_args: list[str] | None = None,
-    ) -> "Result":
+    ) -> Result:
         output_path = e2e_temp_dir / output_name
 
         args = [
@@ -399,7 +400,7 @@ def run_download_list(e2e_runner: CliRunner, e2e_temp_dir: Path) -> Callable[...
 
 
 @pytest.fixture
-def run_download_fetch(e2e_runner: CliRunner, e2e_temp_dir: Path) -> Callable[..., "Result"]:
+def run_download_fetch(e2e_runner: CliRunner, e2e_temp_dir: Path) -> Callable[..., Result]:
     """Fixture to run download genomes fetch command."""
 
     def _run(
@@ -412,7 +413,7 @@ def run_download_fetch(e2e_runner: CliRunner, e2e_temp_dir: Path) -> Callable[..
         quiet: bool = False,
         dry_run: bool = False,
         extra_args: list[str] | None = None,
-    ) -> "Result":
+    ) -> Result:
         output_dir = e2e_temp_dir / output_dir_name
 
         args = [

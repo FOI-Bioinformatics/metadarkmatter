@@ -3,8 +3,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import polars as pl
 import pytest
 from typer.testing import CliRunner

@@ -231,8 +231,8 @@ class BlastN(ExternalTool):
         # Try seqtk first (fastest)
         try:
             cmd = ["seqtk", "seq", "-A", str(fastq_path)]
-            with open(fasta_path, 'w') as f:
-                result = subprocess.run(
+            with fasta_path.open('w') as f:
+                subprocess.run(
                     cmd,
                     stdout=f,
                     stderr=subprocess.PIPE,
@@ -248,10 +248,8 @@ class BlastN(ExternalTool):
         try:
             open_func = gzip.open if str(fastq_path).endswith('.gz') else open
 
-            with open_func(fastq_path, 'rt') as fin, open(fasta_path, 'w') as fout:
-                line_num = 0
-                for line in fin:
-                    line_num += 1
+            with open_func(fastq_path, 'rt') as fin, fasta_path.open('w') as fout:
+                for line_num, line in enumerate(fin, start=1):
                     mod = line_num % 4
 
                     if mod == 1:  # Header line

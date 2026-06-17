@@ -14,7 +14,6 @@ import pytest
 
 from metadarkmatter.core.metadata import GenomeMetadata
 
-
 # =============================================================================
 # Helpers
 # =============================================================================
@@ -220,7 +219,7 @@ class TestGenerateNovelId:
 
     def test_different_inputs_differ(self) -> None:
         """Different read/accession pairs should generally produce different IDs."""
-        id_a = GenomeMetadata.generate_novel_id("read_1", "GCF_000123456.1")
+        GenomeMetadata.generate_novel_id("read_1", "GCF_000123456.1")
         id_b = GenomeMetadata.generate_novel_id("read_2", "GCF_000123456.1")
         # Not guaranteed to differ, but extremely likely for distinct inputs
         # We just verify both are valid 3-char IDs

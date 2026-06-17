@@ -17,10 +17,8 @@ from __future__ import annotations
 
 import gzip
 import subprocess
-import tempfile
 from pathlib import Path
-from typing import ClassVar
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -33,7 +31,6 @@ from metadarkmatter.external.base import (
 from metadarkmatter.external.blast import BlastN, MakeBlastDb
 from metadarkmatter.external.mmseqs2 import MMseqs2
 from metadarkmatter.external.samtools import Samtools
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -377,9 +374,8 @@ class TestBlastNConvertFastqToFasta:
         with patch(
             "metadarkmatter.external.blast.subprocess.run",
             side_effect=FileNotFoundError("seqtk not found"),
-        ):
-            with pytest.raises(RuntimeError, match="Failed to convert FASTQ to FASTA"):
-                BlastN._convert_fastq_to_fasta(fastq_file, fasta_file)
+        ), pytest.raises(RuntimeError, match="Failed to convert FASTQ to FASTA"):
+            BlastN._convert_fastq_to_fasta(fastq_file, fasta_file)
 
 
 # =========================================================================
@@ -400,30 +396,29 @@ class TestBlastNRunFastqConversion:
         with patch(
             "metadarkmatter.external.blast.subprocess.run",
             side_effect=FileNotFoundError("seqtk not found"),
-        ):
-            with patch.object(
-                ExternalTool,
-                "run",
-                return_value=ToolResult(
-                    command=("blastn",),
-                    return_code=0,
-                    stdout="",
-                    stderr="",
-                    elapsed_seconds=0.1,
-                ),
-            ) as mock_super_run:
-                result = mock_blastn.run(
-                    query=fastq_file,
-                    database=Path("db"),
-                    output=Path("out.tsv"),
-                )
+        ), patch.object(
+            ExternalTool,
+            "run",
+            return_value=ToolResult(
+                command=("blastn",),
+                return_code=0,
+                stdout="",
+                stderr="",
+                elapsed_seconds=0.1,
+            ),
+        ) as mock_super_run:
+            result = mock_blastn.run(
+                query=fastq_file,
+                database=Path("db"),
+                output=Path("out.tsv"),
+            )
 
-                assert result.success is True
-                # Verify super().run was called with a FASTA query (not the original FASTQ)
-                call_kwargs = mock_super_run.call_args
-                query_used = call_kwargs.kwargs.get("query")
-                assert query_used is not None
-                assert str(query_used).endswith(".fasta")
+            assert result.success is True
+            # Verify super().run was called with a FASTA query (not the original FASTQ)
+            call_kwargs = mock_super_run.call_args
+            query_used = call_kwargs.kwargs.get("query")
+            assert query_used is not None
+            assert str(query_used).endswith(".fasta")
 
     def test_run_with_fasta_skips_conversion(
         self, mock_blastn: BlastN, tmp_path: Path
@@ -482,18 +477,16 @@ class TestBlastNRunFastqConversion:
         with patch(
             "metadarkmatter.external.blast.subprocess.run",
             side_effect=FileNotFoundError("seqtk not found"),
-        ):
-            with patch.object(
-                ExternalTool,
-                "run",
-                side_effect=RuntimeError("BLAST failed"),
-            ):
-                with pytest.raises(RuntimeError, match="BLAST failed"):
-                    mock_blastn.run(
-                        query=fastq_file,
-                        database=Path("db"),
-                        output=Path("out.tsv"),
-                    )
+        ), patch.object(
+            ExternalTool,
+            "run",
+            side_effect=RuntimeError("BLAST failed"),
+        ), pytest.raises(RuntimeError, match="BLAST failed"):
+            mock_blastn.run(
+                query=fastq_file,
+                database=Path("db"),
+                output=Path("out.tsv"),
+            )
 
         # Temp files should be cleaned up (the finally block ran)
         # We cannot check the specific temp file, but verifying no error
@@ -509,25 +502,24 @@ class TestBlastNRunFastqConversion:
         with patch(
             "metadarkmatter.external.blast.subprocess.run",
             side_effect=FileNotFoundError("seqtk not found"),
+        ), patch.object(
+            ExternalTool,
+            "run",
+            return_value=ToolResult(
+                command=("blastn",),
+                return_code=0,
+                stdout="[dry-run] Command not executed",
+                stderr="",
+                elapsed_seconds=0.0,
+            ),
         ):
-            with patch.object(
-                ExternalTool,
-                "run",
-                return_value=ToolResult(
-                    command=("blastn",),
-                    return_code=0,
-                    stdout="[dry-run] Command not executed",
-                    stderr="",
-                    elapsed_seconds=0.0,
-                ),
-            ):
-                result = mock_blastn.run(
-                    query=fastq_file,
-                    database=Path("db"),
-                    output=Path("out.tsv"),
-                    dry_run=True,
-                )
-                assert result.success is True
+            result = mock_blastn.run(
+                query=fastq_file,
+                database=Path("db"),
+                output=Path("out.tsv"),
+                dry_run=True,
+            )
+            assert result.success is True
 
 
 # =========================================================================

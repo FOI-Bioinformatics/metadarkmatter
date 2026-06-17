@@ -22,8 +22,8 @@ from rich.progress import (
 )
 from rich.table import Table
 
-from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.cli.utils import QuietConsole
+from metadarkmatter.core.runtime import is_dry_run
 
 app = typer.Typer(
     name="proteins",
@@ -273,13 +273,13 @@ def predict(
         )
         total_genomes = len(genomes_to_process) + len(existing)
 
-        out.print(f"[bold]Mode:[/bold] Missing only")
+        out.print("[bold]Mode:[/bold] Missing only")
         out.print(f"[bold]Total genomes:[/bold] {total_genomes}")
         out.print(f"[bold]Existing protein files:[/bold] {len(existing)}")
         out.print(f"[bold]Missing protein files:[/bold] {len(genomes_to_process)}")
     else:
         genomes_to_process = _find_genome_files(genomes, genome_pattern)
-        out.print(f"[bold]Mode:[/bold] All genomes")
+        out.print("[bold]Mode:[/bold] All genomes")
         out.print(f"[bold]Genomes found:[/bold] {len(genomes_to_process)}")
 
     out.print(f"[bold]Output directory:[/bold] {output_dir}")

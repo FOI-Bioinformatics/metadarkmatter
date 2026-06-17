@@ -88,7 +88,7 @@ def evaluate_classifications(
     categories = sorted(set(truth.tolist()) | set(pred.tolist()))
 
     per_category: list[CategoryStats] = []
-    confusion: dict[str, dict[str, int]] = {c: {p: 0 for p in categories} for c in categories}
+    confusion: dict[str, dict[str, int]] = {c: dict.fromkeys(categories, 0) for c in categories}
     for t, p in zip(truth, pred, strict=True):
         confusion[t][p] += 1
 

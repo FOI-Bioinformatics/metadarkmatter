@@ -29,7 +29,6 @@ from metadarkmatter.external.base import (
     validate_paths_safe,
 )
 
-
 # ---------------------------------------------------------------------------
 # Concrete subclass of ExternalTool used throughout the test module
 # ---------------------------------------------------------------------------

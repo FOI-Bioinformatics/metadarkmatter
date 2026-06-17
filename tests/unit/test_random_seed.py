@@ -8,7 +8,6 @@ import pytest
 from metadarkmatter.core.random import DEFAULT_SEED, get_seed
 from metadarkmatter.visualization.plots.base import subsample_dataframe
 
-
 # ---------------------------------------------------------------------------
 # get_seed()
 # ---------------------------------------------------------------------------

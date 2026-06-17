@@ -17,7 +17,6 @@ import pytest
 from metadarkmatter.cli.main import app
 from metadarkmatter.external.base import ToolExecutionError, ToolResult
 
-
 # =============================================================================
 # Fixtures specific to these tests
 # =============================================================================

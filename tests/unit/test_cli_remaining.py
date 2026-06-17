@@ -7,16 +7,14 @@ Uses typer.testing.CliRunner with mocked external tool calls.
 
 from __future__ import annotations
 
-import gzip
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from typer.testing import CliRunner
 
 from metadarkmatter.cli.main import app
 from metadarkmatter.external.base import ToolExecutionError, ToolResult
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers

@@ -6,7 +6,6 @@ Tests for family validation fields in ScoringConfig.
 from __future__ import annotations
 
 import pytest
-
 from pydantic import ValidationError
 
 from metadarkmatter.models.config import ScoringConfig

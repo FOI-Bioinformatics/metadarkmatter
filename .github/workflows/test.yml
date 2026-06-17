@@ -7,11 +7,13 @@ on:
     branches: [main]
 
 jobs:
-  lint-and-test:
-    runs-on: ubuntu-latest
+  lint-type-test:
+    name: lint+type+test (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest]
         python-version: ["3.11", "3.12"]
 
     steps:
@@ -28,26 +30,96 @@ jobs:
           enable-cache: true
 
       - name: Install package and dev dependencies (frozen lockfile)
-        run: |
-          uv sync --frozen --extra dev
+        run: uv sync --frozen --extra dev
 
       - name: Lint (ruff)
         run: uv run ruff check src tests
 
+      # Type checking is now BLOCKING. strict mypy runs with a curated set of
+      # deferred error codes (see [tool.mypy] in pyproject.toml). The enforced
+      # core catches signature/return/overload bugs.
       - name: Type check (mypy)
         run: uv run mypy src/metadarkmatter
-        continue-on-error: true
 
-      - name: Run unit tests
+      # Coverage gate is enforced here (matches fail_under in pyproject.toml).
+      - name: Run unit tests with coverage gate
         run: |
           uv run pytest -m "not slow and not requires_blast and not requires_mmseqs2 and not e2e" \
                  --cov=metadarkmatter \
                  --cov-report=term-missing \
-                 --cov-report=xml
+                 --cov-report=xml \
+                 --cov-fail-under=78
 
       - name: Upload coverage report
-        if: matrix.python-version == '3.12'
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-xml
           path: coverage.xml
+
+  # Experimental Python 3.13 leg. Non-blocking until the locked dependency set
+  # is confirmed to provide 3.13 wheels; promote into the matrix above once green.
+  py313-experimental:
+    name: py3.13 (experimental, non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --extra dev
+      - run: uv run ruff check src tests
+      - run: uv run mypy src/metadarkmatter
+      - run: uv run pytest -m "not slow and not requires_blast and not requires_mmseqs2 and not e2e" -q
+
+  security-audit:
+    name: dependency vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+      - name: Audit locked dependencies (pip-audit)
+        run: |
+          uv export --frozen --no-emit-project --no-dev > requirements-locked.txt
+          uvx pip-audit -r requirements-locked.txt
+
+  tool-integration:
+    name: integration + e2e (external tools)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install external bioinformatics tools (bioconda)
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-name: mdm-tools
+          create-args: >-
+            python=3.12
+            blast>=2.16
+            mmseqs2>=15
+            skani>=0.3
+            fastani>=1.34
+            diamond>=2.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install package (frozen lockfile)
+        run: uv sync --frozen --extra dev
+
+      # Runs the determinism guard plus the tool-dependent integration/e2e
+      # tests that the fast lane skips. The external tools come from the
+      # micromamba env on PATH.
+      - name: Run integration, e2e, and determinism tests
+        shell: bash -el {0}
+        run: |
+          uv run pytest -m "integration or e2e or requires_blast or requires_mmseqs2" \
+                 -p no:cacheprovider

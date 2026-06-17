@@ -15,7 +15,6 @@ from metadarkmatter.core.novel_diversity.neighborhood import (
     PhylogeneticNeighborhoodAnalyzer,
 )
 
-
 # =============================================================================
 # Helpers
 # =============================================================================

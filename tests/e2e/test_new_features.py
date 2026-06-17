@@ -9,13 +9,12 @@ Tests for:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import pytest
 
 from tests.utils.assertions import CLIAssertions
-
 
 pytestmark = pytest.mark.e2e
 

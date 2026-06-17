@@ -27,7 +27,6 @@ from metadarkmatter.core.classification.classifiers.vectorized import Vectorized
 from metadarkmatter.core.parsers import StreamingBlastParser
 from metadarkmatter.models.config import ScoringConfig
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -192,7 +191,7 @@ class TestClassifierEquivalence:
         }
         base_calls = base_sorted["taxonomic_call"].to_list()
         vec_calls = vec_sorted["taxonomic_call"].to_list()
-        for i, (b, v) in enumerate(zip(base_calls, vec_calls)):
+        for i, (b, v) in enumerate(zip(base_calls, vec_calls, strict=False)):
             if b != v and (b, v) not in allowed_equivalences:
                 raise AssertionError(
                     f"taxonomic_call differs at row {i}: base={b!r}, vectorized={v!r}\n"

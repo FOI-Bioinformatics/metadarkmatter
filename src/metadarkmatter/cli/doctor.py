@@ -78,7 +78,7 @@ def _probe_tool(executable: str, version_args: list[str]) -> tuple[str, str]:
         return ("", "not found")
 
     try:
-        result = subprocess.run(  # noqa: S603 - args are a constant list
+        result = subprocess.run(
             [path, *version_args],
             capture_output=True,
             text=True,

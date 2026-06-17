@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from metadarkmatter.external.mmseqs2 import MMseqs2
 
 
@@ -74,7 +72,7 @@ class TestMMseqs2FormatCompatibility:
         }
 
         # Verify each position maps correctly
-        for idx, (mmseqs_col, blast_col) in enumerate(zip(mmseqs_columns, blast_columns)):
+        for idx, (mmseqs_col, blast_col) in enumerate(zip(mmseqs_columns, blast_columns, strict=False)):
             expected_blast_col = column_mapping[mmseqs_col]
             assert blast_col == expected_blast_col, (
                 f"Position {idx}: MMseqs2 column '{mmseqs_col}' maps to "

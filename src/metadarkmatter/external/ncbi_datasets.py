@@ -516,10 +516,7 @@ class NCBIDatasets(ExternalTool):
         recovered_originals: set[str] = set()
         if result.success and batch_zip.exists():
             # Build rename map: NCBI accession -> original accession
-            rename_map = {
-                cand: orig
-                for cand, orig in candidate_to_original.items()
-            }
+            rename_map = dict(candidate_to_original.items())
             _, extracted_accessions = self._extract_fastas(
                 batch_zip,
                 output_dir,
@@ -550,7 +547,7 @@ class NCBIDatasets(ExternalTool):
         all_original_failed = set(failed_accessions) - recovered_originals - set(no_candidates)
         for acc in sorted(all_original_failed):
             candidates = _alternative_versions(acc, max_attempts=max_version_attempts)
-            tried_str = ", ".join([acc] + candidates)
+            tried_str = ", ".join([acc, *candidates])
             outcomes.append(DownloadOutcome(
                 accession=acc, success=False,
                 reason=f"not found in NCBI (tried: {tried_str})",
@@ -638,7 +635,7 @@ class NCBIDatasets(ExternalTool):
             opener = _gzip.open if is_gz else open
             seq_count = 0
             first_line: str | None = None
-            with opener(path, "rt") as fh:  # type: ignore[arg-type]
+            with opener(path, "rt") as fh:
                 for line in fh:
                     if first_line is None:
                         first_line = line
@@ -805,8 +802,8 @@ class NCBIDatazip(ExternalTool):
 
     def build_command(self, **kwargs: object) -> list[str]:
         """Build dataformat command."""
-        subcommand = kwargs.get("subcommand", "tsv")
-        package = kwargs.get("package", "genome")
+        subcommand = str(kwargs.get("subcommand", "tsv"))
+        package = str(kwargs.get("package", "genome"))
 
         cmd = [
             str(self.get_executable()),

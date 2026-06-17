@@ -5,8 +5,6 @@ Tests for GenomeAccession and AccessionList models.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from metadarkmatter.models.genomes import AccessionList, GenomeAccession

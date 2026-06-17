@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import polars as pl
 import typer
 from rich.console import Console
 from rich.progress import (
@@ -22,14 +21,14 @@ from rich.progress import (
 )
 from rich.table import Table
 
-from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.cli.utils import QuietConsole, spinner_progress
 from metadarkmatter.clients.gtdb import (
+    USE_DEFAULT_CACHE,
     GTDBAPIError,
     GTDBClient,
     InvalidTaxonFormatError,
-    USE_DEFAULT_CACHE,
 )
+from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.external import NCBIDatasets, ToolNotFoundError
 from metadarkmatter.models.genomes import AccessionList, GenomeAccession
 

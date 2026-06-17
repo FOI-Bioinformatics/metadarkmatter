@@ -779,11 +779,10 @@ def _flatten_yaml_config(raw: dict[str, Any]) -> dict[str, Any]:
         _map_if_present(modulation, "identity_gap_boost", bay_kwargs, "identity_gap_boost")
         _map_if_present(modulation, "single_hit_boost", bay_kwargs, "single_hit_boost")
         _map_if_present(bayesian_raw, "entropy_threshold", bay_kwargs, "entropy_threshold")
-        if "category_params" in bayesian_raw and bayesian_raw["category_params"]:
+        if bayesian_raw.get("category_params"):
             bay_kwargs["category_params"] = bayesian_raw["category_params"]
         if (
-            "entropy_calibration" in bayesian_raw
-            and bayesian_raw["entropy_calibration"]
+            bayesian_raw.get("entropy_calibration")
         ):
             bay_kwargs["entropy_calibration"] = bayesian_raw["entropy_calibration"]
         flat["bayesian"] = BayesianConfig(**bay_kwargs)
@@ -832,7 +831,7 @@ def _map_if_present(
         target[target_key] = source[source_key]
 
 
-def _build_yaml_structure(config: "ScoringConfig") -> dict[str, Any]:
+def _build_yaml_structure(config: ScoringConfig) -> dict[str, Any]:
     """Build nested YAML dict from a ScoringConfig instance."""
     return {
         "alignment_mode": config.alignment_mode,

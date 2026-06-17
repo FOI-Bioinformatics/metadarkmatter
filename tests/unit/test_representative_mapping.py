@@ -11,7 +11,6 @@ from O(n^2) to O(k^2) where k is the number of species.
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
@@ -21,7 +20,6 @@ from metadarkmatter.cli.mapping import app
 from metadarkmatter.core.classification.ani_matrix import ANIMatrix
 from metadarkmatter.core.metadata import GenomeMetadata
 from metadarkmatter.models.genomes import AccessionList, GenomeAccession
-
 
 # =============================================================================
 # Helpers
@@ -519,7 +517,6 @@ class TestVectorizedClassifierWithRepresentativeMapping:
         result = classifier.classify_file(species_setup["blast_df"])
 
         best_genomes = set(result["best_match_genome"].to_list())
-        rep_genomes = {"GCF_A01", "GCF_B01", "GCF_G01"}
 
         # The best genome should come from one of the actual genomes in the
         # BLAST output. In this scenario, the highest scoring genome for each
@@ -1284,7 +1281,7 @@ class TestValidateAniGenomeCoverageBroadDatabase:
             ["GCF_FAM1", "GCF_FAM2", "GCF_EXT1"],
         )
 
-        matched, total, pct, missing = validate_ani_genome_coverage(
+        matched, total, pct, _missing = validate_ani_genome_coverage(
             blast_path, ani_matrix, representative_mapping=None,
         )
 
@@ -1310,7 +1307,7 @@ class TestValidateAniGenomeCoverageBroadDatabase:
             "GCF_FAM1": "GCF_REP1",  # No BLAST hits to family genomes
         }
 
-        matched, total, pct, missing = validate_ani_genome_coverage(
+        matched, total, pct, _missing = validate_ani_genome_coverage(
             blast_path, ani_matrix, representative_mapping=rep_mapping,
         )
 

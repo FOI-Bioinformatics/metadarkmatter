@@ -218,9 +218,9 @@ class KrakenReport:
             report_path: Path to Kraken2 report file.
         """
         self.report_path = report_path
-        self._data: list[dict[str, object]] | None = None
+        self._data: list[dict[str, float | int | str]] | None = None
 
-    def parse(self) -> list[dict[str, object]]:
+    def parse(self) -> list[dict[str, float | int | str]]:
         """Parse the report file.
 
         Returns:

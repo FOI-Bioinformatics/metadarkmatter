@@ -6,10 +6,8 @@ Tests the ReportGenerator class and related functions.
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
 import polars as pl
+import pytest
 
 # Skip if plotly not available
 plotly = pytest.importorskip("plotly")
@@ -151,8 +149,8 @@ class TestReportGenerator:
 
     def test_generate_dark_theme(self, sample_classifications, tmp_path):
         from metadarkmatter.visualization.report.generator import (
-            ReportGenerator,
             ReportConfig,
+            ReportGenerator,
         )
 
         output_path = tmp_path / "test_report_dark.html"
@@ -352,8 +350,9 @@ class TestPhylogenySection:
         self, classifications_with_novel
     ):
         """Phylogeny section returns None when ANI matrix has < 3 genomes."""
-        from metadarkmatter.visualization.report.generator import ReportGenerator
         import pandas as pd
+
+        from metadarkmatter.visualization.report.generator import ReportGenerator
 
         generator = ReportGenerator(classifications_with_novel)
 

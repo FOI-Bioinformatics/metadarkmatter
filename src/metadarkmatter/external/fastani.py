@@ -251,7 +251,7 @@ def _run_fastani_batch(
         "--fragLen", str(frag_len),
         "--minFraction", str(min_fraction),
     ]
-    result = subprocess.run(  # noqa: S603 - args are list-built above
+    result = subprocess.run(
         cmd, capture_output=True, text=True, check=False
     )
     if result.returncode != 0:

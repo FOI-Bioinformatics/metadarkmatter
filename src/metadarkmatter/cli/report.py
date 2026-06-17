@@ -708,7 +708,7 @@ def summarize_novel_diversity(
 
     # Show summary
     if verbose:
-        out.print(f"\n[bold]Cluster Summary:[/bold]")
+        out.print("\n[bold]Cluster Summary:[/bold]")
         out.print(f"  - Novel Species clusters: {summary.novel_species_clusters}")
         out.print(f"  - Novel Genus clusters: {summary.novel_genus_clusters}")
         out.print(f"  - High confidence: {summary.high_confidence_clusters}")
@@ -774,11 +774,12 @@ def vendor_d3(
     access. This is intended as a one-time step on an internal lab machine.
     """
     import httpx
+
+    from metadarkmatter.visualization.report import assets as _assets
     from metadarkmatter.visualization.report.assets import (
         D3_CDN_URL,
         D3_FILENAME,
     )
-    from metadarkmatter.visualization.report import assets as _assets
 
     target = Path(_assets.__file__).parent / D3_FILENAME
     if target.exists() and not force:
@@ -824,12 +825,13 @@ def vendor_cdn_sri(
     import json
 
     import httpx
+
+    from metadarkmatter.visualization.report import assets as _assets
     from metadarkmatter.visualization.report.assets import (
         D3_CDN_URL,
         PLOTLY_CDN_URL,
         SRI_CACHE_FILENAME,
     )
-    from metadarkmatter.visualization.report import assets as _assets
 
     target = Path(_assets.__file__).parent / SRI_CACHE_FILENAME
 

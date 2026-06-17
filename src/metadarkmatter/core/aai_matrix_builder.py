@@ -729,10 +729,8 @@ def compute_aai_matrix(
                 }
 
                 # Wait for completion
-                completed = 0
-                for future in as_completed(future_to_genome):
-                    genome, n_proteins, success = future.result()
-                    completed += 1
+                for completed, future in enumerate(as_completed(future_to_genome), start=1):
+                    genome, _n_proteins, success = future.result()
                     if success:
                         logger.info("Completed %d/%d genomes", completed, len(genomes))
 

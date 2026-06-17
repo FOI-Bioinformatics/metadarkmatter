@@ -7,20 +7,18 @@ entropy calculation, and edge case handling for the 6-category model.
 
 from __future__ import annotations
 
-import math
-
 import numpy as np
 import polars as pl
 import pytest
 
 from metadarkmatter.core.classification.bayesian import (
+    _MAX_ENTROPY_6,
     BayesianClassifier,
     PosteriorResult,
     _shannon_entropy,
-    _MAX_ENTROPY_6,
     apply_stage2_refinement,
-    entropy_to_confidence,
     build_category_params,
+    entropy_to_confidence,
 )
 from metadarkmatter.models.config import ScoringConfig
 

@@ -249,7 +249,7 @@ class GenomeMetadata:
         """
         # Create deterministic hash from read_id + accession
         hash_input = f"{read_id}:{accession}"
-        hash_bytes = hashlib.md5(hash_input.encode()).digest()  # noqa: S324
+        hash_bytes = hashlib.md5(hash_input.encode()).digest()
 
         # Convert first 2 bytes to alphanumeric (A-Z, 0-9)
         chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"

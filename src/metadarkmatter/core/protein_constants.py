@@ -24,7 +24,6 @@ References:
 
 from __future__ import annotations
 
-
 # =============================================================================
 # Protein Novelty Index Thresholds
 #

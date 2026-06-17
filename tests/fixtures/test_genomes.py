@@ -237,7 +237,7 @@ def create_test_metadata(genome_paths: dict[str, Path], output_file: Path) -> Pa
         },
     }
 
-    for accession in genome_paths.keys():
+    for accession in genome_paths:
         meta = genome_metadata[accession]
         metadata_lines.append(
             f"{accession}\t{meta['species']}\t{meta['genus']}\t{meta['family']}\t{meta['taxonomy']}"

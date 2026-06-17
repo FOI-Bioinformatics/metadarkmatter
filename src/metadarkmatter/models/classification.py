@@ -8,7 +8,7 @@ algorithm applied to environmental DNA metagenomic samples.
 from __future__ import annotations
 
 import logging
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Self
 
@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field, computed_field, model_validator
 logger = logging.getLogger(__name__)
 
 
-class DiversityStatus(str, Enum):
+class DiversityStatus(StrEnum):
     """
     High-level diversity classification for summarizing results.
 
@@ -51,7 +51,7 @@ TAXONOMIC_TO_DIVERSITY: dict[str, str] = {
 }
 
 
-class TaxonomicCall(str, Enum):
+class TaxonomicCall(StrEnum):
     """
     Taxonomic classification categories for environmental DNA reads.
 

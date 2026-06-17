@@ -12,13 +12,12 @@ Tests use realistic synthetic data with known properties to validate correctness
 
 from __future__ import annotations
 
-import gzip
+# Import test data generators
+import sys
 from pathlib import Path
 
 import pytest
 
-# Import test data generators
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "fixtures"))
 from test_genomes import create_test_genome_set, create_test_metadata, create_test_reads
 
@@ -333,9 +332,8 @@ class TestMMseqs2EndToEnd:
 
         # Compress manually (simulating CLI behavior)
         import gzip as gzip_module
-        with temp_output.open('rb') as f_in:
-            with gzip_module.open(output_path, 'wb') as f_out:
-                f_out.write(f_in.read())
+        with temp_output.open('rb') as f_in, gzip_module.open(output_path, 'wb') as f_out:
+            f_out.write(f_in.read())
 
         temp_output.unlink()
 
@@ -351,6 +349,7 @@ class TestMMseqs2EndToEnd:
     def test_performance_measurement(self, test_data_dir, concatenated_genome, test_reads):
         """Should measure and compare performance."""
         import time
+
         from metadarkmatter.external.mmseqs2 import MMseqs2
 
         if not MMseqs2.check_available():
@@ -397,8 +396,8 @@ class TestMMseqs2ClassificationIntegration:
     def test_classification_with_mmseqs2_results(self, test_data_dir, concatenated_genome,
                                                   test_reads, test_metadata):
         """Should classify reads using MMseqs2 alignment results."""
-        from metadarkmatter.external.mmseqs2 import MMseqs2
         from metadarkmatter.core.parsers import StreamingBlastParser
+        from metadarkmatter.external.mmseqs2 import MMseqs2
 
         if not MMseqs2.check_available():
             pytest.skip("MMseqs2 not installed")
@@ -450,7 +449,7 @@ class TestMMseqs2ClassificationIntegration:
                 f"Genome name should match test genomes: {best_hit.genome_name}"
 
         print(f"\nParsed {len(results)} reads from MMseqs2 output")
-        print(f"All results compatible with classification pipeline")
+        print("All results compatible with classification pipeline")
 
 
 def pytest_configure(config):

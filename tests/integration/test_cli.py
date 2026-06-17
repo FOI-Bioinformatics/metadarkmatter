@@ -176,7 +176,7 @@ def cli_blast_dir(temp_dir: Path) -> Path:
             })
 
         df = pl.DataFrame(blast_data)
-        blast_path = blast_dir / f"sample_{sample_idx}.blast.tsv.gz"
+        blast_dir / f"sample_{sample_idx}.blast.tsv.gz"
         # Write as regular tsv (Polars handles the naming)
         df.write_csv(
             blast_dir / f"sample_{sample_idx}.blast.tsv",
@@ -197,18 +197,22 @@ class TestMainCLI:
 
     def test_version_flag(self):
         """--version should display version and exit."""
+        from metadarkmatter import __version__
+
         result = runner.invoke(app, ["--version"])
 
         assert result.exit_code == 0
         assert "metadarkmatter version" in result.stdout
-        assert "0.1.0" in result.stdout
+        assert __version__ in result.stdout
 
     def test_version_short_flag(self):
         """-v should display version and exit."""
+        from metadarkmatter import __version__
+
         result = runner.invoke(app, ["-v"])
 
         assert result.exit_code == 0
-        assert "0.1.0" in result.stdout
+        assert __version__ in result.stdout
 
     def test_no_args_shows_help(self):
         """Running without arguments should show help/usage message."""

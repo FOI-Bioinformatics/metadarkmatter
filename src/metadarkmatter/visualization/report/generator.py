@@ -18,6 +18,8 @@ import polars as pl
 
 logger = logging.getLogger(__name__)
 
+import contextlib
+
 from metadarkmatter.core.io_utils import read_dataframe
 from metadarkmatter.core.metadata import GenomeMetadata
 from metadarkmatter.visualization.plots.base import (
@@ -26,17 +28,7 @@ from metadarkmatter.visualization.plots.base import (
     ThresholdConfig,
     format_count,
 )
-from metadarkmatter.visualization.report.components import (
-    build_aai_heatmap,
-    build_aai_stats_cards,
-    build_ani_heatmap,
-    build_ani_stats_cards,
-    build_phylogenetic_context_heatmap,
-)
 from metadarkmatter.visualization.plots.classification_charts import (
-    ClassificationBarChart,
-    ClassificationDonutChart,
-    DiversityDonutChart,
     DiversitySunburstChart,
 )
 from metadarkmatter.visualization.plots.distributions import (
@@ -44,14 +36,32 @@ from metadarkmatter.visualization.plots.distributions import (
     UncertaintyHistogram,
 )
 from metadarkmatter.visualization.plots.scatter_2d import (
-    ConfidenceNoveltyScatter,
     NoveltyUncertaintyScatter,
+)
+from metadarkmatter.visualization.report.components import (
+    build_aai_heatmap,
+    build_aai_stats_cards,
+    build_ani_heatmap,
+    build_ani_stats_cards,
+    build_phylogenetic_context_heatmap,
+)
+from metadarkmatter.visualization.report.novel_section import (
+    NOVEL_EMPTY_TEMPLATE,
+    PHYLOGENETIC_HEATMAP_INTRO_TEMPLATE,
+    PHYLOGENETIC_HEATMAP_LEGEND_TEMPLATE,
+    build_cluster_scatter_figure,
+    build_cluster_table_html,
+    build_novel_summary_html,
+    build_sunburst_figure,
 )
 from metadarkmatter.visualization.report.styles import get_css_styles
 from metadarkmatter.visualization.report.templates import (
+    BAYESIAN_INTERPRETATION_TEMPLATE,
+    BORDERLINE_ANALYSIS_TEMPLATE,
     CATEGORY_GRID_CELL,
     CATEGORY_GRID_TEMPLATE,
     COLLAPSIBLE_PANEL_TEMPLATE,
+    CONFIDENCE_SUMMARY_TEMPLATE,
     DATA_COLUMN_GUIDE_TEMPLATE,
     DATA_QUICK_FILTERS_TEMPLATE,
     DATA_SUMMARY_TEMPLATE,
@@ -60,11 +70,12 @@ from metadarkmatter.visualization.report.templates import (
     EMPTY_SECTION_TEMPLATE,
     ENHANCED_SCORING_SUMMARY_TEMPLATE,
     ENHANCED_SCORING_UNCERTAINTY_TYPES_TEMPLATE,
+    FAMILY_VALIDATION_SECTION_TEMPLATE,
     KPI_CARD_TEMPLATE,
     KPI_STRIP_TEMPLATE,
+    METHODS_SECTION_TEMPLATE,
     METRIC_CARD_TEMPLATE,
     METRIC_CARDS_CONTAINER,
-    METHODS_SECTION_TEMPLATE,
     OVERVIEW_FINDING_CARD_TEMPLATE,
     OVERVIEW_KEY_FINDINGS_TEMPLATE,
     PLOT_CONTAINER_SIMPLE_TEMPLATE,
@@ -77,20 +88,7 @@ from metadarkmatter.visualization.report.templates import (
     TOP_SPECIES_ROW_TEMPLATE,
     TOP_SPECIES_TABLE_TEMPLATE,
     TWO_COLUMN_ROW_TEMPLATE,
-    BAYESIAN_INTERPRETATION_TEMPLATE,
-    CONFIDENCE_SUMMARY_TEMPLATE,
-    BORDERLINE_ANALYSIS_TEMPLATE,
-    FAMILY_VALIDATION_SECTION_TEMPLATE,
     get_cell_class,
-)
-from metadarkmatter.visualization.report.novel_section import (
-    NOVEL_EMPTY_TEMPLATE,
-    PHYLOGENETIC_HEATMAP_INTRO_TEMPLATE,
-    PHYLOGENETIC_HEATMAP_LEGEND_TEMPLATE,
-    build_cluster_scatter_figure,
-    build_cluster_table_html,
-    build_novel_summary_html,
-    build_sunburst_figure,
 )
 
 if TYPE_CHECKING:
@@ -390,10 +388,8 @@ class ReportGenerator:
             classified_df = self.df.filter(pl.col("taxonomic_call") != "Off-target")
             aq_col = classified_df["alignment_quality"]
             # Cast to Float64 in case Polars inferred String from CSV
-            try:
+            with contextlib.suppress(Exception):
                 aq_col = aq_col.cast(pl.Float64, strict=False)
-            except Exception:
-                pass
             has_enhanced_scoring = aq_col.drop_nulls().len() > 0
         has_inferred_uncertainty = "inferred_uncertainty" in self.df.columns
 
@@ -1482,7 +1478,7 @@ class ReportGenerator:
                 genome_labels_map = self._get_genome_labels_map(genome_accessions)
 
                 # Build the phylogenetic context heatmap
-                phylo_fig, phylo_metadata, clustering_ok = build_phylogenetic_context_heatmap(
+                phylo_fig, phylo_metadata, _clustering_ok = build_phylogenetic_context_heatmap(
                     similarity_matrix=matrix,
                     novel_clusters=clusters,
                     genome_labels_map=genome_labels_map,
@@ -1501,16 +1497,9 @@ class ReportGenerator:
 
                     # Customize description based on similarity type
                     if sim_type == "AAI":
-                        intro_description = (
-                            "This AAI-based heatmap is particularly useful for visualizing "
-                            "Novel Genus candidates, where protein-level similarity provides "
-                            "better resolution than nucleotide comparisons."
-                        )
+                        pass
                     else:
-                        intro_description = (
-                            "This ANI-based heatmap shows novel clusters positioned alongside "
-                            "reference genomes. Best for visualizing Novel Species placement."
-                        )
+                        pass
 
                     heatmap_parts.append(PHYLOGENETIC_HEATMAP_INTRO_TEMPLATE.format(
                         n_references=phylo_metadata.get("n_references", 0),
@@ -1882,39 +1871,39 @@ class ReportGenerator:
 
                 # Background classification zones
                 zone_shapes = [
-                    dict(
-                        type="rect", x0=0, x1=th.novelty_known_max,
-                        y0=0, y1=th.uncertainty_known_max,
-                        fillcolor="rgba(34,197,94,0.08)",
-                        line=dict(width=0), layer="below",
-                    ),
-                    dict(
-                        type="rect",
-                        x0=th.novelty_novel_species_min,
-                        x1=th.novelty_novel_species_max,
-                        y0=0, y1=th.uncertainty_novel_species_max,
-                        fillcolor="rgba(245,158,11,0.08)",
-                        line=dict(width=0), layer="below",
-                    ),
-                    dict(
-                        type="rect",
-                        x0=th.novelty_novel_genus_min,
-                        x1=th.novelty_novel_genus_max,
-                        y0=0, y1=th.uncertainty_novel_genus_max,
-                        fillcolor="rgba(239,68,68,0.08)",
-                        line=dict(width=0), layer="below",
-                    ),
+                    {
+                        "type": "rect", "x0": 0, "x1": th.novelty_known_max,
+                        "y0": 0, "y1": th.uncertainty_known_max,
+                        "fillcolor": "rgba(34,197,94,0.08)",
+                        "line": {"width": 0}, "layer": "below",
+                    },
+                    {
+                        "type": "rect",
+                        "x0": th.novelty_novel_species_min,
+                        "x1": th.novelty_novel_species_max,
+                        "y0": 0, "y1": th.uncertainty_novel_species_max,
+                        "fillcolor": "rgba(245,158,11,0.08)",
+                        "line": {"width": 0}, "layer": "below",
+                    },
+                    {
+                        "type": "rect",
+                        "x0": th.novelty_novel_genus_min,
+                        "x1": th.novelty_novel_genus_max,
+                        "y0": 0, "y1": th.uncertainty_novel_genus_max,
+                        "fillcolor": "rgba(239,68,68,0.08)",
+                        "line": {"width": 0}, "layer": "below",
+                    },
                 ]
 
                 scatter_fig.add_trace(go.Scatter(
                     x=novelty_vals,
                     y=uncertainty_vals,
                     mode="markers",
-                    marker=dict(
-                        color=cat_colors,
-                        size=6,
-                        opacity=0.7,
-                    ),
+                    marker={
+                        "color": cat_colors,
+                        "size": 6,
+                        "opacity": 0.7,
+                    },
                     text=cat_labels,
                     hovertemplate=(
                         "In-Family Novelty: %{x:.1f}%<br>"
@@ -1981,7 +1970,7 @@ class ReportGenerator:
                         xref="paper", yref="paper",
                         x=0.98, y=0.98,
                         showarrow=False,
-                        font=dict(size=11, color="#666"),
+                        font={"size": 11, "color": "#666"},
                         align="right",
                         bgcolor="rgba(255,255,255,0.8)",
                         bordercolor="#ccc",
@@ -1994,19 +1983,19 @@ class ReportGenerator:
                 fig.update_layout(
                     template="plotly_white",
                     height=200,
-                    annotations=[dict(
-                        text=(
+                    annotations=[{
+                        "text": (
                             f"All {n_at_one:,} reads have "
                             "family bitscore ratio = 1.0 "
                             "(entirely in-family)"
                         ),
-                        xref="paper", yref="paper",
-                        x=0.5, y=0.5,
-                        showarrow=False,
-                        font=dict(size=14),
-                    )],
-                    xaxis=dict(visible=False),
-                    yaxis=dict(visible=False),
+                        "xref": "paper", "yref": "paper",
+                        "x": 0.5, "y": 0.5,
+                        "showarrow": False,
+                        "font": {"size": 14},
+                    }],
+                    xaxis={"visible": False},
+                    yaxis={"visible": False},
                 )
                 self._register_plot("family-ratio-histogram", fig)
 
@@ -2114,10 +2103,7 @@ class ReportGenerator:
         # Identify accessions in the matrix
         cols = matrix.columns
         has_genome_col = "genome" in cols
-        if has_genome_col:
-            accessions = matrix["genome"].to_list()
-        else:
-            accessions = list(cols)
+        accessions = matrix["genome"].to_list() if has_genome_col else list(cols)
 
         # Filter to representatives present in the matrix
         keep = [acc for acc in accessions if acc in rep_set]
@@ -2126,7 +2112,7 @@ class ReportGenerator:
 
         if has_genome_col:
             filtered = matrix.filter(pl.col("genome").is_in(keep))
-            filtered = filtered.select(["genome"] + keep)
+            filtered = filtered.select(["genome", *keep])
         else:
             # Columns are accessions; filter both rows and columns
             indices = [i for i, acc in enumerate(accessions) if acc in keep]
@@ -2155,7 +2141,7 @@ class ReportGenerator:
         genome_labels_map = self._get_genome_labels_map(genome_accessions)
 
         # Build full heatmap
-        heatmap_fig, stats, clustering_succeeded = build_ani_heatmap(
+        heatmap_fig, stats, _clustering_succeeded = build_ani_heatmap(
             self.ani_matrix,
             genome_labels_map,
         )
@@ -2232,7 +2218,7 @@ class ReportGenerator:
         genome_labels_map = self._get_genome_labels_map(genome_accessions)
 
         # Build full heatmap
-        heatmap_fig, stats, clustering_succeeded = build_aai_heatmap(
+        heatmap_fig, stats, _clustering_succeeded = build_aai_heatmap(
             self.aai_matrix,
             genome_labels_map,
         )
@@ -2455,10 +2441,7 @@ class ReportGenerator:
             ambiguous_hits = row.get("num_ambiguous_hits", 0)
             identity_gap = _safe_float(row.get("identity_gap"))
             # Format identity_gap: use absolute value, show "-" if not available
-            if identity_gap is None:
-                identity_gap_str = "-"
-            else:
-                identity_gap_str = f"{abs(identity_gap):.2f}"
+            identity_gap_str = "-" if identity_gap is None else f"{abs(identity_gap):.2f}"
             is_novel = row.get("is_novel", False)
             if is_novel is None:
                 # Compute from taxonomic_call if not in dataframe

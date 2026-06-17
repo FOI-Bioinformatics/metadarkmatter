@@ -7,18 +7,17 @@ These tests verify the primary use cases work correctly.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import polars as pl
 import pytest
 
 from tests.utils.assertions import (
-    CLIAssertions,
     ClassificationAssertions,
+    CLIAssertions,
     SummaryAssertions,
 )
-
 
 pytestmark = pytest.mark.e2e
 
@@ -149,7 +148,7 @@ class TestClassifyHappyPath:
     ):
         """Should create output directory if it doesn't exist."""
         blast_path, ani_path = standard_dataset
-        nested_output = e2e_temp_dir / "nested" / "deep" / "output.csv"
+        e2e_temp_dir / "nested" / "deep" / "output.csv"
 
         result = run_classify(
             blast=blast_path,

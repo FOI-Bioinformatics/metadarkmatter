@@ -7,14 +7,13 @@ and non-zero exit codes.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import polars as pl
 import pytest
 
 from tests.utils.assertions import CLIAssertions
-
 
 pytestmark = pytest.mark.e2e
 
@@ -126,7 +125,7 @@ class TestInvalidFiles:
             "G2": [80.0, 100.0],
         }).write_csv(ani_path)
 
-        result = run_classify(
+        run_classify(
             blast=empty_blast_file,
             ani=ani_path,
             output_name="empty.csv",

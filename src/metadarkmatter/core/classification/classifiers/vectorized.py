@@ -10,26 +10,22 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
 import polars as pl
 
-from collections.abc import Callable
-
 from metadarkmatter.core.classification.bayesian import (
     BayesianClassifier,
-    apply_stage2_refinement,
-    entropy_to_confidence,
 )
 from metadarkmatter.core.constants import (
     UNKNOWN_GENOME,
-    calculate_confidence_score,
 )
-from metadarkmatter.core.io_utils import write_dataframe, write_dataframe_append
+from metadarkmatter.core.io_utils import write_dataframe_append
 from metadarkmatter.core.parsers import extract_genome_name_expr
-from metadarkmatter.models.classification import TaxonomicCall, TAXONOMIC_TO_DIVERSITY
+from metadarkmatter.models.classification import TAXONOMIC_TO_DIVERSITY
 from metadarkmatter.models.config import ScoringConfig
 
 if TYPE_CHECKING:
@@ -289,7 +285,7 @@ class VectorizedClassifier:
         blast_input: Path | pl.DataFrame,
         id_mapping: ContigIdMapping | None = None,
         compute_qc: bool = False,
-    ) -> pl.DataFrame | tuple[pl.DataFrame, "QCMetrics"]:
+    ) -> pl.DataFrame | tuple[pl.DataFrame, QCMetrics]:
         """
         Classify BLAST hits using fully vectorized Polars operations.
 
@@ -527,7 +523,6 @@ class VectorizedClassifier:
             if family_validation_active and off_target_df is not None and not off_target_df.is_empty():
                 if compute_qc:
                     from metadarkmatter.core.classification.qc import (
-                        QCMetrics,
                         compute_pre_qc,
                     )
                     qc = compute_pre_qc(raw_df, filtered_df, self.ani_matrix, self.config)
@@ -536,7 +531,6 @@ class VectorizedClassifier:
             empty = self._empty_dataframe()
             if compute_qc:
                 from metadarkmatter.core.classification.qc import (
-                    QCMetrics,
                     compute_pre_qc,
                 )
                 qc = compute_pre_qc(raw_df, filtered_df, self.ani_matrix, self.config)
@@ -1107,7 +1101,6 @@ class VectorizedClassifier:
         """
         import time
 
-        from metadarkmatter.core.parsers import extract_genome_name_expr
 
         start_time = time.time()
         total_reads = 0

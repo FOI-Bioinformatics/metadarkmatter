@@ -106,7 +106,7 @@ class ContigIdMapping:
             open_func = gzip.open if genome_file.suffix == ".gz" else Path.open
 
             try:
-                with open_func(genome_file, "rt") as f:  # type: ignore[operator]
+                with open_func(genome_file, "rt") as f:
                     for line in f:
                         if line.startswith(">"):
                             # Extract contig ID (first word after >)

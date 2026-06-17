@@ -7,7 +7,6 @@ and reference selection algorithms.
 
 from __future__ import annotations
 
-import numpy as np
 import polars as pl
 import pytest
 
@@ -411,7 +410,7 @@ class TestBuildExtendedSimilarityMatrix:
             )
             clusters.append(cluster)
 
-        matrix, labels, is_novel = build_extended_similarity_matrix(
+        _matrix, _labels, is_novel = build_extended_similarity_matrix(
             similarity_matrix=sample_ani_matrix,
             novel_clusters=clusters,
             genome_labels_map=genome_labels_map,
@@ -431,7 +430,7 @@ class TestBuildExtendedSimilarityMatrix:
         genome_labels_map: dict[str, str],
     ):
         """With no clusters, should return references only."""
-        matrix, labels, is_novel = build_extended_similarity_matrix(
+        _matrix, labels, is_novel = build_extended_similarity_matrix(
             similarity_matrix=sample_ani_matrix,
             novel_clusters=[],
             genome_labels_map=genome_labels_map,

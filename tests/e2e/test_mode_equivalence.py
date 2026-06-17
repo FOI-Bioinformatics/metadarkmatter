@@ -7,14 +7,13 @@ produce identical or functionally equivalent results.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import polars as pl
 import pytest
 
 from tests.utils.assertions import CLIAssertions
-
 
 pytestmark = pytest.mark.e2e
 

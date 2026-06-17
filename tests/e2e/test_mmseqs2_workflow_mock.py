@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 
 class TestMMseqs2WorkflowWithMockData:
     """Test complete workflow using mock MMseqs2 output."""
@@ -102,10 +100,10 @@ read_5_GCF_000004.1_100pct\tGCF_000004.1|contig_1\t100.0\t150\t0\t0\t1\t150\t50\
 
         # Parse both with same parser
         mmseqs_parser = StreamingBlastParser(mmseqs_output)
-        mmseqs_result = list(mmseqs_parser.iter_reads())[0]
+        mmseqs_result = next(iter(mmseqs_parser.iter_reads()))
 
         blast_parser = StreamingBlastParser(blast_output)
-        blast_result = list(blast_parser.iter_reads())[0]
+        blast_result = next(iter(blast_parser.iter_reads()))
 
         # Results should be identical
         assert mmseqs_result.read_id == blast_result.read_id
@@ -125,19 +123,19 @@ read_5_GCF_000004.1_100pct\tGCF_000004.1|contig_1\t100.0\t150\t0\t0\t1\t150\t50\
 
     def test_classification_threshold_validation(self, tmp_path: Path):
         """Validate classification thresholds work with MMseqs2 output."""
-        from metadarkmatter.core.parsers import StreamingBlastParser
         from metadarkmatter.core.constants import (
             NOVELTY_KNOWN_MAX,
+            NOVELTY_NOVEL_GENUS_MIN,
             NOVELTY_NOVEL_SPECIES_MAX,
-            NOVELTY_NOVEL_GENUS_MIN
         )
+        from metadarkmatter.core.parsers import StreamingBlastParser
 
         # Create reads spanning classification categories
         mock_output = tmp_path / "threshold_test.tsv"
         # read_known: 97% identity = 3% novelty (< 5%)
         # read_novel_species: 92% identity = 8% novelty (5-20% range)
         # read_novel_genus: 78% identity = 22% novelty (>= 20%)
-        mock_data = f"""read_known\tGCF_000001.1|c1\t97.0\t150\t4\t0\t1\t150\t1\t150\t1e-70\t270.0
+        mock_data = """read_known\tGCF_000001.1|c1\t97.0\t150\t4\t0\t1\t150\t1\t150\t1e-70\t270.0
 read_novel_species\tGCF_000001.1|c1\t92.0\t150\t12\t0\t1\t150\t1\t150\t1e-60\t240.0
 read_novel_genus\tGCF_000001.1|c1\t78.0\t150\t33\t0\t1\t150\t1\t150\t1e-45\t190.0
 """
@@ -225,6 +223,7 @@ read1\tGCF_000003.1|c1\t88.0\t150\t18\t0\t1\t150\t1\t150\t1e-50\t210.0
     def test_workflow_with_real_data_structure(self, tmp_path: Path):
         """Test workflow with realistic data structure and file operations."""
         import gzip
+
         from metadarkmatter.core.parsers import StreamingBlastParser
 
         # Simulate real workflow: compressed MMseqs2 output

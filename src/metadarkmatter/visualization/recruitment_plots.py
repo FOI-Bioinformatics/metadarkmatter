@@ -143,7 +143,7 @@ class RecruitmentPlotGenerator:
                     y1=band.max_identity,
                     fillcolor=band.color,
                     opacity=band.opacity,
-                    line=dict(width=0),
+                    line={"width": 0},
                     layer="below",
                 )
 
@@ -153,7 +153,7 @@ class RecruitmentPlotGenerator:
                     y=(band.min_identity + band.max_identity) / 2,
                     text=band.name,
                     showarrow=False,
-                    font=dict(size=10, color=band.color),
+                    font={"size": 10, "color": band.color},
                     xanchor="left",
                 )
 
@@ -176,11 +176,11 @@ class RecruitmentPlotGenerator:
                     y=genome_data["percent_identity"].to_list(),
                     mode="markers",
                     name=genome_name,
-                    marker=dict(
-                        size=point_size,
-                        color=colors[i % len(colors)],
-                        opacity=point_opacity,
-                    ),
+                    marker={
+                        "size": point_size,
+                        "color": colors[i % len(colors)],
+                        "opacity": point_opacity,
+                    },
                     hovertemplate=(
                         f"<b>{genome_name}</b><br>"
                         "Position: %{x:,.0f}<br>"
@@ -192,30 +192,30 @@ class RecruitmentPlotGenerator:
 
         # Layout
         fig.update_layout(
-            title=dict(text=title, x=0.5, xanchor="center"),
-            xaxis=dict(
-                title="Genome Position (bp)",
-                showgrid=True,
-                gridwidth=1,
-                gridcolor="rgba(128,128,128,0.2)",
-            ),
-            yaxis=dict(
-                title="Percent Identity (%)",
-                range=[65, 102],
-                showgrid=True,
-                gridwidth=1,
-                gridcolor="rgba(128,128,128,0.2)",
-            ),
+            title={"text": title, "x": 0.5, "xanchor": "center"},
+            xaxis={
+                "title": "Genome Position (bp)",
+                "showgrid": True,
+                "gridwidth": 1,
+                "gridcolor": "rgba(128,128,128,0.2)",
+            },
+            yaxis={
+                "title": "Percent Identity (%)",
+                "range": [65, 102],
+                "showgrid": True,
+                "gridwidth": 1,
+                "gridcolor": "rgba(128,128,128,0.2)",
+            },
             width=width,
             height=height,
             template="plotly_white",
-            legend=dict(
-                yanchor="top",
-                y=0.99,
-                xanchor="right",
-                x=0.99,
-                bgcolor="rgba(255,255,255,0.8)",
-            ),
+            legend={
+                "yanchor": "top",
+                "y": 0.99,
+                "xanchor": "right",
+                "x": 0.99,
+                "bgcolor": "rgba(255,255,255,0.8)",
+            },
             hovermode="closest",
         )
 
@@ -286,7 +286,7 @@ class RecruitmentPlotGenerator:
                         y1=band.max_identity,
                         fillcolor=band.color,
                         opacity=band.opacity,
-                        line=dict(width=0),
+                        line={"width": 0},
                         row=i,
                         col=1,
                         layer="below",
@@ -299,11 +299,11 @@ class RecruitmentPlotGenerator:
                     y=genome_data["percent_identity"].to_list(),
                     mode="markers",
                     name=genome_name,
-                    marker=dict(
-                        size=2,
-                        color=colors[(i - 1) % len(colors)],
-                        opacity=0.5,
-                    ),
+                    marker={
+                        "size": 2,
+                        "color": colors[(i - 1) % len(colors)],
+                        "opacity": 0.5,
+                    },
                     showlegend=False,
                     hovertemplate=(
                         f"<b>{genome_name}</b><br>"
@@ -322,7 +322,7 @@ class RecruitmentPlotGenerator:
         # Update layout
         total_height = height_per_genome * n_genomes + 100
         fig.update_layout(
-            title=dict(text=title, x=0.5, xanchor="center"),
+            title={"text": title, "x": 0.5, "xanchor": "center"},
             width=width,
             height=total_height,
             template="plotly_white",

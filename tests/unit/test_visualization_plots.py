@@ -6,8 +6,8 @@ Tests the plot generators for distributions, scatter plots, and classification c
 
 from __future__ import annotations
 
-import pytest
 import polars as pl
+import pytest
 
 # Skip if plotly not available
 plotly = pytest.importorskip("plotly")
@@ -261,7 +261,9 @@ class TestClassificationDonutChart:
     """Test ClassificationDonutChart plot generator."""
 
     def test_create_figure(self, sample_summary):
-        from metadarkmatter.visualization.plots.classification_charts import ClassificationDonutChart
+        from metadarkmatter.visualization.plots.classification_charts import (
+            ClassificationDonutChart,
+        )
 
         plot = ClassificationDonutChart(sample_summary)
         fig = plot.create_figure()
@@ -271,7 +273,9 @@ class TestClassificationDonutChart:
 
     def test_with_zero_values(self):
         """Test handling of summary with zero values."""
-        from metadarkmatter.visualization.plots.classification_charts import ClassificationDonutChart
+        from metadarkmatter.visualization.plots.classification_charts import (
+            ClassificationDonutChart,
+        )
 
         summary = {
             "total_reads": 100,
@@ -411,8 +415,9 @@ class TestBasePlotMethods:
         assert "plotly" in html.lower() or "data" in html.lower()
 
     def test_to_json(self, sample_classification_data):
-        from metadarkmatter.visualization.plots.distributions import NoveltyHistogram
         import json
+
+        from metadarkmatter.visualization.plots.distributions import NoveltyHistogram
 
         plot = NoveltyHistogram(sample_classification_data)
         json_str = plot.to_json()
@@ -654,10 +659,10 @@ class TestNoveltyUncertaintyDensity:
 
     def test_threshold_lines_added(self, sample_classification_data):
         """Verify threshold lines are present in the figure."""
+        from metadarkmatter.visualization.plots.base import ThresholdConfig
         from metadarkmatter.visualization.plots.scatter_2d import (
             NoveltyUncertaintyDensity,
         )
-        from metadarkmatter.visualization.plots.base import ThresholdConfig
 
         thresholds = ThresholdConfig()
         plot = NoveltyUncertaintyDensity(
@@ -983,8 +988,9 @@ class TestBasePlotSave:
         self, sample_classification_data, tmp_path
     ):
         """Verify save to image format calls write_image (may need kaleido)."""
+        from unittest.mock import MagicMock, patch
+
         from metadarkmatter.visualization.plots.distributions import NoveltyHistogram
-        from unittest.mock import patch, MagicMock
 
         plot = NoveltyHistogram(sample_classification_data)
         output = str(tmp_path / "test_plot.png")

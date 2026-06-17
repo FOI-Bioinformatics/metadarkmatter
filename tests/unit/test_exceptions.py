@@ -1,6 +1,5 @@
 """Unit tests for custom exceptions module."""
 
-import pytest
 
 from metadarkmatter.core.exceptions import (
     ANIMatrixError,

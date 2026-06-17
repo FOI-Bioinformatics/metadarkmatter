@@ -239,13 +239,12 @@ class StreamingBlastParser:
         """
         import gzip
 
-        # Open file (handle gzip if needed)
-        if self._is_gzipped():
-            file_handle = gzip.open(self.blast_path, "rt")
-        else:
-            file_handle = self.blast_path.open("r")
-
-        try:
+        # Open file (handle gzip if needed); the context manager closes it.
+        with (
+            gzip.open(self.blast_path, "rt")
+            if self._is_gzipped()
+            else self.blast_path.open("r")
+        ) as file_handle:
             for line in file_handle:
                 # Skip comment lines
                 if line.startswith("#"):
@@ -267,9 +266,6 @@ class StreamingBlastParser:
             # No data lines found
             msg = f"BLAST file contains no data lines: {self.blast_path}"
             raise ValueError(msg)
-
-        finally:
-            file_handle.close()
 
     def parse_lazy(self) -> pl.LazyFrame:
         """

@@ -10,7 +10,6 @@ import json
 import logging
 from io import StringIO
 
-import numpy as np
 import pandas as pd
 import polars as pl
 import pytest

@@ -1,0 +1,51 @@
+name: release
+
+# Internal-lab release automation. Triggered by pushing a version tag
+# (e.g. v0.3.0). Builds and smoke-tests the container image and creates a
+# GitHub release. We deliberately do NOT publish to PyPI or a public
+# container registry (internal-lab scope).
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  verify-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check CHANGELOG has an entry for this tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! grep -q "$version" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no entry for version $version"
+            exit 1
+          fi
+          echo "Found CHANGELOG entry for $version"
+
+      - name: Verify package version matches tag
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          pkg_version=$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')
+          if [ "$version" != "$pkg_version" ]; then
+            echo "::error::Tag $version does not match pyproject version $pkg_version"
+            exit 1
+          fi
+
+      - name: Build container image (smoke test the build)
+        run: |
+          docker build -t metadarkmatter:${GITHUB_REF_NAME} .
+
+      - name: Smoke-test the image
+        run: |
+          docker run --rm metadarkmatter:${GITHUB_REF_NAME} --version
+          docker run --rm metadarkmatter:${GITHUB_REF_NAME} doctor
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true

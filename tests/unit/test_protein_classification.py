@@ -7,8 +7,6 @@ integration with the classifier for protein-mode classification.
 
 from __future__ import annotations
 
-import pytest
-
 from metadarkmatter.core.constants import (
     CONFIDENCE_IDENTITY_GAP_THRESHOLDS,
     CONFIDENCE_IDENTITY_SCORE_BASE,

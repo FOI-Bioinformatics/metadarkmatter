@@ -891,7 +891,7 @@ class TestStreamingChunks:
         def track_progress(rows: int, reads: int, elapsed: float):
             progress_calls.append((rows, reads, elapsed))
 
-        num_classified = vectorized.stream_to_file(
+        vectorized.stream_to_file(
             large_blast_file,
             output_path,
             output_format="csv",

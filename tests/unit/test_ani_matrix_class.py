@@ -8,11 +8,9 @@ genus counting.
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
 
 from metadarkmatter.core.classification.ani_matrix import ANIMatrix
-
 
 # =============================================================================
 # Fixtures
@@ -344,7 +342,7 @@ class TestCountDistinctGenera:
         assert count == 2
         genus1_members = {"GCF_A", "GCF_B", "GCF_C"}
         genus2_members = {"GCF_D", "GCF_E"}
-        group_sets = [g for g in groups]
+        group_sets = list(groups)
         assert genus1_members in group_sets
         assert genus2_members in group_sets
 

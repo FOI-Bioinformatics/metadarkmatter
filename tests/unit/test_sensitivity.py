@@ -91,7 +91,7 @@ class TestApplyClassificationThresholds:
         novels = result["is_novel"].to_list()
         calls = result["taxonomic_call"].to_list()
 
-        for novel, call in zip(novels, calls):
+        for novel, call in zip(novels, calls, strict=False):
             if call in ("Novel Species", "Novel Genus"):
                 assert novel is True
             else:

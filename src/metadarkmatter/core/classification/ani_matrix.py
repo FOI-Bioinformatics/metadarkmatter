@@ -206,7 +206,6 @@ class ANIMatrix:
         Returns:
             ANIMatrix instance
         """
-        import polars as pl
 
         if len(df) == 0:
             return cls({}, default_ani=default_ani)

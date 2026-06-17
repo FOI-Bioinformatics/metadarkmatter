@@ -169,7 +169,7 @@ def classifications(
         df = pl.read_csv(input)
     except Exception as e:
         console.print(f"[red]Failed to read CSV:[/red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     console.print(f"File: {input}")
     console.print(f"Total reads: {len(df)}")
@@ -222,7 +222,7 @@ def ani(
         df = pl.read_csv(input)
     except Exception as e:
         console.print(f"[red]Failed to read CSV:[/red] {e}")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     # First column is genome labels; remaining columns are the matrix
     genome_labels = df.columns[1:]
@@ -242,7 +242,7 @@ def ani(
     except Exception as e:
         issues.append(f"Could not extract numeric matrix: {e}")
         console.print(Panel("\n".join(issues), title="Issues Found", border_style="red"))
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from None
 
     # Value range
     min_val = float(matrix.min())

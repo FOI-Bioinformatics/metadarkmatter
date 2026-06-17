@@ -203,11 +203,11 @@ def _build_similarity_heatmap(
             colorscale=config.colorscale,
             zmin=config.zmin,
             zmax=config.zmax,
-            colorbar=dict(
-                title=f"{config.metric_name} (%)",
-                tickvals=config.tick_vals,
-                ticktext=config.tick_text,
-            ),
+            colorbar={
+                "title": f"{config.metric_name} (%)",
+                "tickvals": config.tick_vals,
+                "ticktext": config.tick_text,
+            },
             hovertemplate=(
                 "Genome 1: %{y}<br>"
                 "Genome 2: %{x}<br>"
@@ -226,8 +226,8 @@ def _build_similarity_heatmap(
         width=1000,
         height=900,
         template="plotly_white",
-        xaxis=dict(tickangle=45, tickfont=dict(size=8)),
-        yaxis=dict(tickfont=dict(size=8)),
+        xaxis={"tickangle": 45, "tickfont": {"size": 8}},
+        yaxis={"tickfont": {"size": 8}},
     )
 
     return fig, stats, clustering_succeeded
@@ -438,7 +438,6 @@ def build_phylogenetic_context_heatmap(
         zmin, zmax = 40, 100
         colorbar_tickvals = [40, 50, 60, 65, 70, 80, 90, 100]
         colorbar_ticktext = ["40", "50", "60", "65 (genus)", "70", "80", "90", "100"]
-        boundary_label = "genus"
     else:
         # ANI colorscale: 70-100% range (species-level comparisons)
         colorscale = [
@@ -453,7 +452,6 @@ def build_phylogenetic_context_heatmap(
         zmin, zmax = 70, 100
         colorbar_tickvals = [70, 75, 80, 85, 90, 95, 100]
         colorbar_ticktext = ["70", "75", "80", "85 (genus)", "90", "95 (species)", "100"]
-        boundary_label = "species"
 
     # Create custom hover text to indicate novel vs reference
     hover_text = []
@@ -487,11 +485,11 @@ def build_phylogenetic_context_heatmap(
             colorscale=colorscale,
             zmin=zmin,
             zmax=zmax,
-            colorbar=dict(
-                title=f"{similarity_type} (%)",
-                tickvals=colorbar_tickvals,
-                ticktext=colorbar_ticktext,
-            ),
+            colorbar={
+                "title": f"{similarity_type} (%)",
+                "tickvals": colorbar_tickvals,
+                "ticktext": colorbar_ticktext,
+            },
             hovertext=hover_text,
             hovertemplate="%{hovertext}<extra></extra>",
         )
@@ -519,8 +517,8 @@ def build_phylogenetic_context_heatmap(
         width=width,
         height=height,
         template="plotly_white",
-        xaxis=dict(tickangle=45, tickfont=dict(size=8)),
-        yaxis=dict(tickfont=dict(size=8)),
+        xaxis={"tickangle": 45, "tickfont": {"size": 8}},
+        yaxis={"tickfont": {"size": 8}},
     )
 
     # Metadata for reporting

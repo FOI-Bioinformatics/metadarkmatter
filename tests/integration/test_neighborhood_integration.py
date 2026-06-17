@@ -38,7 +38,7 @@ def _make_multi_genus_ani_matrix() -> tuple[ANIMatrix, list[str]]:
         Tuple of (ANIMatrix, genome_list).
     """
     genomes = [f"GCF_{i:03d}" for i in range(1, 10)]
-    n = len(genomes)
+    len(genomes)
 
     ani_dict: dict[str, dict[str, float]] = {}
     for i, g1 in enumerate(genomes):

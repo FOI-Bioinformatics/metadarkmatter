@@ -10,10 +10,9 @@ import re
 from pathlib import Path
 from typing import Annotated
 
+import polars as pl
 import typer
 from rich.console import Console
-
-import polars as pl
 
 from metadarkmatter.cli.utils import QuietConsole, spinner_progress
 from metadarkmatter.core.genome_utils import extract_accession_from_filename
@@ -415,10 +414,7 @@ def _parse_structured_filename(
         species_epithet = ""
 
     # Construct full species name: "Genus epithet"
-    if species_epithet:
-        full_species = f"{genus} {species_epithet}"
-    else:
-        full_species = genus
+    full_species = f"{genus} {species_epithet}" if species_epithet else genus
 
     return {
         "accession": accession,
@@ -611,7 +607,7 @@ def generate_metadata(
         num_genomes = len(out_df)
         num_species = out_df["species"].n_unique()
         num_reps = len(
-            set(r for r in representative_col if r in set(df["accession"]))
+            {r for r in representative_col if r in set(df["accession"])}
         )
         qc.print(
             f"\n[green]Success![/green] {num_genomes:,} genomes, "

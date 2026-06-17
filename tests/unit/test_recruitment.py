@@ -24,7 +24,6 @@ from metadarkmatter.core.recruitment import (
     stream_bam_alignments,
 )
 
-
 # =============================================================================
 # AlignmentRecord dataclass tests
 # =============================================================================

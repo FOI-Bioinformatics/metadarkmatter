@@ -25,8 +25,8 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
-from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.cli.utils import QuietConsole, spinner_progress
+from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.external import ToolExecutionError
 from metadarkmatter.external.diamond import Diamond
 

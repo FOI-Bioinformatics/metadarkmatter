@@ -19,6 +19,7 @@ import numpy as np
 
 if TYPE_CHECKING:
     import polars as pl
+
     from metadarkmatter.core.novel_diversity import NovelCluster
 
 logger = logging.getLogger(__name__)
@@ -56,7 +57,6 @@ def build_extended_similarity_matrix(
         - labels: Ordered list of labels for rows/columns
         - is_novel_mask: Boolean list indicating novel cluster entries
     """
-    import polars as pl
 
     # Set default based on similarity type
     is_aai = similarity_type.upper() == "AAI"

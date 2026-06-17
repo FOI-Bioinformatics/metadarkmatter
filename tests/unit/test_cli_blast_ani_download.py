@@ -7,7 +7,6 @@ and error cases for the blast, ani, and download subcommands.
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import polars as pl
@@ -16,7 +15,6 @@ import pytest
 from metadarkmatter.cli.main import app
 from metadarkmatter.external.base import ToolExecutionError, ToolResult
 from metadarkmatter.external.ncbi_datasets import DownloadOutcome, DownloadReport
-
 
 # =============================================================================
 # Shared helpers

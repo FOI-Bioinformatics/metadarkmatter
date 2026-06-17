@@ -11,7 +11,6 @@ from pathlib import Path
 import pytest
 
 from metadarkmatter.external.base import (
-    ExternalTool,
     ToolExecutionError,
     ToolNotFoundError,
     ToolResult,

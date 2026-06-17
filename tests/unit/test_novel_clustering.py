@@ -7,8 +7,8 @@ NovelDiversityAnalyzer clustering logic.
 
 from __future__ import annotations
 
-import pytest
 import polars as pl
+import pytest
 
 from metadarkmatter.core.novel_diversity import (
     GenusDistance,
@@ -17,7 +17,6 @@ from metadarkmatter.core.novel_diversity import (
     NovelDiversitySummary,
     PhylogeneticNeighborhood,
 )
-
 
 # =============================================================================
 # NovelCluster Model Tests
@@ -1266,6 +1265,7 @@ class TestANIMatrixFromDataframe:
     def test_from_dataframe_with_genome_column(self):
         """Should construct from DataFrame with 'genome' column."""
         import polars as pl
+
         from metadarkmatter.core.classification.ani_matrix import ANIMatrix
 
         df = pl.DataFrame({
@@ -1285,6 +1285,7 @@ class TestANIMatrixFromDataframe:
     def test_from_dataframe_without_genome_column(self):
         """Should construct from square DataFrame without 'genome' column."""
         import polars as pl
+
         from metadarkmatter.core.classification.ani_matrix import ANIMatrix
 
         df = pl.DataFrame({
@@ -1300,6 +1301,7 @@ class TestANIMatrixFromDataframe:
     def test_from_dataframe_empty(self):
         """Should handle empty DataFrame."""
         import polars as pl
+
         from metadarkmatter.core.classification.ani_matrix import ANIMatrix
 
         df = pl.DataFrame()
@@ -1311,6 +1313,7 @@ class TestANIMatrixFromDataframe:
     def test_from_dataframe_roundtrip(self):
         """Values should survive dict -> ANIMatrix -> from_dataframe cycle."""
         import polars as pl
+
         from metadarkmatter.core.classification.ani_matrix import ANIMatrix
 
         ani_dict = {

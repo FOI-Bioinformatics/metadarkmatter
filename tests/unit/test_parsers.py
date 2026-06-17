@@ -10,8 +10,6 @@ Tests StreamingBlastParser and ANIMatrixParser including:
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import polars as pl
 import pytest
 
@@ -342,7 +340,7 @@ class TestANIMatrixParser:
 
         assert isinstance(ani_dict, dict)
         # Each value should be a dict
-        for genome, inner in ani_dict.items():
+        for _genome, inner in ani_dict.items():
             assert isinstance(inner, dict)
 
     def test_to_dict_diagonal_is_100(self, temp_ani_file):

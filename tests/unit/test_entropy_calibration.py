@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import itertools
 import math
 import subprocess
 import sys
 from pathlib import Path
 
 import numpy as np
-import polars as pl
 import pytest
 
 from metadarkmatter.core.classification.bayesian import entropy_to_confidence
@@ -112,7 +112,7 @@ def test_calibrate_entropy_produces_monotone_decreasing_knots(tmp_path: Path) ->
     confidences = [c for _, c in cfg.bayesian.entropy_calibration]
     entropies = [e for e, _ in cfg.bayesian.entropy_calibration]
     assert entropies == sorted(entropies)
-    for prev, nxt in zip(confidences, confidences[1:], strict=False):
+    for prev, nxt in itertools.pairwise(confidences):
         assert nxt <= prev + 1e-9, (
             f"calibration is not monotone non-increasing: {confidences}"
         )

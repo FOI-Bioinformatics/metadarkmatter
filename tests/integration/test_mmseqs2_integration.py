@@ -68,7 +68,7 @@ def test_query(tmp_path: Path, test_fasta: Path) -> Path:
 
     # Create reads from positions 50-200 (150bp) of each genome
     query_content = ""
-    for i, (genome_id, seq) in enumerate(seqs.items(), 1):
+    for i, (_genome_id, seq) in enumerate(seqs.items(), 1):
         read_seq = seq[50:200]  # 150bp read
         query_content += f">read{i}\n{read_seq}\n"
 
@@ -239,9 +239,8 @@ class TestMMseqs2Integration:
 
         # Manually compress to test parser's gzip handling
         compressed_path = tmp_path / "results.tsv.gz"
-        with raw_output.open("rb") as f_in:
-            with gzip.open(compressed_path, "wb") as f_out:
-                f_out.write(f_in.read())
+        with raw_output.open("rb") as f_in, gzip.open(compressed_path, "wb") as f_out:
+            f_out.write(f_in.read())
 
         # Verify compressed output exists
         assert compressed_path.exists(), "Compressed output should exist"

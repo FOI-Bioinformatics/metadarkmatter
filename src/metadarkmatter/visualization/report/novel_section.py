@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import plotly.graph_objects as go
+
     from metadarkmatter.core.novel_diversity import (
         NovelCluster,
         NovelDiversitySummary,
@@ -530,12 +531,12 @@ def build_cluster_scatter_figure(
             y=y_vals,
             mode="markers",
             name=conf,
-            marker=dict(
-                color=color,
-                size=sizes,
-                opacity=0.7,
-                line=dict(width=1, color="white"),
-            ),
+            marker={
+                "color": color,
+                "size": sizes,
+                "opacity": 0.7,
+                "line": {"width": 1, "color": "white"},
+            },
             text=[
                 f"{c.cluster_id}<br>{c.suggested_name}<br>{c.read_count} reads"
                 for c in conf_clusters
@@ -554,13 +555,13 @@ def build_cluster_scatter_figure(
         template="plotly_white",
         width=width,
         height=height,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=-0.2,
-            xanchor="center",
-            x=0.5,
-        ),
+        legend={
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": -0.2,
+            "xanchor": "center",
+            "x": 0.5,
+        },
         showlegend=True,
     )
 
@@ -702,7 +703,7 @@ def build_sunburst_figure(
         labels=labels,
         parents=parents,
         values=values,
-        marker=dict(colors=colors),
+        marker={"colors": colors},
         branchvalues="total",
         customdata=custom_data,
         hovertemplate=(
@@ -717,7 +718,7 @@ def build_sunburst_figure(
         template="plotly_white",
         width=width,
         height=height,
-        margin=dict(t=50, l=10, r=10, b=10),
+        margin={"t": 50, "l": 10, "r": 10, "b": 10},
     )
 
     return fig

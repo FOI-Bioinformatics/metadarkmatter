@@ -13,13 +13,13 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.cli.utils import (
     QuietConsole,
     extract_sample_name,
     extract_sample_name_from_reads,
     spinner_progress,
 )
+from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.external import (
     ExtractKrakenReads,
     Kraken2,

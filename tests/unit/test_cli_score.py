@@ -6,10 +6,6 @@ Tests argument validation, file handling, and error cases for the score subcomma
 
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
-
 from metadarkmatter.cli.main import app
 
 
@@ -403,9 +399,6 @@ class TestScoreBatch:
 # =============================================================================
 
 import json
-import tempfile
-from dataclasses import dataclass, field
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import polars as pl
@@ -1601,18 +1594,10 @@ class TestExtractNovelAdditional:
                 + [4.0, 3.0, 5.0]
             ),
             "placement_uncertainty": (
-                [0.2, 0.3, 0.4, 0.1, 0.2]
-                + [0.5, 0.6, 0.7, 0.3, 0.4]
-                + [1.0, 1.2, 0.8, 1.5]
-                + [8.0, 9.0, 10.0]
-                + [6.0, 7.0, 8.0]
+                [0.2, 0.3, 0.4, 0.1, 0.2, 0.5, 0.6, 0.7, 0.3, 0.4, 1.0, 1.2, 0.8, 1.5, 8.0, 9.0, 10.0, 6.0, 7.0, 8.0]
             ),
             "top_hit_identity": (
-                [99.0, 98.0, 97.0, 98.5, 97.5]
-                + [92.0, 90.0, 88.0, 85.0, 94.0]
-                + [78.0, 77.0, 79.0, 76.0]
-                + [95.0, 94.0, 93.0]
-                + [96.0, 97.0, 95.0]
+                [99.0, 98.0, 97.0, 98.5, 97.5, 92.0, 90.0, 88.0, 85.0, 94.0, 78.0, 77.0, 79.0, 76.0, 95.0, 94.0, 93.0, 96.0, 97.0, 95.0]
             ),
         }
         df = pl.DataFrame(data)

@@ -8,21 +8,15 @@ speedup over BLAST while maintaining sensitivity.
 
 from __future__ import annotations
 
+import contextlib
 import gzip
 from pathlib import Path
 
 import typer
 from rich.console import Console
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    TimeElapsedColumn,
-)
 
-from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.cli.utils import QuietConsole, spinner_progress
+from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.external import ToolExecutionError
 from metadarkmatter.external.mmseqs2 import MMseqs2
 
@@ -501,7 +495,7 @@ def search_reads(
         temp_query_file = Path(temp_path)
         _concatenate_paired_reads(query_1, query_2, temp_query_file, console, quiet)
         query_for_search = temp_query_file
-        out.print(f"[bold]Input:[/bold] Paired-end reads")
+        out.print("[bold]Input:[/bold] Paired-end reads")
         out.print(f"  R1: {query_1}")
         out.print(f"  R2: {query_2}")
     else:
@@ -512,10 +506,8 @@ def search_reads(
     def _cleanup_temp_query() -> None:
         """Clean up temporary concatenated query file."""
         if temp_query_file and temp_query_file.exists():
-            try:
-                temp_query_file.unlink()
-            except OSError:
-                pass  # Best effort cleanup
+            with contextlib.suppress(OSError):
+                temp_query_file.unlink()  # Best effort cleanup
 
     # Validate database exists
     if not database.exists():
@@ -608,7 +600,7 @@ def search_reads(
 
     except Exception as e:
         _cleanup_temp_query()
-        console.print(f"\n[red]MMseqs2 search failed:[/red]\n{str(e)}")
+        console.print(f"\n[red]MMseqs2 search failed:[/red]\n{e!s}")
         raise typer.Exit(code=1) from None
 
     # Clean up temporary concatenated query file

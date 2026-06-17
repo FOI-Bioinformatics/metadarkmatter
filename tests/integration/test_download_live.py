@@ -84,9 +84,8 @@ class TestLiveGTDBAPI:
         """Should handle unknown taxon gracefully."""
         from metadarkmatter.clients.gtdb import GTDBAPIError
 
-        with GTDBClient(timeout=30.0) as client:
-            with pytest.raises(GTDBAPIError) as exc_info:
-                client.query_genomes("g__FakeTaxonDoesNotExist")
+        with GTDBClient(timeout=30.0) as client, pytest.raises(GTDBAPIError) as exc_info:
+            client.query_genomes("g__FakeTaxonDoesNotExist")
 
         assert exc_info.value.status_code == 404
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from metadarkmatter.models.classification import TaxonomicCall, TAXONOMIC_TO_DIVERSITY
+from metadarkmatter.models.classification import TAXONOMIC_TO_DIVERSITY
 from metadarkmatter.models.config import ScoringConfig
 
 

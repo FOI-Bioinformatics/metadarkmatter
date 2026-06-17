@@ -18,7 +18,6 @@ from metadarkmatter.core.classification.bayesian import (
 )
 from metadarkmatter.core.constants import (
     calculate_alignment_quality,
-    calculate_confidence_score,
     calculate_discovery_score,
     calculate_identity_confidence,
     calculate_inferred_uncertainty,
@@ -356,11 +355,10 @@ class ANIWeightedClassifier:
             # Only one genome hit, no uncertainty
             return 0.0, num_ambiguous_hits
 
-        # Choose ANI based on uncertainty mode
-        if self.config.uncertainty_mode == "second":
-            effective_ani = second_genome_ani
-        else:  # "max" mode (default)
-            effective_ani = max_ani
+        # Choose ANI based on uncertainty mode ("second", else "max" default)
+        effective_ani = (
+            second_genome_ani if self.config.uncertainty_mode == "second" else max_ani
+        )
 
         if effective_ani == 0.0:
             # Genome not in ANI matrix at all - maximum uncertainty

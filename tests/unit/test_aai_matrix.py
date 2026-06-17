@@ -30,7 +30,6 @@ from metadarkmatter.core.constants import (
     AAI_GENUS_BOUNDARY_LOW,
 )
 
-
 # =============================================================================
 # AAI Matrix Test Data Fixtures
 # =============================================================================

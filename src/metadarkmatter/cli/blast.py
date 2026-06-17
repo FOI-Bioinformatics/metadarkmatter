@@ -7,6 +7,7 @@ high-sensitivity nucleotide alignments optimized for detecting divergent sequenc
 
 from __future__ import annotations
 
+import contextlib
 import gzip
 from pathlib import Path
 
@@ -433,10 +434,8 @@ def align_reads(
     def _cleanup_temp_query() -> None:
         """Ensure temp query file is cleaned up."""
         if temp_query and temp_query.exists():
-            try:
-                temp_query.unlink()
-            except OSError:
-                pass  # Best effort cleanup
+            with contextlib.suppress(OSError):
+                temp_query.unlink()  # Best effort cleanup
 
     if query_is_gzipped:
         import shutil

@@ -4,7 +4,7 @@ Classification summary charts: donut charts, bar charts, and summary visualizati
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -584,7 +584,7 @@ class DiversitySunburstChart(BasePlot):
     """
 
     # Define the hierarchy: diversity_status -> taxonomic categories
-    DIVERSITY_HIERARCHY: dict[str, list[str]] = {
+    DIVERSITY_HIERARCHY: ClassVar[dict[str, list[str]]] = {
         "Known": ["Known Species"],
         "Novel": ["Novel Species", "Novel Genus"],
         "Uncertain": [
@@ -598,7 +598,7 @@ class DiversitySunburstChart(BasePlot):
     }
 
     # Map taxonomic categories to summary dict keys
-    CATEGORY_TO_KEY: dict[str, str] = {
+    CATEGORY_TO_KEY: ClassVar[dict[str, str]] = {
         "Known Species": "known_species",
         "Novel Species": "novel_species",
         "Novel Genus": "novel_genus",
@@ -663,7 +663,7 @@ class DiversitySunburstChart(BasePlot):
         # Add taxonomic category level (outer ring)
         for diversity_status, categories in self.DIVERSITY_HIERARCHY.items():
             base_color = DIVERSITY_COLORS[diversity_status]
-            for i, category in enumerate(categories):
+            for _i, category in enumerate(categories):
                 cat_id = f"{diversity_status}-{category}"
                 ids.append(cat_id)
                 labels.append(category)

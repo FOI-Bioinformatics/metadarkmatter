@@ -16,9 +16,9 @@ from metadarkmatter.core.phylogeny.tree_builder import (
 )
 
 __all__ = [
-    "ani_to_newick",
-    "load_user_tree",
     "NovelCluster",
+    "ani_to_newick",
     "extract_novel_clusters",
+    "load_user_tree",
     "place_novel_clusters",
 ]

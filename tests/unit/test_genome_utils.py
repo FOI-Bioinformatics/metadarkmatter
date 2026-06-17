@@ -12,9 +12,8 @@ import polars as pl
 import pytest
 from typer.testing import CliRunner
 
-from metadarkmatter.core.genome_utils import extract_accession_from_filename
 from metadarkmatter.cli.mapping import _parse_structured_filename, app
-
+from metadarkmatter.core.genome_utils import extract_accession_from_filename
 
 # =============================================================================
 # extract_accession_from_filename tests

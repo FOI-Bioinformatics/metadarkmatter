@@ -12,8 +12,8 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.cli.utils import QuietConsole, spinner_progress
+from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.external import (
     Bowtie2,
     Bowtie2Build,
@@ -279,7 +279,6 @@ def map_reads(
                         genome_dir=genomes,
                         output_path=pangenome_path,
                         pattern=genome_pattern,
-                        prefix_headers=True,
                     )
                 except FileNotFoundError as e:
                     console.print(f"\n[red]Error: {e}[/red]")
