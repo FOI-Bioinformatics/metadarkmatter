@@ -17,11 +17,15 @@ import pytest
 
 # Make Typer/Rich help output deterministic for CLI tests. Some CI runners set
 # FORCE_COLOR=1, which injects ANSI escape codes into --help output (splitting
-# e.g. "--genomes" across colour spans) and breaks plain substring assertions.
-# Force plain, wide rendering before any CliRunner invocation so the suite
-# behaves identically locally, in CI, and under pre-commit.
+# e.g. "--genomes" across style spans) and breaks plain substring assertions.
+# NO_COLOR alone is insufficient: it strips colour but not bold styling.
+# TERM=dumb forces Rich's color_system to None, emitting zero escape codes
+# regardless of FORCE_COLOR or terminal detection. Set before any CliRunner
+# invocation so the suite behaves identically locally, in CI, and under
+# pre-commit.
 os.environ.pop("FORCE_COLOR", None)
 os.environ["NO_COLOR"] = "1"
+os.environ["TERM"] = "dumb"
 os.environ.setdefault("COLUMNS", "200")
 
 # =============================================================================
