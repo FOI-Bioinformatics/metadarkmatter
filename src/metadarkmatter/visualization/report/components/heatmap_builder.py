@@ -8,7 +8,7 @@ statistics cards for genome similarity matrices (ANI and AAI).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import plotly.graph_objects as go
@@ -42,7 +42,7 @@ class HeatmapConfig:
     default_value: float
     same_threshold: float
     boundary_lower: float
-    colorscale: list[list]
+    colorscale: list[list[Any]]
     zmin: float
     zmax: float = 100.0
     tick_vals: list[float] = field(default_factory=list)
@@ -343,13 +343,13 @@ def build_aai_stats_cards(stats: SimilarityStats) -> str:
 
 def build_phylogenetic_context_heatmap(
     similarity_matrix: pl.DataFrame,
-    novel_clusters: list,
+    novel_clusters: list[Any],
     genome_labels_map: dict[str, str],
     similarity_type: str = "ANI",
     default_value: float | None = None,
     max_references: int = 50,
     max_clusters: int = 20,
-) -> tuple[go.Figure, dict, bool]:
+) -> tuple[go.Figure, dict[str, Any], bool]:
     """
     Build heatmap showing novel clusters in phylogenetic context.
 

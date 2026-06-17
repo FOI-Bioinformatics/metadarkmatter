@@ -8,9 +8,12 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import TracebackType
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import polars as pl
+
+if TYPE_CHECKING:
+    import pyarrow.parquet as pq
 
 OutputFormat = Literal["csv", "parquet"]
 
@@ -38,7 +41,7 @@ class StreamingWriter:
     def __init__(self, path: Path, output_format: OutputFormat = "parquet") -> None:
         self.path = path
         self.output_format = output_format
-        self._pq_writer: object | None = None  # pyarrow.parquet.ParquetWriter
+        self._pq_writer: pq.ParquetWriter | None = None
         self._csv_started = False
 
     def write(self, df: pl.DataFrame) -> None:

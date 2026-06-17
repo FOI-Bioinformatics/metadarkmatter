@@ -7,7 +7,7 @@ inferred from grouped novel reads sharing similar characteristics.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -208,7 +208,7 @@ class NovelCluster(BaseModel):
         taxon = self.closest_known_taxon
         return f"{taxon} (~{self.estimated_ani:.0f}% ANI)"
 
-    def to_summary_dict(self) -> dict:
+    def to_summary_dict(self) -> dict[str, Any]:
         """Convert to dictionary for summary output (excludes read_ids)."""
         result = {
             "cluster_id": self.cluster_id,

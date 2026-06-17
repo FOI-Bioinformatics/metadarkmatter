@@ -102,14 +102,30 @@ re-enabled incrementally.
   `output_format` literal is propagated; and several genuinely-guarded
   `Path | None` / `float | None` values are asserted or coerced. No suppressions.
 
-**Still deferred:** `override`, `attr-defined`, `no-untyped-call`, `type-arg`,
-`prop-decorator`, `no-any-return`, `import-untyped`, `no-untyped-def`, `misc`,
-`str-bytes-safe` (largely untyped third-party libraries — BioPython, Plotly —
-and broad strict checks with lower bug-catching value).
+- `attr-defined`, `no-untyped-call`, `type-arg`, `no-any-return`,
+  `import-untyped`, `no-untyped-def`, `misc`, `str-bytes-safe` (101 errors).
+  Fixes: BioPython and pyarrow are configured as untyped
+  (`follow_imports = "skip"`) so their attribute access / calls resolve to
+  `Any`; `yaml`/`pandas` added to `ignore_missing_imports`; bare generics
+  parametrised (`dict[str, Any]`, `re.Pattern[str]`, `Iterator[Any]`, ...);
+  polars / plotly returns coerced or cast to their real types; the polars
+  when/then builder typed `Any`; a handful of genuinely-guarded values
+  asserted. No blanket suppressions.
 
-The enforced set (`call-arg`, `return-value`, `call-overload`,
-`import-not-found`, `unused-ignore`, `operator`, `dict-item`, `arg-type`,
-`assignment`) is what caught the `mdm map` bug.
+**Still deferred (won't-fix, by design — not debt):** only two codes remain
+disabled, both flagging idioms mypy cannot model rather than bugs:
+
+- `prop-decorator` — pydantic v2's `@computed_field` on top of `@property`
+  (17 sites); a mypy core limitation, analogous to ignoring `B008` for Typer.
+- `override` — the `external/*` tool wrappers deliberately give each tool a
+  specific `build_command(...)` signature over the base's permissive
+  `(**kwargs)` placeholder that the polymorphic `run()` calls.
+
+Everything else under `strict = true` is enforced. The enforced set
+(`call-arg`, `return-value`, `call-overload`, `import-not-found`,
+`unused-ignore`, `operator`, `dict-item`, `arg-type`, `assignment`,
+`attr-defined`, `no-untyped-call`, `type-arg`, `no-any-return`,
+`no-untyped-def`, ...) is what caught the `mdm map` bug.
 
 ## What's still open
 

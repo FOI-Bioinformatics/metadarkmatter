@@ -104,28 +104,30 @@ python_version = "3.11"
 strict = true
 warn_return_any = true
 plugins = ["pydantic.mypy"]
-# Pragmatic blocking gate: strict stays on, with a shrinking set of deferred
-# codes (mostly untyped third-party libs and broad strict checks). Re-enabled so
-# far: operator, dict-item, arg-type, assignment (all fixed at root, not
-# suppressed). The enforced set caught a real prefix_headers kwarg bug in
-# cli/map.py. Remaining codes are tracked as technical debt to ratchet back on;
-# see docs/PRODUCTION_READINESS.md.
-disable_error_code = [
-    "override",
-    "attr-defined",
-    "no-untyped-call",
-    "type-arg",
-    "prop-decorator",
-    "no-any-return",
-    "import-untyped",
-    "no-untyped-def",
-    "misc",
-    "str-bytes-safe",
-]
+# Near-fully-strict gate. Only two error codes remain disabled, both because
+# they flag legitimate idioms mypy cannot model rather than real bugs:
+#   - prop-decorator: pydantic's `@computed_field` placed on top of `@property`
+#     (17 sites) is the documented pydantic v2 idiom; mypy core does not support
+#     decorators stacked on @property.
+#   - override: the external tool wrappers intentionally give each tool a
+#     specific `build_command(...)` signature over the base's permissive
+#     `(**kwargs)` placeholder used by the polymorphic `run()`.
+# Everything else strict is enforced; see docs/PRODUCTION_READINESS.md for the
+# codes that were re-enabled (operator, dict-item, arg-type, assignment, ...).
+disable_error_code = ["prop-decorator", "override"]
 
 [[tool.mypy.overrides]]
-module = ["plotly.*", "polars.*", "Bio.*", "sklearn.*", "scipy.*"]
+module = ["plotly.*", "polars.*", "sklearn.*", "scipy.*", "yaml", "pandas"]
 ignore_missing_imports = true
+
+# BioPython ships a partial py.typed that does not export Bio.Phylo.read/write
+# etc. and leaves Clade/find_clades untyped. Treat it as fully untyped so its
+# attribute access and calls resolve to Any rather than producing attr-defined /
+# no-untyped-call noise in our code.
+[[tool.mypy.overrides]]
+module = ["Bio.*", "pyarrow.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

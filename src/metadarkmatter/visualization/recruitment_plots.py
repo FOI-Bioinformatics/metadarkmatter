@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 import polars as pl
 
@@ -334,7 +334,7 @@ class RecruitmentPlotGenerator:
         self,
         output_path: Path,
         output_format: Literal["html", "png", "json"] = "html",
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """Save plot to file.
 
@@ -385,7 +385,7 @@ def create_recruitment_plot(
     data: pl.DataFrame,
     output_path: Path,
     output_format: Literal["html", "png", "json"] = "html",
-    **kwargs,
+    **kwargs: Any,
 ) -> None:
     """Convenience function to create and save a recruitment plot.
 

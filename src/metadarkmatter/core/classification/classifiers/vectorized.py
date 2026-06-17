@@ -12,7 +12,7 @@ import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import polars as pl
@@ -1144,7 +1144,7 @@ class VectorizedClassifier:
         ).collect_batches(chunk_size=partition_size)
 
         # Track reads across partitions to handle boundary cases
-        pending_reads: dict[str, list] = {}
+        pending_reads: dict[str, list[Any]] = {}
 
         # Incremental writer: each partition is appended exactly once (parquet
         # row group / CSV append), keeping total write cost O(rows) instead of

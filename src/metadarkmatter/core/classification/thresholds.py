@@ -7,6 +7,8 @@ so that sensitivity analysis can re-classify without re-computing metrics.
 
 from __future__ import annotations
 
+from typing import Any
+
 import polars as pl
 
 from metadarkmatter.models.classification import TAXONOMIC_TO_DIVERSITY
@@ -65,9 +67,10 @@ def apply_classification_thresholds(
     has_genus = "genus_uncertainty" in df.columns
     has_scope = "ambiguity_scope" in df.columns
 
-    # Build classification expression. Annotated as Expr because the cascade
-    # reassigns through polars' Then/ChainedThen/Expr (all Expr subclasses).
-    classification: pl.Expr = (
+    # Build classification expression. Typed Any because the polars when/then
+    # fluent builder reassigns through When/Then/ChainedThen/Expr, which expose
+    # different methods at each step and do not share a usable static type.
+    classification: Any = (
         # Rule 0: Identity gap check
         pl.when(
             (pl.col("identity_gap").is_not_null())
@@ -197,7 +200,7 @@ def apply_legacy_thresholds(
     has_scope = "ambiguity_scope" in df.columns
 
     # Build classification expression (same cascade as apply_classification_thresholds)
-    classification: pl.Expr = (
+    classification: Any = (  # polars when/then fluent builder (Then/ChainedThen/Expr)
         # Rule 0: Identity gap check
         pl.when(
             (pl.col("identity_gap").is_not_null())

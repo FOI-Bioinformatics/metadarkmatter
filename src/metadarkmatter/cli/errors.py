@@ -158,5 +158,5 @@ def wrap_app_commands(app: typer.Typer) -> None:
         if callback is None or getattr(callback, "_mdm_error_wrapped", False):
             continue
         wrapped = handle_cli_errors(callback)
-        wrapped._mdm_error_wrapped = True
+        setattr(wrapped, "_mdm_error_wrapped", True)  # noqa: B010 - dynamic marker attr
         command.callback = wrapped

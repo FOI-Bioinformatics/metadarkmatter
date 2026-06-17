@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Generator, Iterator
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, NamedTuple
+from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple
 
 import polars as pl
 
@@ -328,7 +328,7 @@ class StreamingBlastParser:
                     print(f"{result.read_id}: {result.best_hit.genome_name}")
         """
         # Buffer to hold partial read data across chunk boundaries
-        pending_hits: dict[str, list[dict]] = {}
+        pending_hits: dict[str, list[dict[str, Any]]] = {}
 
         # Use Polars scan_csv with collect_batches for streaming
         batches = pl.scan_csv(
@@ -371,7 +371,7 @@ class StreamingBlastParser:
         for read_id, hits in pending_hits.items():
             yield self._create_blast_result(read_id, hits)
 
-    def _create_blast_result(self, read_id: str, hit_rows: list[dict]) -> BlastResult:
+    def _create_blast_result(self, read_id: str, hit_rows: list[dict[str, Any]]) -> BlastResult:
         """
         Create BlastResult from accumulated hit rows.
 

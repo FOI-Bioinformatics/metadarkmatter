@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from metadarkmatter.external.base import ExternalTool, validate_path_safe
+from metadarkmatter.external.base import ExternalTool, ToolResult, validate_path_safe
 
 
 class MakeBlastDb(ExternalTool):
@@ -270,7 +270,7 @@ class BlastN(ExternalTool):
         dry_run: bool = False,
         capture_output: bool = True,
         **kwargs: object,
-    ):
+    ) -> ToolResult:
         """Execute BLASTN with automatic FASTQ to FASTA conversion.
 
         If the query file is FASTQ format, it will be automatically converted

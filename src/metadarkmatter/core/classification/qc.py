@@ -8,7 +8,7 @@ to help users identify problematic inputs and interpret results.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import polars as pl
 
@@ -43,7 +43,7 @@ class QCMetrics:
     # Warnings
     warnings: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to JSON-serializable dictionary."""
         return {
             "total_alignments": self.total_alignments,

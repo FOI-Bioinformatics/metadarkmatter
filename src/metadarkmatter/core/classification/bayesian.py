@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import polars as pl
@@ -197,7 +197,7 @@ def _shannon_entropy(posteriors: np.ndarray) -> np.ndarray:
         Array of shape (n_reads,) with entropy values.
     """
     safe_p = np.where(posteriors > 0, posteriors, 1.0)
-    return -np.sum(posteriors * np.log2(safe_p), axis=1)
+    return cast("np.ndarray", -np.sum(posteriors * np.log2(safe_p), axis=1))
 
 
 def entropy_to_confidence(

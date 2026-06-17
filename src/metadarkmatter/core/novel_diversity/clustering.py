@@ -11,7 +11,7 @@ across equidistant references.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import polars as pl
 
@@ -189,8 +189,8 @@ class NovelDiversityAnalyzer:
 
     def _merge_adjacent_bands(
         self,
-        rows: list[dict],
-    ) -> list[dict]:
+        rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
         """
         Merge clusters that share (representative_genome, taxonomic_call)
         and occupy adjacent novelty bands with overlapping or near-overlapping
@@ -217,7 +217,7 @@ class NovelDiversityAnalyzer:
             key=lambda r: (r["representative_genome"], r["taxonomic_call"], r["novelty_band"]),
         )
 
-        merged: list[dict] = []
+        merged: list[dict[str, Any]] = []
         current = rows_sorted[0].copy()
 
         for nxt in rows_sorted[1:]:
@@ -568,7 +568,7 @@ class NovelDiversityAnalyzer:
         data = [c.to_summary_dict() for c in clusters]
         return pl.DataFrame(data)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """
         Export as JSON-serializable dictionary.
 

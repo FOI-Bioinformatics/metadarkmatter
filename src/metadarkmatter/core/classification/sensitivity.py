@@ -8,6 +8,7 @@ values, helping users assess whether results are robust or threshold-dependent.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 import polars as pl
 
@@ -23,7 +24,7 @@ class SensitivityResult:
     uncertainty_thresholds: list[float] = field(default_factory=list)
     counts: dict[str, list[int]] = field(default_factory=dict)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to JSON-serializable dictionary."""
         return {
             "novelty_thresholds": [round(t, 2) for t in self.novelty_thresholds],

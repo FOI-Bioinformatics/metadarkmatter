@@ -76,7 +76,7 @@ class BlastHit(BaseModel):
     #   GCF_000123456.1_ASM12345v1_genomic -> GCF_000123456.1
     #   NZ_CP012345.1 -> NZ_CP012345.1
     #   contig_1234|genome_name -> genome_name
-    GENOME_PATTERN: ClassVar[re.Pattern] = re.compile(
+    GENOME_PATTERN: ClassVar[re.Pattern[str]] = re.compile(
         r"^(?P<genome>GCF_\d+\.\d+|GCA_\d+\.\d+|NZ_[A-Z]+\d+\.\d+)"
         r"|(?P<alt>[^|]+\|(?P<name>[^|]+))"
     )

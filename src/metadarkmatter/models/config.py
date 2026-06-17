@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Literal, Self, TypedDict
+from typing import Any, Literal, Self, TypedDict, cast
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -702,7 +702,7 @@ class ScoringConfig(BaseModel):
         import yaml
 
         data = _build_yaml_structure(self)
-        return yaml.dump(data, default_flow_style=False, sort_keys=False)
+        return cast(str, yaml.dump(data, default_flow_style=False, sort_keys=False))
 
     model_config = {"frozen": True}
 

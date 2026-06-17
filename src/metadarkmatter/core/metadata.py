@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import cast
 
 import polars as pl
 
@@ -182,7 +183,7 @@ class GenomeMetadata:
         )
         if family_counts.is_empty():
             return None
-        return family_counts["family"][0]
+        return cast("str | None", family_counts["family"][0])
 
     def get_representative(self, accession: str) -> str:
         """Get the species representative accession for a genome.

@@ -350,7 +350,7 @@ class MultiSampleReportGenerator:
 
         return SAMPLE_TABLE_TEMPLATE.format(rows="\n".join(rows))
 
-    def _register_plot(self, plot_id: str, fig) -> None:
+    def _register_plot(self, plot_id: str, fig: Any) -> None:
         """Register a plot for later JS initialization."""
         self._plot_data[plot_id] = fig.to_json()
 

@@ -9,7 +9,7 @@ Identity) distances to identify novel bacterial taxa.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from metadarkmatter.core.classification.bayesian import (
     BayesianClassifier,
@@ -315,7 +315,7 @@ class ANIWeightedClassifier:
     def _calculate_placement_uncertainty(
         self,
         best_genome: str,
-        ambiguous_hits_iter: Iterator,
+        ambiguous_hits_iter: Iterator[Any],
     ) -> tuple[float, int]:
         """
         Calculate placement uncertainty from ANI values to secondary hits.
@@ -376,7 +376,7 @@ class ANIWeightedClassifier:
         self,
         best_genome: str,
         best_bitscore: float,
-        hits_iter: Iterator,
+        hits_iter: Iterator[Any],
     ) -> tuple[float | None, int]:
         """
         Calculate genus-level uncertainty using lower bitscore threshold.

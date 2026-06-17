@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import plotly.graph_objects as go
 
@@ -191,11 +191,11 @@ class BasePlot(ABC):
             HTML string containing the plot div
         """
         fig = self.create_figure()
-        return fig.to_html(
+        return cast(str, fig.to_html(
             full_html=False,
             include_plotlyjs="cdn" if include_plotlyjs else False,
             div_id=self._get_div_id(),
-        )
+        ))
 
     def to_html(self, include_plotlyjs: bool = True) -> str:
         """
@@ -208,15 +208,15 @@ class BasePlot(ABC):
             Complete HTML document string
         """
         fig = self.create_figure()
-        return fig.to_html(
+        return cast(str, fig.to_html(
             full_html=True,
             include_plotlyjs=True if include_plotlyjs else "cdn",
-        )
+        ))
 
     def to_json(self) -> str:
         """Export plot as JSON for data interchange."""
         fig = self.create_figure()
-        return fig.to_json()
+        return cast(str, fig.to_json())
 
     def save(self, path: str, **kwargs: Any) -> None:
         """

@@ -11,7 +11,7 @@ import logging
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Self
+from typing import Any, Self
 
 import polars as pl
 from pydantic import BaseModel, Field, field_validator
@@ -185,7 +185,7 @@ class AccessionList(BaseModel):
             path: Output path for TSV file
             include_metadata: Include additional columns (genome_size, etc.)
         """
-        columns = {
+        columns: dict[str, list[Any]] = {
             "accession": [a.accession for a in self.accessions],
             "gtdb_taxonomy": [a.gtdb_taxonomy for a in self.accessions],
             "species": [a.species for a in self.accessions],
