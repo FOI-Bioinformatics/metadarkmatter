@@ -7,11 +7,73 @@ Provides consistent handling of output formats (CSV/Parquet) across the codebase
 from __future__ import annotations
 
 from pathlib import Path
+from types import TracebackType
 from typing import Literal
 
 import polars as pl
 
 OutputFormat = Literal["csv", "parquet"]
+
+
+class StreamingWriter:
+    """Append DataFrame partitions to a single file in O(total rows).
+
+    Replaces the naive parquet read-concat-rewrite append (which is O(n^2)
+    across K partitions) with an incremental writer:
+
+    - parquet: a ``pyarrow.parquet.ParquetWriter`` opened on the first
+      partition and fed one row group per partition. Each partition is written
+      exactly once; memory stays bounded to a single partition.
+    - csv: native append mode (header on the first partition only).
+
+    Schemas must match across partitions (the classifier emits a stable schema
+    for a given config). Use as a context manager so the parquet file footer is
+    always finalised::
+
+        with StreamingWriter(path, "parquet") as w:
+            for part in partitions:
+                w.write(part)
+    """
+
+    def __init__(self, path: Path, output_format: OutputFormat = "parquet") -> None:
+        self.path = path
+        self.output_format = output_format
+        self._pq_writer: object | None = None  # pyarrow.parquet.ParquetWriter
+        self._csv_started = False
+
+    def write(self, df: pl.DataFrame) -> None:
+        """Append one partition."""
+        if self.output_format == "parquet":
+            import pyarrow.parquet as pq
+
+            table = df.to_arrow()
+            if self._pq_writer is None:
+                self._pq_writer = pq.ParquetWriter(
+                    self.path, table.schema, compression="zstd"
+                )
+            self._pq_writer.write_table(table)
+        elif not self._csv_started:
+            df.write_csv(self.path)
+            self._csv_started = True
+        else:
+            with self.path.open("a") as f:
+                f.write(df.write_csv(include_header=False))
+
+    def close(self) -> None:
+        if self._pq_writer is not None:
+            self._pq_writer.close()
+            self._pq_writer = None
+
+    def __enter__(self) -> StreamingWriter:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.close()
 
 
 def write_dataframe(

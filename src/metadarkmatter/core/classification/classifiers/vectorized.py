@@ -23,7 +23,7 @@ from metadarkmatter.core.classification.bayesian import (
 from metadarkmatter.core.constants import (
     UNKNOWN_GENOME,
 )
-from metadarkmatter.core.io_utils import write_dataframe_append
+from metadarkmatter.core.io_utils import StreamingWriter
 from metadarkmatter.core.parsers import extract_genome_name_expr
 from metadarkmatter.models.classification import TAXONOMIC_TO_DIVERSITY
 from metadarkmatter.models.config import ScoringConfig
@@ -1105,8 +1105,6 @@ class VectorizedClassifier:
         start_time = time.time()
         total_reads = 0
         total_rows = 0
-        first_partition = True
-
         # Use scan_csv with collect_batches for streaming
         # Detect column count from file (12 for legacy, 13 for new format with qlen)
         from metadarkmatter.core.parsers import StreamingBlastParser
@@ -1122,84 +1120,71 @@ class VectorizedClassifier:
         # Track reads across partitions to handle boundary cases
         pending_reads: dict[str, list] = {}
 
-        for partition_df in batches:
-            if partition_df.is_empty():
-                continue
+        # Incremental writer: each partition is appended exactly once (parquet
+        # row group / CSV append), keeping total write cost O(rows) instead of
+        # the O(partitions^2) read-concat-rewrite this previously used.
+        with StreamingWriter(output_path, output_format) as writer:
+            for partition_df in batches:
+                if partition_df.is_empty():
+                    continue
 
-            total_rows += len(partition_df)
+                total_rows += len(partition_df)
 
-            # Add genome_name column
-            partition_df = partition_df.with_columns([extract_genome_name_expr()])
+                # Add genome_name column
+                partition_df = partition_df.with_columns([extract_genome_name_expr()])
 
-            # Get unique reads in this partition
-            partition_reads = set(partition_df["qseqid"].unique().to_list())
+                # Get unique reads in this partition
+                partition_reads = set(partition_df["qseqid"].unique().to_list())
 
-            # Find reads that are complete (not the last read which may span partitions)
-            if partition_df.height > 0:
-                last_read = partition_df["qseqid"][-1]
-                complete_reads = partition_reads - {last_read}
+                # Find reads that are complete (not the last read which may span partitions)
+                if partition_df.height > 0:
+                    last_read = partition_df["qseqid"][-1]
+                    complete_reads = partition_reads - {last_read}
 
-                # Filter to complete reads only
-                if complete_reads:
-                    complete_df = partition_df.filter(pl.col("qseqid").is_in(complete_reads))
+                    # Filter to complete reads only
+                    if complete_reads:
+                        complete_df = partition_df.filter(pl.col("qseqid").is_in(complete_reads))
 
-                    # Add any pending data from previous partition
-                    for read_id in list(pending_reads.keys()):
-                        if read_id in complete_reads:
-                            pending_data = pending_reads.pop(read_id)
-                            pending_df = pl.DataFrame(pending_data)
-                            complete_df = pl.concat([complete_df, pending_df])
+                        # Add any pending data from previous partition
+                        for read_id in list(pending_reads.keys()):
+                            if read_id in complete_reads:
+                                pending_data = pending_reads.pop(read_id)
+                                pending_df = pl.DataFrame(pending_data)
+                                complete_df = pl.concat([complete_df, pending_df])
 
-                    # Classify this partition
-                    if not complete_df.is_empty():
-                        result_df = self.classify_file(complete_df)
-                        total_reads += len(result_df)
+                        # Classify this partition
+                        if not complete_df.is_empty():
+                            result_df = self.classify_file(complete_df)
+                            total_reads += len(result_df)
+                            writer.write(result_df)
 
-                        # Write results
-                        self._write_partition(
-                            result_df, output_path, output_format, first_partition
-                        )
-                        first_partition = False
+                    # Save incomplete reads for next partition
+                    incomplete_df = partition_df.filter(pl.col("qseqid") == last_read)
+                    if not incomplete_df.is_empty():
+                        if last_read not in pending_reads:
+                            pending_reads[last_read] = []
+                        pending_reads[last_read].extend(incomplete_df.to_dicts())
 
-                # Save incomplete reads for next partition
-                incomplete_df = partition_df.filter(pl.col("qseqid") == last_read)
-                if not incomplete_df.is_empty():
-                    if last_read not in pending_reads:
-                        pending_reads[last_read] = []
-                    pending_reads[last_read].extend(incomplete_df.to_dicts())
+                if progress_callback:
+                    elapsed = time.time() - start_time
+                    progress_callback(total_rows, total_reads, elapsed)
 
-            if progress_callback:
-                elapsed = time.time() - start_time
-                progress_callback(total_rows, total_reads, elapsed)
+            # Process any remaining pending reads
+            if pending_reads:
+                remaining_data = []
+                for rows in pending_reads.values():
+                    remaining_data.extend(rows)
 
-        # Process any remaining pending reads
-        if pending_reads:
-            remaining_data = []
-            for rows in pending_reads.values():
-                remaining_data.extend(rows)
-
-            if remaining_data:
-                remaining_df = pl.DataFrame(remaining_data)
-                result_df = self.classify_file(remaining_df)
-                total_reads += len(result_df)
-                self._write_partition(
-                    result_df, output_path, output_format, first_partition
-                )
+                if remaining_data:
+                    remaining_df = pl.DataFrame(remaining_data)
+                    result_df = self.classify_file(remaining_df)
+                    total_reads += len(result_df)
+                    writer.write(result_df)
 
         if progress_callback:
             elapsed = time.time() - start_time
             progress_callback(total_rows, total_reads, elapsed)
 
         return total_reads
-
-    def _write_partition(
-        self,
-        df: pl.DataFrame,
-        output_path: Path,
-        output_format: str,
-        is_first: bool,
-    ) -> None:
-        """Write a partition of results to file."""
-        write_dataframe_append(df, output_path, output_format, is_first)
 
 
