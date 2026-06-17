@@ -19,8 +19,8 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 
-from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.cli.utils import QuietConsole
+from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.external import ToolExecutionError
 
 app = typer.Typer(
@@ -325,29 +325,22 @@ def validate(
 
     out.print("\n[bold blue]Metadarkmatter AAI Matrix Validator[/bold blue]\n")
 
-    # Load ANI matrix
+    # Load ANI matrix. Load errors propagate to the centralized CLI error
+    # handler (cli/errors.py), which renders the typed message + suggestion.
     out.print(f"[bold]Loading ANI matrix:[/bold] {ani}")
-    try:
-        from metadarkmatter.core.ani_placement import ANIMatrix
+    from metadarkmatter.core.ani_placement import ANIMatrix
 
-        ani_matrix = ANIMatrix.from_file(ani)
-        ani_genomes = ani_matrix.genomes
-        out.print(f"  [green]Loaded {len(ani_genomes)} genomes[/green]")
-    except Exception as e:
-        console.print(f"[red]Error loading ANI matrix: {e}[/red]")
-        raise typer.Exit(code=1) from None
+    ani_matrix = ANIMatrix.from_file(ani)
+    ani_genomes = ani_matrix.genomes
+    out.print(f"  [green]Loaded {len(ani_genomes)} genomes[/green]")
 
     # Load AAI matrix
     out.print(f"\n[bold]Loading AAI matrix:[/bold] {aai}")
-    try:
-        from metadarkmatter.core.aai_matrix_builder import AAIMatrix
+    from metadarkmatter.core.aai_matrix_builder import AAIMatrix
 
-        aai_matrix = AAIMatrix.from_file(aai)
-        aai_genomes = aai_matrix.genomes
-        out.print(f"  [green]Loaded {len(aai_genomes)} genomes[/green]")
-    except Exception as e:
-        console.print(f"[red]Error loading AAI matrix: {e}[/red]")
-        raise typer.Exit(code=1) from None
+    aai_matrix = AAIMatrix.from_file(aai)
+    aai_genomes = aai_matrix.genomes
+    out.print(f"  [green]Loaded {len(aai_genomes)} genomes[/green]")
 
     # Calculate coverage
     matched = ani_genomes & aai_genomes

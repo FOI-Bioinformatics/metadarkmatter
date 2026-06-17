@@ -16,8 +16,9 @@ from rich import print as rprint
 from rich.console import Console
 
 from metadarkmatter import __version__
+from metadarkmatter.cli.errors import wrap_app_commands
 from metadarkmatter.core.logging_config import setup_logging
-from metadarkmatter.core.runtime import set_dry_run
+from metadarkmatter.core.runtime import set_debug, set_dry_run
 
 app = typer.Typer(
     name="metadarkmatter",
@@ -70,6 +71,14 @@ def main(
             "environment."
         ),
     ),
+    debug: bool = typer.Option(
+        False,
+        "--debug",
+        help=(
+            "Print full tracebacks on error instead of a friendly message. "
+            "Equivalent to setting MDM_DEBUG=1 in the environment."
+        ),
+    ),
 ) -> None:
     """
     Metadarkmatter: ANI-weighted placement for detecting novel microbial diversity.
@@ -81,10 +90,29 @@ def main(
     setup_logging(log_level, log_format, log_file)
     if dry_run:
         set_dry_run(True)
+    if debug:
+        set_debug(True)
 
 
 # Import subcommands
-from metadarkmatter.cli import aai, ani, blast, blastx, doctor, download, kraken2, mapping, mmseqs2, proteins, report, score, tree, validate, visualize
+from metadarkmatter.cli import (
+    aai,
+    ani,
+    blast,
+    blastx,
+    doctor,
+    download,
+    kraken2,
+    mapping,
+    mmseqs2,
+    proteins,
+    report,
+    run,
+    score,
+    tree,
+    validate,
+    visualize,
+)
 from metadarkmatter.cli import map as map_cmd  # Alias to avoid shadowing builtin
 
 # Register subcommands
@@ -104,6 +132,18 @@ app.add_typer(mapping.app, name="util")
 app.add_typer(tree.app, name="tree")
 app.add_typer(validate.app, name="validate")
 app.add_typer(doctor.app, name="doctor")
+app.add_typer(run.app, name="run")
+
+# Wrap every registered command with the centralized error handler so that
+# MetadarkmatterError subclasses and common library/runtime errors surface as
+# friendly messages (full tracebacks only under --debug). Done once here to
+# avoid per-command decoration churn across the subcommand modules.
+for _sub_app in (
+    aai.app, ani.app, score.app, kraken2.app, blast.app, blastx.app,
+    mmseqs2.app, map_cmd.app, proteins.app, visualize.app, download.app,
+    report.app, mapping.app, tree.app, validate.app, doctor.app, run.app,
+):
+    wrap_app_commands(_sub_app)
 
 
 if __name__ == "__main__":

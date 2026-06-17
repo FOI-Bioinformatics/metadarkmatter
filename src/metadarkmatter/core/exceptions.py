@@ -9,7 +9,14 @@ from __future__ import annotations
 
 
 class MetadarkmatterError(Exception):
-    """Base exception for metadarkmatter errors."""
+    """Base exception for metadarkmatter errors.
+
+    The ``exit_code`` class attribute lets the centralized CLI error
+    handler choose a process exit status per error type (e.g. genuine
+    failures exit 1, advisory warnings exit 0).
+    """
+
+    exit_code: int = 1
 
     def __init__(self, message: str, suggestion: str | None = None):
         self.message = message
@@ -122,7 +129,13 @@ class MalformedBlastFileError(BlastFileError):
 
 
 class GenomeCoverageWarning(MetadarkmatterError):
-    """Warning when genome coverage is low but not critical."""
+    """Warning when genome coverage is low but not critical.
+
+    Advisory only: exits 0 so a low-coverage run is not treated as a
+    hard failure by automation that keys on exit status.
+    """
+
+    exit_code = 0
 
     def __init__(
         self,

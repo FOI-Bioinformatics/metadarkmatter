@@ -40,7 +40,6 @@ from metadarkmatter.core.parsers import StreamingBlastParser, extract_genome_nam
 from metadarkmatter.models.classification import TaxonomicSummary
 from metadarkmatter.models.config import ScoringConfig
 
-
 # Threshold presets for common use-cases.
 # Based on Parks et al. 2018, 2020 and GTDB methodology.
 THRESHOLD_PRESETS: dict[str, ScoringConfig] = {
@@ -746,7 +745,7 @@ def classify(
         "min_query_coverage": (min_query_coverage, 0.0, "--min-query-coverage"),
     }
     if config_file:
-        for key, (val, default, flag_name) in _deprecated_flags.items():
+        for _key, (val, default, flag_name) in _deprecated_flags.items():
             if val != default:
                 out.print(
                     f"[yellow]Warning: {flag_name} is deprecated when using --config. "
@@ -891,14 +890,12 @@ def classify(
         console=console,
     ) as progress:
         progress.add_task(description="Loading ANI matrix...", total=None)
-        try:
-            ani_matrix = ANIMatrix.from_file(
-                ani, symmetry_check="strict" if strict_ani else "warn"
-            )
-            num_genomes = len(ani_matrix.genomes)
-        except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
-            console.print(f"\n[red]Error loading ANI matrix: {e}[/red]")
-            raise typer.Exit(code=1) from None
+        # Load errors (incl. typed ANIMatrixError with its suggestion) propagate
+        # to the centralized CLI error handler in cli/errors.py.
+        ani_matrix = ANIMatrix.from_file(
+            ani, symmetry_check="strict" if strict_ani else "warn"
+        )
+        num_genomes = len(ani_matrix.genomes)
 
     out.print(f"[green]Loaded ANI matrix for {num_genomes} genomes[/green]\n")
 
@@ -940,12 +937,8 @@ def classify(
             console=console,
         ) as progress:
             progress.add_task(description="Loading AAI matrix...", total=None)
-            try:
-                aai_matrix = AAIMatrix.from_file(aai)
-                aai_genomes = len(aai_matrix.genomes)
-            except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
-                console.print(f"\n[red]Error loading AAI matrix: {e}[/red]")
-                raise typer.Exit(code=1) from None
+            aai_matrix = AAIMatrix.from_file(aai)
+            aai_genomes = len(aai_matrix.genomes)
 
         out.print(f"[green]Loaded AAI matrix for {aai_genomes} genomes[/green]")
         out.print(
@@ -962,11 +955,7 @@ def classify(
             console=console,
         ) as progress:
             progress.add_task(description="Loading genome metadata...", total=None)
-            try:
-                genome_metadata = GenomeMetadata.from_file(metadata)
-            except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
-                console.print(f"\n[red]Error loading metadata: {e}[/red]")
-                raise typer.Exit(code=1) from None
+            genome_metadata = GenomeMetadata.from_file(metadata)
 
         out.print(
             f"[green]Loaded metadata for {genome_metadata.genome_count} genomes "
@@ -1081,119 +1070,94 @@ def classify(
     qc_metrics = None
     num_classified = 0
 
-    try:
-        if streaming:
-            # Use streaming mode for very large files (100M+ alignments)
-            # Streaming writes directly to file - no in-memory DataFrame
-            out.print("[cyan]Streaming mode: processing in 5M alignment partitions[/cyan]\n")
+    # Classification errors (Polars, file-system, memory) propagate to the
+    # centralized CLI error handler (cli/errors.py), which renders a friendly
+    # message and shows a full traceback only under --debug.
+    if streaming:
+        # Use streaming mode for very large files (100M+ alignments)
+        # Streaming writes directly to file - no in-memory DataFrame
+        out.print("[cyan]Streaming mode: processing in 5M alignment partitions[/cyan]\n")
 
-            if genome_metadata:
-                out.print(
-                    "[yellow]Note: --metadata is not supported with --streaming mode.[/yellow]\n"
-                    "[yellow]Species columns will not be added to output.[/yellow]\n"
+        if genome_metadata:
+            out.print(
+                "[yellow]Note: --metadata is not supported with --streaming mode.[/yellow]\n"
+                "[yellow]Species columns will not be added to output.[/yellow]\n"
+            )
+
+        if contig_mapping:
+            out.print(
+                "[yellow]Note: --genomes/--id-mapping is not supported with --streaming mode.[/yellow]\n"
+                "[yellow]ID transformation will not be applied. Remove --streaming to enable it.[/yellow]\n"
+            )
+
+        vectorized = VectorizedClassifier(
+            ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config,
+            representative_mapping=representative_mapping,
+        )
+
+        # Rich progress with ETA for streaming
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeElapsedColumn(),
+            TextColumn("•"),
+            TimeRemainingColumn(),
+            console=console,
+            refresh_per_second=2,
+        ) as progress:
+            # Estimate total rows from file size (rough: ~100 bytes per alignment)
+            file_size = alignment.stat().st_size
+            estimated_rows = file_size // 100
+            task = progress.add_task(
+                "Classifying reads (streaming)...",
+                total=estimated_rows,
+            )
+
+            def streaming_progress(rows: int, reads: int, elapsed: float) -> None:
+                """Update progress bar during streaming."""
+                progress.update(task, completed=rows)
+                rate = rows / elapsed if elapsed > 0 else 0
+                progress.update(
+                    task,
+                    description=f"Streaming: {reads:,} reads @ {rate:,.0f} rows/s",
                 )
 
-            if contig_mapping:
-                out.print(
-                    "[yellow]Note: --genomes/--id-mapping is not supported with --streaming mode.[/yellow]\n"
-                    "[yellow]ID transformation will not be applied. Remove --streaming to enable it.[/yellow]\n"
-                )
+            num_classified = vectorized.stream_to_file(
+                blast_path=alignment,
+                output_path=output,
+                output_format=output_format,
+                partition_size=chunk_size,
+                progress_callback=streaming_progress,
+            )
 
+    else:
+        # All non-streaming classification uses VectorizedClassifier
+        qc_metrics = None
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            progress.add_task(description="Classifying reads...", total=None)
             vectorized = VectorizedClassifier(
                 ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config,
                 representative_mapping=representative_mapping,
             )
-
-            # Rich progress with ETA for streaming
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TaskProgressColumn(),
-                TimeElapsedColumn(),
-                TextColumn("•"),
-                TimeRemainingColumn(),
-                console=console,
-                refresh_per_second=2,
-            ) as progress:
-                # Estimate total rows from file size (rough: ~100 bytes per alignment)
-                file_size = alignment.stat().st_size
-                estimated_rows = file_size // 100
-                task = progress.add_task(
-                    "Classifying reads (streaming)...",
-                    total=estimated_rows,
-                )
-
-                def streaming_progress(rows: int, reads: int, elapsed: float) -> None:
-                    """Update progress bar during streaming."""
-                    progress.update(task, completed=rows)
-                    rate = rows / elapsed if elapsed > 0 else 0
-                    progress.update(
-                        task,
-                        description=f"Streaming: {reads:,} reads @ {rate:,.0f} rows/s",
-                    )
-
-                num_classified = vectorized.stream_to_file(
-                    blast_path=alignment,
-                    output_path=output,
-                    output_format=output_format,
-                    partition_size=chunk_size,
-                    progress_callback=streaming_progress,
-                )
-
-        else:
-            # All non-streaming classification uses VectorizedClassifier
-            qc_metrics = None
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[progress.description]{task.description}"),
-                console=console,
-            ) as progress:
-                progress.add_task(description="Classifying reads...", total=None)
-                vectorized = VectorizedClassifier(
-                    ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config,
-                    representative_mapping=representative_mapping,
-                )
-                result = vectorized.classify_file(
-                    alignment,
-                    id_mapping=contig_mapping,
-                    compute_qc=qc_output is not None,
-                )
-                if qc_output is not None:
-                    classification_df, qc_metrics = result
-                else:
-                    classification_df = result
-
-            num_classified = _finalize_classification(
-                classification_df, genome_metadata, output, output_format
+            result = vectorized.classify_file(
+                alignment,
+                id_mapping=contig_mapping,
+                compute_qc=qc_output is not None,
             )
+            if qc_output is not None:
+                classification_df, qc_metrics = result
+            else:
+                classification_df = result
 
-    except pl.exceptions.PolarsError as e:
-        console.print(f"\n[red]Data processing error: {e}[/red]")
-        console.print(
-            "[dim]This may indicate malformed BLAST data or incompatible file format.[/dim]"
+        num_classified = _finalize_classification(
+            classification_df, genome_metadata, output, output_format
         )
-        if verbose:
-            console.print_exception()
-        raise typer.Exit(code=1) from None
-    except FileNotFoundError as e:
-        console.print(f"\n[red]File not found: {e}[/red]")
-        raise typer.Exit(code=1) from None
-    except PermissionError as e:
-        console.print(f"\n[red]Permission denied: {e}[/red]")
-        console.print("[dim]Check file permissions and try again.[/dim]")
-        raise typer.Exit(code=1) from None
-    except MemoryError:
-        console.print(
-            "\n[red]Out of memory during classification.[/red]\n"
-            "[dim]Try using --streaming mode for large files, or reduce chunk size.[/dim]"
-        )
-        raise typer.Exit(code=1) from None
-    except Exception as e:
-        console.print(f"\n[red]Unexpected error during classification: {e}[/red]")
-        if verbose:
-            console.print_exception()
-        raise typer.Exit(code=1) from None
 
     out.print(f"[green]Classified {num_classified:,} reads[/green]\n")
 
@@ -1243,6 +1207,12 @@ def classify(
     out.print(f"\n[bold green]Results written to:[/bold green] {output}")
     if summary:
         out.print(f"[bold green]Summary written to:[/bold green] {summary}")
+
+    # Point the user at the natural next step.
+    out.print(
+        f"\n[dim]Next: generate an interactive report with[/dim]\n"
+        f"  mdm report generate --classifications {output} --ani {ani} --output report.html"
+    )
     out.print()
 
 
