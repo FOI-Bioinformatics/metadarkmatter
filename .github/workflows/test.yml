@@ -99,6 +99,10 @@ jobs:
         uses: mamba-org/setup-micromamba@v2
         with:
           environment-name: mdm-tools
+          condarc: |
+            channels:
+              - conda-forge
+              - bioconda
           create-args: >-
             python=3.12
             blast>=2.16

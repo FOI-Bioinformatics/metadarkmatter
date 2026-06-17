@@ -7,12 +7,22 @@ for unit and integration testing.
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
 
 import polars as pl
 import pytest
+
+# Make Typer/Rich help output deterministic for CLI tests. Some CI runners set
+# FORCE_COLOR=1, which injects ANSI escape codes into --help output (splitting
+# e.g. "--genomes" across colour spans) and breaks plain substring assertions.
+# Force plain, wide rendering before any CliRunner invocation so the suite
+# behaves identically locally, in CI, and under pre-commit.
+os.environ.pop("FORCE_COLOR", None)
+os.environ["NO_COLOR"] = "1"
+os.environ.setdefault("COLUMNS", "200")
 
 # =============================================================================
 # BLAST Test Data Fixtures
