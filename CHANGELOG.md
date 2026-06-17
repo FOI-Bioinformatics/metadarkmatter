@@ -44,6 +44,16 @@ Production-readiness and UX hardening pass.
 
 ### Fixed
 
+- Streaming classification (`score classify --streaming` / `stream_to_file`)
+  silently bypassed the alignment-quality filters (`min_alignment_length`,
+  `min_alignment_fraction`, `max_evalue`, `min_percent_identity`,
+  `min_bitscore`, `min_read_length`, `min_query_coverage`) that the in-memory
+  path applied, so it classified more reads than the default path for the same
+  input. The filters are now shared by both paths; a regression test asserts
+  identical read sets.
+- Streaming parquet output is now written incrementally (one row group per
+  partition) instead of re-reading and rewriting the whole file per partition,
+  cutting streaming time from O(partitions^2) to O(rows).
 - `metadarkmatter map reads` against a genome directory crashed with a
   `TypeError` (passed a non-existent `prefix_headers` argument to
   `concatenate_genomes`). Surfaced by enabling blocking mypy.

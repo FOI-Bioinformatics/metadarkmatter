@@ -280,6 +280,69 @@ class VectorizedClassifier:
                 avail_gb,
             )
 
+    def _apply_alignment_filters(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Apply GTDB-compatible alignment-quality filters to raw BLAST rows.
+
+        Shared by the in-memory (file) and streaming (DataFrame partition)
+        paths so both classify an identical set of reads. Operates on raw
+        BLAST columns (length, qstart/qend, evalue, pident, bitscore, qlen);
+        does not require the genome_name column.
+        """
+        cfg = self.config
+
+        if cfg.min_alignment_length > 0:
+            df = df.filter(pl.col("length") >= cfg.min_alignment_length)
+
+        # Note: alignment fraction filter requires read length which isn't
+        # in standard BLAST output. Use qend - qstart + 1 as proxy.
+        if cfg.min_alignment_fraction > 0:
+            df = df.with_columns([
+                ((pl.col("qend") - pl.col("qstart") + 1) / pl.col("qend")).alias("_approx_af")
+            ]).filter(
+                pl.col("_approx_af") >= cfg.min_alignment_fraction
+            ).drop("_approx_af")
+
+        # E-value filter
+        if cfg.max_evalue > 0:
+            df = df.filter(pl.col("evalue") <= cfg.max_evalue)
+
+        # Percent identity filter
+        if cfg.min_percent_identity > 0:
+            df = df.filter(pl.col("pident") >= cfg.min_percent_identity)
+
+        # Bitscore filter
+        if cfg.min_bitscore > 0:
+            df = df.filter(pl.col("bitscore") >= cfg.min_bitscore)
+
+        # Read length and query coverage filters
+        if cfg.min_read_length > 0 or cfg.min_query_coverage > 0:
+            if "qlen" in df.columns:
+                df = df.with_columns(
+                    pl.when(pl.col("qlen").is_not_null())
+                    .then(pl.col("qlen"))
+                    .otherwise(pl.col("qend"))
+                    .alias("_read_length")
+                )
+            else:
+                df = df.with_columns(pl.col("qend").alias("_read_length"))
+
+            if cfg.min_read_length > 0:
+                df = df.filter(pl.col("_read_length") >= cfg.min_read_length)
+
+            if cfg.min_query_coverage > 0:
+                df = df.with_columns(
+                    ((pl.col("qend") - pl.col("qstart") + 1)
+                     / pl.col("_read_length") * 100.0)
+                    .clip(0.0, 100.0)
+                    .alias("_query_cov")
+                ).filter(
+                    pl.col("_query_cov") >= cfg.min_query_coverage
+                ).drop("_query_cov")
+
+            df = df.drop("_read_length")
+
+        return df
+
     def classify_file(
         self,
         blast_input: Path | pl.DataFrame,
@@ -305,10 +368,13 @@ class VectorizedClassifier:
             tuple if compute_qc is True.
         """
         if isinstance(blast_input, pl.DataFrame):
-            # DataFrame passed directly (e.g. from stream_to_file partitions).
-            # Assumes genome_name column and alignment filters already applied.
+            # DataFrame passed directly (e.g. from stream_to_file partitions),
+            # with the genome_name column already added. Apply the same
+            # alignment-quality filters as the file path so streaming and
+            # in-memory modes classify an identical set of reads.
             df = blast_input
             raw_df = df if compute_qc else None
+            df = self._apply_alignment_filters(df)
         else:
             self._check_memory(blast_input)
 
@@ -330,58 +396,7 @@ class VectorizedClassifier:
             raw_df = df if compute_qc else None
 
             # Apply alignment quality filters (GTDB-compatible)
-            if self.config.min_alignment_length > 0:
-                df = df.filter(pl.col("length") >= self.config.min_alignment_length)
-
-            # Note: alignment fraction filter requires read length which isn't
-            # in standard BLAST output. Use qend - qstart + 1 as proxy.
-            if self.config.min_alignment_fraction > 0:
-                df = df.with_columns([
-                    ((pl.col("qend") - pl.col("qstart") + 1) / pl.col("qend")).alias("_approx_af")
-                ]).filter(
-                    pl.col("_approx_af") >= self.config.min_alignment_fraction
-                ).drop("_approx_af")
-
-            # E-value filter
-            if self.config.max_evalue > 0:
-                df = df.filter(pl.col("evalue") <= self.config.max_evalue)
-
-            # Percent identity filter
-            if self.config.min_percent_identity > 0:
-                df = df.filter(pl.col("pident") >= self.config.min_percent_identity)
-
-            # Bitscore filter
-            if self.config.min_bitscore > 0:
-                df = df.filter(pl.col("bitscore") >= self.config.min_bitscore)
-
-            # Read length and query coverage filters
-            if self.config.min_read_length > 0 or self.config.min_query_coverage > 0:
-                if "qlen" in df.columns:
-                    df = df.with_columns(
-                        pl.when(pl.col("qlen").is_not_null())
-                        .then(pl.col("qlen"))
-                        .otherwise(pl.col("qend"))
-                        .alias("_read_length")
-                    )
-                else:
-                    df = df.with_columns(
-                        pl.col("qend").alias("_read_length")
-                    )
-
-                if self.config.min_read_length > 0:
-                    df = df.filter(pl.col("_read_length") >= self.config.min_read_length)
-
-                if self.config.min_query_coverage > 0:
-                    df = df.with_columns(
-                        ((pl.col("qend") - pl.col("qstart") + 1)
-                         / pl.col("_read_length") * 100.0)
-                        .clip(0.0, 100.0)
-                        .alias("_query_cov")
-                    ).filter(
-                        pl.col("_query_cov") >= self.config.min_query_coverage
-                    ).drop("_query_cov")
-
-                df = df.drop("_read_length")
+            df = self._apply_alignment_filters(df)
 
             # Add genome_name column (extracts accession from standardized sseqid)
             df = df.with_columns([extract_genome_name_expr()])
