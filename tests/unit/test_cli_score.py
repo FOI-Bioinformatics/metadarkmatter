@@ -406,9 +406,7 @@ import polars as pl
 from metadarkmatter.cli.score import (
     THRESHOLD_PRESETS,
     _display_summary_table,
-    _finalize_classification,
     _generate_summary,
-    validate_ani_genome_coverage,
     validate_output_format_extension,
 )
 from metadarkmatter.models.classification import TaxonomicSummary
@@ -463,71 +461,6 @@ class TestValidateOutputFormatExtension:
         output = temp_dir / "results.parquet"
         corrected = validate_output_format_extension(output, "parquet", console)
         assert corrected == output
-
-
-class TestFinalizeClassification:
-    """Tests for _finalize_classification helper."""
-
-    def test_returns_zero_for_none_df(self, temp_dir):
-        """Should return 0 when classification_df is None."""
-        output = temp_dir / "output.csv"
-        result = _finalize_classification(None, None, output, "csv")
-        assert result == 0
-
-    def test_writes_csv_output(self, temp_dir):
-        """Should write DataFrame to CSV and return count."""
-        df = pl.DataFrame({
-            "read_id": ["r1", "r2", "r3"],
-            "best_match_genome": ["g1", "g2", "g3"],
-            "novelty_index": [1.0, 5.0, 20.0],
-            "placement_uncertainty": [0.5, 0.3, 1.0],
-            "taxonomic_call": ["Known Species", "Novel Species", "Novel Genus"],
-        })
-        output = temp_dir / "output.csv"
-        result = _finalize_classification(df, None, output, "csv")
-        assert result == 3
-        assert output.exists()
-
-    def test_writes_parquet_output(self, temp_dir):
-        """Should write DataFrame to Parquet."""
-        df = pl.DataFrame({
-            "read_id": ["r1"],
-            "best_match_genome": ["g1"],
-            "novelty_index": [1.0],
-            "placement_uncertainty": [0.5],
-            "taxonomic_call": ["Known Species"],
-        })
-        output = temp_dir / "output.parquet"
-        result = _finalize_classification(df, None, output, "parquet")
-        assert result == 1
-        assert output.exists()
-
-    def test_joins_metadata(self, temp_dir):
-        """Should join genome metadata when provided."""
-        df = pl.DataFrame({
-            "read_id": ["r1"],
-            "best_match_genome": ["g1"],
-            "novelty_index": [1.0],
-            "placement_uncertainty": [0.5],
-            "taxonomic_call": ["Known Species"],
-        })
-        mock_metadata = MagicMock()
-        mock_metadata.join_classifications.return_value = df
-        output = temp_dir / "output.csv"
-
-        _finalize_classification(df, mock_metadata, output, "csv")
-        mock_metadata.join_classifications.assert_called_once_with(df)
-
-    def test_empty_dataframe_not_written(self, temp_dir):
-        """Should not write file when DataFrame is empty."""
-        df = pl.DataFrame({
-            "read_id": [],
-            "best_match_genome": [],
-        })
-        output = temp_dir / "output.csv"
-        result = _finalize_classification(df, None, output, "csv")
-        assert result == 0
-        assert not output.exists()
 
 
 class TestGenerateSummary:
@@ -1177,7 +1110,7 @@ class TestClassifyErrorHandling:
         output = temp_dir / "output.csv"
 
         with patch(
-            "metadarkmatter.cli.score.VectorizedClassifier"
+            "metadarkmatter.core.classification.runner.VectorizedClassifier"
         ) as mock_cls:
             mock_instance = MagicMock()
             mock_instance.classify_file.side_effect = pl.exceptions.PolarsError("test error")
@@ -1200,7 +1133,7 @@ class TestClassifyErrorHandling:
         output = temp_dir / "output.csv"
 
         with patch(
-            "metadarkmatter.cli.score.VectorizedClassifier"
+            "metadarkmatter.core.classification.runner.VectorizedClassifier"
         ) as mock_cls:
             mock_instance = MagicMock()
             mock_instance.classify_file.side_effect = MemoryError()
@@ -1224,7 +1157,7 @@ class TestClassifyErrorHandling:
         output = temp_dir / "output.csv"
 
         with patch(
-            "metadarkmatter.cli.score.VectorizedClassifier"
+            "metadarkmatter.core.classification.runner.VectorizedClassifier"
         ) as mock_cls:
             mock_instance = MagicMock()
             mock_instance.classify_file.side_effect = RuntimeError("unexpected error")
@@ -1247,7 +1180,7 @@ class TestClassifyErrorHandling:
         output = temp_dir / "output.csv"
 
         with patch(
-            "metadarkmatter.cli.score.VectorizedClassifier"
+            "metadarkmatter.core.classification.runner.VectorizedClassifier"
         ) as mock_cls:
             mock_instance = MagicMock()
             mock_instance.classify_file.side_effect = FileNotFoundError("missing file")
@@ -1270,7 +1203,7 @@ class TestClassifyErrorHandling:
         output = temp_dir / "output.csv"
 
         with patch(
-            "metadarkmatter.cli.score.VectorizedClassifier"
+            "metadarkmatter.core.classification.runner.VectorizedClassifier"
         ) as mock_cls:
             mock_instance = MagicMock()
             mock_instance.classify_file.side_effect = PermissionError("denied")
@@ -1761,93 +1694,6 @@ class TestExtractNovelAdditional:
         assert result.exit_code == 0
 
 
-class TestValidateAniGenomeCoverage:
-    """Tests for validate_ani_genome_coverage function."""
-
-    def test_full_coverage(self, temp_dir, small_ani_dict):
-        """All genomes in BLAST should be in ANI matrix."""
-        from metadarkmatter.core.ani_placement import ANIMatrix
-
-        ani_matrix = ANIMatrix(small_ani_dict)
-
-        # Create BLAST with matching genomes using pipe-separated format
-        # (expected by extract_genome_name_expr: "{accession}|{contig_id}")
-        blast_rows = []
-        for genome in small_ani_dict:
-            blast_rows.append({
-                "qseqid": "read_001",
-                "sseqid": f"{genome}|contig_1",
-                "pident": 98.0,
-                "length": 150,
-                "mismatch": 2,
-                "gapopen": 0,
-                "qstart": 1,
-                "qend": 150,
-                "sstart": 1000,
-                "send": 1150,
-                "evalue": 1e-50,
-                "bitscore": 250.0,
-            })
-        blast_df = pl.DataFrame(blast_rows)
-        blast_path = temp_dir / "test.blast.tsv"
-        blast_df.write_csv(blast_path, separator="\t", include_header=False)
-
-        matched, total, pct, missing = validate_ani_genome_coverage(
-            blast_path, ani_matrix
-        )
-        assert matched == total
-        assert pct == 100.0
-        assert len(missing) == 0
-
-    def test_partial_coverage(self, temp_dir, small_ani_dict):
-        """Some genomes missing from ANI should be detected."""
-        from metadarkmatter.core.ani_placement import ANIMatrix
-
-        ani_matrix = ANIMatrix(small_ani_dict)
-
-        # Create BLAST with one extra genome not in ANI (pipe-separated format)
-        blast_rows = [
-            {
-                "qseqid": "read_001",
-                "sseqid": "GCF_000123456.1|contig_1",
-                "pident": 98.0,
-                "length": 150,
-                "mismatch": 2,
-                "gapopen": 0,
-                "qstart": 1,
-                "qend": 150,
-                "sstart": 1000,
-                "send": 1150,
-                "evalue": 1e-50,
-                "bitscore": 250.0,
-            },
-            {
-                "qseqid": "read_002",
-                "sseqid": "GCF_999999999.1|contig_1",
-                "pident": 95.0,
-                "length": 150,
-                "mismatch": 7,
-                "gapopen": 0,
-                "qstart": 1,
-                "qend": 150,
-                "sstart": 1000,
-                "send": 1150,
-                "evalue": 1e-40,
-                "bitscore": 200.0,
-            },
-        ]
-        blast_df = pl.DataFrame(blast_rows)
-        blast_path = temp_dir / "test.blast.tsv"
-        blast_df.write_csv(blast_path, separator="\t", include_header=False)
-
-        matched, total, pct, missing = validate_ani_genome_coverage(
-            blast_path, ani_matrix
-        )
-        assert matched < total
-        assert pct < 100.0
-        assert "GCF_999999999.1" in missing
-
-
 class TestClassifyWithAdaptiveThresholds:
     """Tests for --adaptive-thresholds flag."""
 
@@ -1910,7 +1756,7 @@ class TestClassifyWithAdaptiveThresholds:
         output = temp_dir / "output.csv"
 
         with patch(
-            "metadarkmatter.cli.score.VectorizedClassifier"
+            "metadarkmatter.core.classification.runner.VectorizedClassifier"
         ):
             # Mock the adaptive import to raise ImportError
             import builtins

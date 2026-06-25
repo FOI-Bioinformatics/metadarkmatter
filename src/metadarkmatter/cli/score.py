@@ -29,16 +29,17 @@ from rich.progress import (
 from rich.table import Table
 
 from metadarkmatter.cli.utils import QuietConsole, extract_sample_name
-from metadarkmatter.core.aai_matrix_builder import AAIMatrix
 from metadarkmatter.core.ani_placement import (
     ANIMatrix,
     VectorizedClassifier,
 )
+from metadarkmatter.core.classification.runner import (
+    ClassificationRequest,
+    run_classification,
+    validate_ani_genome_coverage,
+)
 from metadarkmatter.core.exceptions import ConfigurationError
-from metadarkmatter.core.id_mapping import ContigIdMapping
 from metadarkmatter.core.io_utils import OutputFormat, read_dataframe, write_dataframe
-from metadarkmatter.core.metadata import GenomeMetadata
-from metadarkmatter.core.parsers import StreamingBlastParser, extract_genome_name_expr
 from metadarkmatter.models.classification import TaxonomicSummary
 from metadarkmatter.models.config import ScoringConfig
 
@@ -109,69 +110,6 @@ THRESHOLD_PRESETS: dict[str, ScoringConfig] = {
 }
 
 
-def validate_ani_genome_coverage(
-    blast_path: Path,
-    ani_matrix: ANIMatrix,
-    sample_rows: int = 10000,
-    representative_mapping: dict[str, str] | None = None,
-) -> tuple[int, int, float, set[str]]:
-    """
-    Early validation of ANI matrix coverage against BLAST file genomes.
-
-    Samples the BLAST file and checks how many unique genomes are present
-    in the ANI matrix. When representative_mapping is provided, maps BLAST
-    genomes to their representatives before checking coverage.
-
-    Args:
-        blast_path: Path to BLAST file
-        ani_matrix: Loaded ANI matrix
-        sample_rows: Number of rows to sample (default 10000)
-        representative_mapping: Optional mapping from genome accession to
-            representative accession. When provided, checks representative
-            coverage rather than raw genome coverage.
-
-    Returns:
-        Tuple of (matched_count, total_genomes, coverage_pct, missing_genomes)
-    """
-    # Read sample of BLAST file (auto-detect column count for backward compatibility)
-    parser = StreamingBlastParser(blast_path)
-    sample_df = pl.scan_csv(
-        blast_path,
-        separator="\t",
-        has_header=False,
-        new_columns=parser.column_names,
-        n_rows=sample_rows,
-    ).with_columns(
-        extract_genome_name_expr()
-    ).collect()
-
-    # Get unique genome names from BLAST sample
-    blast_genomes = set(sample_df["genome_name"].unique().to_list())
-    blast_genomes.discard("unknown")
-
-    # Get ANI matrix genomes
-    ani_genomes = set(ani_matrix.genomes)
-
-    # When representative mapping is active, only check family genomes
-    # (those present in the mapping). Non-family genomes from broad databases
-    # are excluded to avoid inflating the denominator.
-    if representative_mapping:
-        family_blast_genomes = {g for g in blast_genomes if g in representative_mapping}
-        check_genomes = {representative_mapping[g] for g in family_blast_genomes}
-    else:
-        check_genomes = blast_genomes
-
-    # Calculate coverage
-    matched = check_genomes & ani_genomes
-    missing = check_genomes - ani_genomes
-
-    total_genomes = len(check_genomes)
-    matched_count = len(matched)
-    coverage_pct = (100.0 * matched_count / total_genomes) if total_genomes > 0 else 0.0
-
-    return matched_count, total_genomes, coverage_pct, missing
-
-
 def validate_output_format_extension(
     output: Path,
     output_format: str,
@@ -212,38 +150,6 @@ def validate_output_format_extension(
         return corrected
 
     return output
-
-
-def _finalize_classification(
-    classification_df: pl.DataFrame | None,
-    genome_metadata: Any,
-    output: Path,
-    output_format: OutputFormat,
-) -> int:
-    """
-    Finalize classification: join metadata and write output.
-
-    Args:
-        classification_df: Classification results DataFrame.
-        genome_metadata: Optional GenomeMetadata for species/genus joining.
-        output: Output file path.
-        output_format: Output format ('csv' or 'parquet').
-
-    Returns:
-        Number of classified reads.
-    """
-    if classification_df is None:
-        return 0
-
-    # Join species/genus metadata if provided
-    if genome_metadata is not None:
-        classification_df = genome_metadata.join_classifications(classification_df)
-
-    num_classified = len(classification_df)
-    if num_classified > 0:
-        write_dataframe(classification_df, output, output_format)
-
-    return num_classified
 
 
 app = typer.Typer(
@@ -846,7 +752,7 @@ def classify(
 
         # Show genome coverage
         try:
-            matched, total, coverage_pct, missing = validate_ani_genome_coverage(
+            matched, total, coverage_pct, _missing = validate_ani_genome_coverage(
                 alignment, ani_matrix
             )
             console.print("\n[bold]Genome Coverage:[/bold]")
@@ -935,238 +841,33 @@ def classify(
     for _msg in config_messages:
         out.print(_msg)
 
-    # Log active filter settings
-    active_filters = []
-    if config.min_alignment_length > 0:
-        active_filters.append(f"length >= {config.min_alignment_length}bp")
-    if config.min_alignment_fraction > 0:
-        active_filters.append(f"fraction >= {config.min_alignment_fraction:.0%}")
-    if config.max_evalue > 0:
-        active_filters.append(f"evalue <= {config.max_evalue:.0e}")
-    if config.min_percent_identity > 0:
-        active_filters.append(f"identity >= {config.min_percent_identity:.1f}%")
-    if config.min_bitscore > 0:
-        active_filters.append(f"bitscore >= {config.min_bitscore:.1f}")
-    if config.min_read_length > 0:
-        active_filters.append(f"read length >= {config.min_read_length}bp")
-    if config.min_query_coverage > 0:
-        active_filters.append(f"query coverage >= {config.min_query_coverage:.1f}%")
-    if active_filters:
-        out.print(f"[dim]Alignment filters: {', '.join(active_filters)}[/dim]")
+    # Build the request and execute the load -> classify -> finalize pipeline.
+    # Status text is emitted via out.print; the streaming progress bar is owned
+    # here and kept alive across the call (run_classification drives it through
+    # the progress_callback). Input-validation and classification errors
+    # (Polars, file-system, memory) propagate to the centralized CLI error
+    # handler (cli/errors.py), which renders a friendly message and shows a full
+    # traceback only under --debug.
+    request = ClassificationRequest(
+        alignment=alignment,
+        ani=ani,
+        output=output,
+        config=config,
+        output_format=output_format,
+        aai=aai,
+        metadata=metadata,
+        genomes=genomes,
+        id_mapping=id_mapping,
+        streaming=streaming,
+        chunk_size=chunk_size,
+        strict_ani=strict_ani,
+        adaptive_thresholds=adaptive_thresholds,
+        compute_qc=qc_output is not None,
+    )
 
-    # Load ANI matrix
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        progress.add_task(description="Loading ANI matrix...", total=None)
-        # Load errors (incl. typed ANIMatrixError with its suggestion) propagate
-        # to the centralized CLI error handler in cli/errors.py.
-        ani_matrix = ANIMatrix.from_file(
-            ani, symmetry_check="strict" if strict_ani else "warn"
-        )
-        num_genomes = len(ani_matrix.genomes)
-
-    out.print(f"[green]Loaded ANI matrix for {num_genomes} genomes[/green]\n")
-
-    # Adaptive threshold detection (override config if enabled)
-    if adaptive_thresholds:
-        try:
-            from metadarkmatter.core.classification.adaptive import (
-                build_adaptive_config,
-                detect_species_boundary,
-            )
-
-            adaptive = detect_species_boundary(ani_matrix)
-            if adaptive.method == "gmm":
-                config = build_adaptive_config(config, adaptive)
-                out.print(
-                    f"[green]Adaptive threshold:[/green] species boundary at "
-                    f"{adaptive.species_boundary:.1f}% ANI "
-                    f"(novelty_known_max={adaptive.novelty_known_max:.1f}%, "
-                    f"confidence={adaptive.confidence:.2f})\n"
-                )
-            else:
-                out.print(
-                    f"[yellow]Adaptive threshold detection fell back to default "
-                    f"({adaptive.species_boundary:.1f}% ANI)[/yellow]\n"
-                )
-        except ImportError:
-            console.print(
-                "[red]scikit-learn required for adaptive thresholds. "
-                "Install with: pip install metadarkmatter[adaptive][/red]"
-            )
-            raise typer.Exit(code=1) from None
-
-    # Load AAI matrix if provided (for genus-level classification)
-    aai_matrix: AAIMatrix | None = None
-    if aai:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            progress.add_task(description="Loading AAI matrix...", total=None)
-            aai_matrix = AAIMatrix.from_file(aai)
-            aai_genomes = len(aai_matrix.genomes)
-
-        out.print(f"[green]Loaded AAI matrix for {aai_genomes} genomes[/green]")
-        out.print(
-            "[dim]AAI will be used for genus-level classification (20-25% novelty)[/dim]\n"
-        )
-
-    # Load genome metadata if provided
-    genome_metadata: GenomeMetadata | None = None
-    representative_mapping: dict[str, str] | None = None
-    if metadata:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            progress.add_task(description="Loading genome metadata...", total=None)
-            genome_metadata = GenomeMetadata.from_file(metadata)
-
-        out.print(
-            f"[green]Loaded metadata for {genome_metadata.genome_count} genomes "
-            f"({genome_metadata.species_count} species)[/green]"
-        )
-
-        # Build representative mapping if metadata has representative column
-        if genome_metadata.has_representatives:
-            representative_mapping = genome_metadata.build_representative_mapping()
-            out.print(
-                f"[dim]Representative mapping: {genome_metadata.genome_count} genomes -> "
-                f"{genome_metadata.representative_count} representatives[/dim]"
-            )
-        out.print()
-
-    # Infer target family from metadata if not explicitly provided
-    if target_family is None and genome_metadata is not None:
-        inferred = genome_metadata.infer_target_family()
-        if inferred:
-            target_family = inferred
-            out.print(f"[dim]Inferred target family from metadata: {target_family}[/dim]")
-            # Update config with inferred family
-            config = config.model_copy(update={"target_family": target_family})
-
-    if config.target_family:
-        out.print(
-            f"[cyan]Family validation: target={config.target_family}, "
-            f"threshold={config.family_ratio_threshold}[/cyan]\n"
-        )
-
-    # Load or generate ID mapping for external BLAST results
-    contig_mapping: ContigIdMapping | None = None
-    if genomes and id_mapping:
-        console.print(
-            "[red]Error: Cannot specify both --genomes and --id-mapping. "
-            "Use one or the other.[/red]"
-        )
-        raise typer.Exit(code=1) from None
-
-    if genomes:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            progress.add_task(description="Generating ID mapping from genomes...", total=None)
-            try:
-                contig_mapping = ContigIdMapping.from_genome_dir(genomes)
-            except (FileNotFoundError, ValueError, OSError) as e:
-                console.print(f"\n[red]Error generating ID mapping: {e}[/red]")
-                raise typer.Exit(code=1) from None
-
-        out.print(
-            f"[green]Generated ID mapping for {len(contig_mapping):,} contigs[/green]\n"
-        )
-
-    elif id_mapping:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            progress.add_task(description="Loading ID mapping...", total=None)
-            try:
-                contig_mapping = ContigIdMapping.from_tsv(id_mapping)
-            except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
-                console.print(f"\n[red]Error loading ID mapping: {e}[/red]")
-                raise typer.Exit(code=1) from None
-
-        out.print(f"[green]Loaded ID mapping with {len(contig_mapping):,} entries[/green]\n")
-
-    # Early validation: check genome coverage between alignment file and ANI matrix
-    # When representative mapping is active, validate representative coverage
-    try:
-        matched, total, coverage_pct, missing = validate_ani_genome_coverage(
-            alignment, ani_matrix, representative_mapping=representative_mapping,
-        )
-
-        if verbose:
-            if representative_mapping:
-                out.print(
-                    f"[dim]Representative coverage: {matched}/{total} representatives in ANI matrix "
-                    f"({coverage_pct:.1f}%)[/dim]"
-                )
-            else:
-                out.print(
-                    f"[dim]Genome coverage: {matched}/{total} genomes in ANI matrix "
-                    f"({coverage_pct:.1f}%)[/dim]"
-                )
-
-        if coverage_pct < 50.0 and total > 0:
-            out.print(
-                f"[yellow]Warning: Low genome coverage ({coverage_pct:.1f}%)[/yellow]\n"
-                f"  Only {matched} of {total} genomes in BLAST file are in ANI matrix.\n"
-                f"  This may indicate mismatched input files.\n"
-            )
-            if missing and len(missing) <= 5:
-                out.print(f"  Missing genomes: {', '.join(sorted(missing))}\n")
-            elif missing:
-                sample = sorted(missing)[:5]
-                out.print(
-                    f"  Missing genomes (first 5): {', '.join(sample)}...\n"
-                )
-    except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
-        # Always log warnings - don't silently swallow validation failures
-        logger.warning("Could not validate genome coverage: %s", e)
-        if verbose:
-            out.print(f"[dim]Warning: Could not validate genome coverage: {e}[/dim]")
-
-    # Run classification - keep DataFrame in memory to avoid redundant I/O
-    classification_df: pl.DataFrame | None = None
-    qc_metrics = None
-    num_classified = 0
-
-    # Classification errors (Polars, file-system, memory) propagate to the
-    # centralized CLI error handler (cli/errors.py), which renders a friendly
-    # message and shows a full traceback only under --debug.
     if streaming:
-        # Use streaming mode for very large files (100M+ alignments)
-        # Streaming writes directly to file - no in-memory DataFrame
-        out.print("[cyan]Streaming mode: processing in 5M alignment partitions[/cyan]\n")
-
-        if genome_metadata:
-            out.print(
-                "[yellow]Note: --metadata is not supported with --streaming mode.[/yellow]\n"
-                "[yellow]Species columns will not be added to output.[/yellow]\n"
-            )
-
-        if contig_mapping:
-            out.print(
-                "[yellow]Note: --genomes/--id-mapping is not supported with --streaming mode.[/yellow]\n"
-                "[yellow]ID transformation will not be applied. Remove --streaming to enable it.[/yellow]\n"
-            )
-
-        vectorized = VectorizedClassifier(
-            ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config,
-            representative_mapping=representative_mapping,
-        )
-
-        # Rich progress with ETA for streaming
+        # Rich progress with ETA; estimate total rows from file size (~100 bytes
+        # per alignment).
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -1178,9 +879,7 @@ def classify(
             console=console,
             refresh_per_second=2,
         ) as progress:
-            # Estimate total rows from file size (rough: ~100 bytes per alignment)
-            file_size = alignment.stat().st_size
-            estimated_rows = file_size // 100
+            estimated_rows = alignment.stat().st_size // 100
             task = progress.add_task(
                 "Classifying reads (streaming)...",
                 total=estimated_rows,
@@ -1195,44 +894,18 @@ def classify(
                     description=f"Streaming: {reads:,} reads @ {rate:,.0f} rows/s",
                 )
 
-            num_classified = vectorized.stream_to_file(
-                blast_path=alignment,
-                output_path=output,
-                output_format=output_format,
-                partition_size=chunk_size,
+            result = run_classification(
+                request,
+                log=out.print,
+                verbose=verbose,
                 progress_callback=streaming_progress,
             )
-
     else:
-        # All non-streaming classification uses VectorizedClassifier
-        qc_metrics = None
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            progress.add_task(description="Classifying reads...", total=None)
-            vectorized = VectorizedClassifier(
-                ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config,
-                representative_mapping=representative_mapping,
-            )
-            result = vectorized.classify_file(
-                alignment,
-                id_mapping=contig_mapping,
-                compute_qc=qc_output is not None,
-            )
-            if qc_output is not None:
-                assert isinstance(result, tuple)
-                classification_df, qc_metrics = result
-            else:
-                assert isinstance(result, pl.DataFrame)
-                classification_df = result
+        result = run_classification(request, log=out.print, verbose=verbose)
 
-        num_classified = _finalize_classification(
-            classification_df, genome_metadata, output, output_format
-        )
-
-    out.print(f"[green]Classified {num_classified:,} reads[/green]\n")
+    num_classified = result.num_classified
+    classification_df = result.classification_df
+    qc_metrics = result.qc_metrics
 
     # Generate summary if requested
     if summary and num_classified > 0:
