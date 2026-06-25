@@ -15,61 +15,36 @@ from metadarkmatter.models.classification import TAXONOMIC_TO_DIVERSITY
 from metadarkmatter.models.config import ScoringConfig
 
 
-def apply_classification_thresholds(
-    df: pl.DataFrame,
+def _build_threshold_cascade(
     config: ScoringConfig,
-) -> pl.DataFrame:
-    """
-    Apply threshold-based classification to a DataFrame with pre-computed metrics.
+    *,
+    has_scope: bool,
+    has_genus: bool,
+) -> Any:
+    """Build the shared hard-threshold classification cascade.
 
-    This function applies the classification decision rules without recomputing
-    the underlying metrics (novelty_index, placement_uncertainty, etc.).
-    This allows efficient re-classification with different threshold values
-    for sensitivity analysis.
+    Returns the polars ``when/then`` expression *without* the final
+    ``.otherwise(...).alias(...)``, so callers can target different output
+    columns (``taxonomic_call`` vs ``legacy_call``) from the same rules.
 
-    Required columns in df:
-        - novelty_index: float (100 - top_hit_identity)
-        - placement_uncertainty: float (100 - max_ANI between competing genomes)
-        - num_ambiguous_hits: int
-        - identity_gap: float or null
-
-    Optional columns (used when present):
-        - genus_uncertainty: float
-        - num_secondary_genomes: int
-        - ambiguity_scope: str
+    Typed ``Any`` because the polars fluent builder reassigns through
+    When/Then/ChainedThen/Expr, which expose different methods at each step and
+    do not share a usable static type.
 
     Args:
-        df: DataFrame with pre-computed classification metrics.
         config: ScoringConfig with threshold values to apply.
-
-    Returns:
-        DataFrame with updated taxonomic_call and diversity_status columns.
+        has_scope: Whether the ``ambiguity_scope`` column is present.
+        has_genus: Whether the ``genus_uncertainty`` column is present.
     """
-    # Build effective thresholds (handles protein vs nucleotide mode)
     eff = config.get_effective_thresholds()
 
-    # Compute inferred uncertainty breakpoints (continuous piecewise-linear)
+    # Inferred uncertainty breakpoints (continuous piecewise-linear)
     inferred_known_break = 5.0 + eff["novelty_known_max"] * 0.5
     inferred_species_break = (
         inferred_known_break
         + (eff["novelty_novel_species_max"] - eff["novelty_known_max"]) * 1.0
     )
 
-    # Preserve Off-target reads (already classified by family validation)
-    has_off_target = "taxonomic_call" in df.columns
-    off_target_rows = None
-    if has_off_target:
-        off_target_mask = pl.col("taxonomic_call") == "Off-target"
-        off_target_rows = df.filter(off_target_mask)
-        df = df.filter(~off_target_mask)
-
-    # Check which optional columns exist
-    has_genus = "genus_uncertainty" in df.columns
-    has_scope = "ambiguity_scope" in df.columns
-
-    # Build classification expression. Typed Any because the polars when/then
-    # fluent builder reassigns through When/Then/ChainedThen/Expr, which expose
-    # different methods at each step and do not share a usable static type.
     classification: Any = (
         # Rule 0: Identity gap check
         pl.when(
@@ -80,7 +55,7 @@ def apply_classification_thresholds(
         .then(pl.lit("Ambiguous"))
     )
 
-    # Conserved Region and high uncertainty rules
+    # Conserved Region (cross-genera) rule, only when scope is known
     if has_scope:
         classification = classification.when(
             (pl.col("placement_uncertainty") >= eff["uncertainty_conserved_min"])
@@ -143,7 +118,56 @@ def apply_classification_thresholds(
             & (pl.col("placement_uncertainty") < eff["uncertainty_novel_genus_max"])
         ).then(pl.lit("Novel Genus"))
 
-    classification = classification.otherwise(pl.lit("Unclassified")).alias("taxonomic_call")
+    return classification
+
+
+def apply_classification_thresholds(
+    df: pl.DataFrame,
+    config: ScoringConfig,
+) -> pl.DataFrame:
+    """
+    Apply threshold-based classification to a DataFrame with pre-computed metrics.
+
+    This function applies the classification decision rules without recomputing
+    the underlying metrics (novelty_index, placement_uncertainty, etc.).
+    This allows efficient re-classification with different threshold values
+    for sensitivity analysis.
+
+    Required columns in df:
+        - novelty_index: float (100 - top_hit_identity)
+        - placement_uncertainty: float (100 - max_ANI between competing genomes)
+        - num_ambiguous_hits: int
+        - identity_gap: float or null
+
+    Optional columns (used when present):
+        - genus_uncertainty: float
+        - num_secondary_genomes: int
+        - ambiguity_scope: str
+
+    Args:
+        df: DataFrame with pre-computed classification metrics.
+        config: ScoringConfig with threshold values to apply.
+
+    Returns:
+        DataFrame with updated taxonomic_call and diversity_status columns.
+    """
+    # Preserve Off-target reads (already classified by family validation)
+    has_off_target = "taxonomic_call" in df.columns
+    off_target_rows = None
+    if has_off_target:
+        off_target_mask = pl.col("taxonomic_call") == "Off-target"
+        off_target_rows = df.filter(off_target_mask)
+        df = df.filter(~off_target_mask)
+
+    classification = (
+        _build_threshold_cascade(
+            config,
+            has_scope="ambiguity_scope" in df.columns,
+            has_genus="genus_uncertainty" in df.columns,
+        )
+        .otherwise(pl.lit("Unclassified"))
+        .alias("taxonomic_call")
+    )
 
     # Apply classification and derived columns
     result = df.with_columns([classification])
@@ -186,93 +210,14 @@ def apply_legacy_thresholds(
     Returns:
         DataFrame with an additional ``legacy_call`` column.
     """
-    eff = config.get_effective_thresholds()
-
-    # Inferred uncertainty breakpoints (continuous piecewise-linear)
-    inferred_known_break = 5.0 + eff["novelty_known_max"] * 0.5
-    inferred_species_break = (
-        inferred_known_break
-        + (eff["novelty_novel_species_max"] - eff["novelty_known_max"]) * 1.0
-    )
-
-    # Check which optional columns exist
-    has_genus = "genus_uncertainty" in df.columns
-    has_scope = "ambiguity_scope" in df.columns
-
-    # Build classification expression (same cascade as apply_classification_thresholds)
-    classification: Any = (  # polars when/then fluent builder (Then/ChainedThen/Expr)
-        # Rule 0: Identity gap check
-        pl.when(
-            (pl.col("identity_gap").is_not_null())
-            & (pl.col("num_ambiguous_hits") > 1)
-            & (pl.col("identity_gap") < config.identity_gap_ambiguous_max)
-        )
-        .then(pl.lit("Ambiguous"))
-    )
-
-    # Conserved Region and high uncertainty rules
-    if has_scope:
-        classification = classification.when(
-            (pl.col("placement_uncertainty") >= eff["uncertainty_conserved_min"])
-            & (pl.col("ambiguity_scope") == "across_genera")
-        ).then(pl.lit("Conserved Region"))
-
     classification = (
-        classification
-        .when(pl.col("placement_uncertainty") >= eff["uncertainty_conserved_min"])
-        .then(pl.lit("Ambiguous"))
-        # Species boundary zone
-        .when(pl.col("placement_uncertainty") >= eff["uncertainty_novel_genus_max"])
-        .then(pl.lit("Species Boundary"))
-        # Known Species
-        .when(
-            (pl.col("novelty_index") < eff["novelty_known_max"])
-            & (pl.col("placement_uncertainty") < eff["uncertainty_known_max"])
+        _build_threshold_cascade(
+            config,
+            has_scope="ambiguity_scope" in df.columns,
+            has_genus="genus_uncertainty" in df.columns,
         )
-        .then(pl.lit("Known Species"))
-        # Rule 0b: Single-hit inferred uncertainty check
-        .when(
-            (pl.col("num_ambiguous_hits") <= 1)
-            & (pl.col("novelty_index") >= eff["novelty_novel_species_min"])
-            & (
-                pl.when(pl.col("novelty_index") < eff["novelty_known_max"])
-                .then(5.0 + pl.col("novelty_index") * 0.5)
-                .when(pl.col("novelty_index") < eff["novelty_novel_species_max"])
-                .then(inferred_known_break + (pl.col("novelty_index") - eff["novelty_known_max"]) * 1.0)
-                .when(pl.col("novelty_index") < eff["novelty_novel_genus_max"])
-                .then(inferred_species_break + (pl.col("novelty_index") - eff["novelty_novel_species_max"]) * 1.5)
-                .otherwise(35.0)
-                >= pl.lit(config.single_hit_uncertainty_threshold)
-            )
-        )
-        .then(pl.lit("Ambiguous"))
-        # Novel Species
-        .when(
-            (pl.col("novelty_index") >= eff["novelty_novel_species_min"])
-            & (pl.col("novelty_index") < eff["novelty_novel_species_max"])
-            & (pl.col("placement_uncertainty") < eff["uncertainty_novel_species_max"])
-        )
-        .then(pl.lit("Novel Species"))
+        .otherwise(pl.lit("Unclassified"))
+        .alias("legacy_call")
     )
-
-    # Novel Genus with optional genus_uncertainty check
-    if has_genus:
-        classification = classification.when(
-            (pl.col("novelty_index") >= eff["novelty_novel_genus_min"])
-            & (pl.col("novelty_index") <= eff["novelty_novel_genus_max"])
-            & (pl.col("placement_uncertainty") < eff["uncertainty_novel_genus_max"])
-            & (
-                (pl.col("genus_uncertainty") < config.genus_uncertainty_ambiguous_min)
-                | (pl.col("num_secondary_genomes") <= 0)
-            )
-        ).then(pl.lit("Novel Genus"))
-    else:
-        classification = classification.when(
-            (pl.col("novelty_index") >= eff["novelty_novel_genus_min"])
-            & (pl.col("novelty_index") <= eff["novelty_novel_genus_max"])
-            & (pl.col("placement_uncertainty") < eff["uncertainty_novel_genus_max"])
-        ).then(pl.lit("Novel Genus"))
-
-    classification = classification.otherwise(pl.lit("Unclassified")).alias("legacy_call")
 
     return df.with_columns([classification])
