@@ -57,7 +57,6 @@ from metadarkmatter.visualization.report.novel_section import (
 from metadarkmatter.visualization.report.styles import get_css_styles
 from metadarkmatter.visualization.report.templates import (
     BAYESIAN_INTERPRETATION_TEMPLATE,
-    BORDERLINE_ANALYSIS_TEMPLATE,
     CATEGORY_GRID_CELL,
     CATEGORY_GRID_TEMPLATE,
     COLLAPSIBLE_PANEL_TEMPLATE,
@@ -70,7 +69,6 @@ from metadarkmatter.visualization.report.templates import (
     EMPTY_SECTION_TEMPLATE,
     ENHANCED_SCORING_SUMMARY_TEMPLATE,
     ENHANCED_SCORING_UNCERTAINTY_TYPES_TEMPLATE,
-    FAMILY_VALIDATION_SECTION_TEMPLATE,
     KPI_CARD_TEMPLATE,
     KPI_STRIP_TEMPLATE,
     METHODS_SECTION_TEMPLATE,
@@ -94,6 +92,9 @@ from metadarkmatter.visualization.report.templates import (
 if TYPE_CHECKING:
     import pandas as pd
     import plotly.graph_objects as go
+
+    from metadarkmatter.core.classification.adaptive import AdaptiveGenusThreshold
+    from metadarkmatter.core.novel_diversity.models import NovelCluster
 
 
 # Version for report footer
@@ -1381,34 +1382,9 @@ class ReportGenerator:
                 content=content,
             )
 
-        # Build KPI metric strip for novel diversity
-        novel_kpi_cards = []
-        cluster_count = len(clusters) if clusters else 0
-        novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
-            color_class="accent", value=str(cluster_count), label="Clusters",
-        ))
-        novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
-            color_class="novel", value=str(self.summary.novel_species), label="Novel Species",
-        ))
-        novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
-            color_class="novel", value=str(self.summary.novel_genus), label="Novel Genus",
-        ))
-        if self.summary.has_bayesian:
-            high_conf_novel = len(self.df.filter(
-                (pl.col("taxonomic_call").is_in(["Novel Species", "Novel Genus"])) &
-                (pl.col("posterior_entropy") < 1.0)
-            ))
-            novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
-                color_class="known", value=str(high_conf_novel), label="High Confidence",
-            ))
-        if genus_boundary_result is not None and genus_boundary_result.method != "fallback":
-            novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
-                color_class="accent",
-                value=f"{genus_boundary_result.genus_boundary:.0f}%",
-                label="Genus Boundary",
-            ))
-        kpi_html = KPI_STRIP_TEMPLATE.format(cards="\n".join(novel_kpi_cards))
-        content_parts.append(kpi_html)
+        content_parts.append(
+            self._build_novel_kpi_strip(clusters, genus_boundary_result)
+        )
 
         # Build summary section
         content_parts.append(build_novel_summary_html(summary))
@@ -1445,6 +1421,58 @@ class ReportGenerator:
             plot_id=sunburst_id,
         ))
 
+        heatmap_panel = self._build_novel_heatmap_panel(clusters)
+        if heatmap_panel:
+            content_parts.append(heatmap_panel)
+
+        # Build cluster table (includes phylogenetic placement)
+        content_parts.append(build_cluster_table_html(clusters))
+
+        content = "\n".join(content_parts)
+
+        return TAB_SECTION_TEMPLATE.format(
+            tab_id="novel-diversity",
+            active_class="",
+            section_title="Novel Diversity",
+            content=content,
+        )
+
+
+    def _build_novel_kpi_strip(
+        self, clusters: list[NovelCluster], genus_boundary_result: AdaptiveGenusThreshold | None
+    ) -> str:
+        """Build the KPI metric strip for the novel-diversity tab."""
+        # Build KPI metric strip for novel diversity
+        novel_kpi_cards = []
+        cluster_count = len(clusters) if clusters else 0
+        novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
+            color_class="accent", value=str(cluster_count), label="Clusters",
+        ))
+        novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
+            color_class="novel", value=str(self.summary.novel_species), label="Novel Species",
+        ))
+        novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
+            color_class="novel", value=str(self.summary.novel_genus), label="Novel Genus",
+        ))
+        if self.summary.has_bayesian:
+            high_conf_novel = len(self.df.filter(
+                (pl.col("taxonomic_call").is_in(["Novel Species", "Novel Genus"])) &
+                (pl.col("posterior_entropy") < 1.0)
+            ))
+            novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
+                color_class="known", value=str(high_conf_novel), label="High Confidence",
+            ))
+        if genus_boundary_result is not None and genus_boundary_result.method != "fallback":
+            novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
+                color_class="accent",
+                value=f"{genus_boundary_result.genus_boundary:.0f}%",
+                label="Genus Boundary",
+            ))
+        return KPI_STRIP_TEMPLATE.format(cards="\n".join(novel_kpi_cards))
+
+
+    def _build_novel_heatmap_panel(self, clusters: list[NovelCluster]) -> str:
+        """Build the collapsible phylogenetic-context heatmap panel HTML."""
         # Build phylogenetic context heatmap(s) based on available matrices
         # Prefer AAI for protein mode, ANI for nucleotide mode
         # Show both when both are available (ANI for species, AAI for genus context)
@@ -1531,26 +1559,16 @@ class ReportGenerator:
                 logger.warning(f"Could not build {sim_type} phylogenetic context heatmap: {e}")
 
         # Wrap heatmaps in a collapsible panel if any were built
-        if heatmap_parts:
-            heatmap_html = "\n".join(heatmap_parts)
-            content_parts.append(COLLAPSIBLE_PANEL_TEMPLATE.format(
-                default_state="",
-                panel_id="novel-heatmap",
-                title="Phylogenetic Context Heatmap",
-                content=heatmap_html,
-            ))
-
-        # Build cluster table (includes phylogenetic placement)
-        content_parts.append(build_cluster_table_html(clusters))
-
-        content = "\n".join(content_parts)
-
-        return TAB_SECTION_TEMPLATE.format(
-            tab_id="novel-diversity",
-            active_class="",
-            section_title="Novel Diversity",
-            content=content,
+        if not heatmap_parts:
+            return ""
+        heatmap_html = "\n".join(heatmap_parts)
+        return COLLAPSIBLE_PANEL_TEMPLATE.format(
+            default_state="",
+            panel_id="novel-heatmap",
+            title="Phylogenetic Context Heatmap",
+            content=heatmap_html,
         )
+
 
     def _build_recruitment_content(self) -> str | None:
         """Build recruitment plot HTML content without tab wrapper.
@@ -1682,343 +1700,6 @@ class ReportGenerator:
         return PLOT_CONTAINER_SIMPLE_TEMPLATE.format(
             extra_class="full-width",
             plot_id=species_bar_id,
-        )
-
-    def _build_family_validation_section(self) -> str:
-        """Build the Family Validation tab content."""
-        import plotly.graph_objects as go
-
-        total = self.summary.total_reads
-        off_target = self.summary.off_target
-        in_family = total - off_target
-        off_target_pct = (off_target / total * 100) if total > 0 else 0.0
-        validated_pct = 100.0 - off_target_pct
-
-        # Build external genomes breakdown table from off-target reads
-        external_families_table = ""
-        if (
-            "external_best_genome" in self.df.columns
-            and "taxonomic_call" in self.df.columns
-        ):
-            off_target_df = self.df.filter(
-                pl.col("taxonomic_call") == "Off-target"
-            )
-            if len(off_target_df) > 0:
-                ext_col = "external_best_genome"
-                ident_col = "external_best_identity"
-
-                # Group by external genome, count reads and mean identity
-                agg_cols = [pl.len().alias("read_count")]
-                has_identity = ident_col in off_target_df.columns
-                if has_identity:
-                    agg_cols.append(
-                        pl.col(ident_col).mean().alias("mean_identity")
-                    )
-                has_if_ident = "in_family_identity" in off_target_df.columns
-                if has_if_ident:
-                    agg_cols.append(
-                        pl.col("in_family_identity").mean().alias("mean_in_family_identity")
-                    )
-
-                ext_summary = (
-                    off_target_df
-                    .with_columns(
-                        pl.col(ext_col).fill_null("unknown").alias(ext_col)
-                    )
-                    .group_by(ext_col)
-                    .agg(agg_cols)
-                    .sort("read_count", descending=True)
-                    .head(20)
-                )
-
-                if len(ext_summary) > 0:
-                    if_ident_header = (
-                        "<th>In-Family Identity</th>" if has_if_ident else ""
-                    )
-                    rows_html = ""
-                    for row in ext_summary.iter_rows(named=True):
-                        genome = row[ext_col]
-                        count = row["read_count"]
-                        pct = count / off_target * 100 if off_target > 0 else 0
-                        ident_str = (
-                            f"{row['mean_identity']:.1f}%"
-                            if has_identity and row.get("mean_identity")
-                            is not None
-                            else "-"
-                        )
-                        if_ident_cell = ""
-                        if has_if_ident:
-                            if_val = row.get("mean_in_family_identity")
-                            if_ident_cell = (
-                                f"<td>{if_val:.1f}%</td>"
-                                if if_val is not None
-                                else "<td>-</td>"
-                            )
-                        rows_html += (
-                            f"<tr><td>{genome}</td>"
-                            f"<td>{count:,}</td>"
-                            f"<td>{pct:.1f}%</td>"
-                            f"<td>{ident_str}</td>"
-                            f"{if_ident_cell}</tr>\n"
-                        )
-
-                    external_families_table = (
-                        '<h3>Off-target Best External Matches</h3>\n'
-                        '<div style="overflow-x:auto;">\n'
-                        '<table class="data-table">\n'
-                        "<thead><tr>"
-                        "<th>External Genome</th>"
-                        "<th>Reads</th>"
-                        "<th>% of Off-target</th>"
-                        "<th>Mean Identity</th>"
-                        f"{if_ident_header}"
-                        "</tr></thead>\n<tbody>\n"
-                        + rows_html
-                        + "</tbody></table></div>\n"
-                    )
-
-        # Borderline analysis: classify off-target reads by in-family novelty
-        borderline_analysis = ""
-        if (
-            "in_family_novelty_index" in self.df.columns
-            and "taxonomic_call" in self.df.columns
-        ):
-            ot_with_novelty = self.df.filter(
-                pl.col("taxonomic_call") == "Off-target"
-            )
-            if len(ot_with_novelty) > 0:
-                th = self.config.thresholds
-                n_total_ot = len(ot_with_novelty)
-                ni = ot_with_novelty["in_family_novelty_index"]
-
-                known_count = len(ni.filter(ni < th.novelty_known_max))
-                novel_sp_count = len(ni.filter(
-                    (ni >= th.novelty_novel_species_min)
-                    & (ni < th.novelty_novel_species_max)
-                ))
-                novel_gen_count = len(ni.filter(
-                    (ni >= th.novelty_novel_genus_min)
-                    & (ni <= th.novelty_novel_genus_max)
-                ))
-                divergent_count = len(ni.filter(ni > th.novelty_novel_genus_max))
-
-                def _pct(c: int) -> float:
-                    return c / n_total_ot * 100 if n_total_ot > 0 else 0.0
-
-                borderline_analysis = BORDERLINE_ANALYSIS_TEMPLATE.format(
-                    known_count=known_count,
-                    known_pct=_pct(known_count),
-                    novel_sp_count=novel_sp_count,
-                    novel_sp_pct=_pct(novel_sp_count),
-                    novel_gen_count=novel_gen_count,
-                    novel_gen_pct=_pct(novel_gen_count),
-                    divergent_count=divergent_count,
-                    divergent_pct=_pct(divergent_count),
-                    novel_sp_highlight=(
-                        " highlight-amber" if novel_sp_count > 0 else ""
-                    ),
-                    novel_gen_highlight=(
-                        " highlight-red" if novel_gen_count > 0 else ""
-                    ),
-                    novelty_known_max=th.novelty_known_max,
-                    novelty_novel_sp_max=th.novelty_novel_species_max,
-                    novelty_novel_gen_max=th.novelty_novel_genus_max,
-                )
-
-                # Scatter plot: off-target reads in novelty-uncertainty space
-                novelty_vals = ot_with_novelty["in_family_novelty_index"].to_list()
-
-                # Compute inferred uncertainty using the same piecewise formula
-                # as VectorizedClassifier (lines 773-789)
-                known_break = 5.0 + th.novelty_known_max * 0.5
-                species_break = (
-                    known_break
-                    + (th.novelty_novel_species_max - th.novelty_known_max)
-                )
-                uncertainty_vals = []
-                for nv in novelty_vals:
-                    if nv < th.novelty_known_max:
-                        uncertainty_vals.append(5.0 + nv * 0.5)
-                    elif nv < th.novelty_novel_species_max:
-                        uncertainty_vals.append(
-                            known_break
-                            + (nv - th.novelty_known_max) * 1.0
-                        )
-                    elif nv < th.novelty_novel_genus_max:
-                        uncertainty_vals.append(
-                            species_break
-                            + (nv - th.novelty_novel_species_max) * 1.5
-                        )
-                    else:
-                        uncertainty_vals.append(35.0)
-
-                # Assign would-be categories for coloring
-                cat_colors = []
-                cat_labels = []
-                for nv in novelty_vals:
-                    if nv < th.novelty_known_max:
-                        cat_colors.append("#22c55e")
-                        cat_labels.append("Known Species")
-                    elif nv < th.novelty_novel_species_max:
-                        cat_colors.append("#f59e0b")
-                        cat_labels.append("Novel Species")
-                    elif nv <= th.novelty_novel_genus_max:
-                        cat_colors.append("#ef4444")
-                        cat_labels.append("Novel Genus")
-                    else:
-                        cat_colors.append("#64748b")
-                        cat_labels.append("Very Divergent")
-
-                scatter_fig = go.Figure()
-
-                # Background classification zones
-                zone_shapes = [
-                    {
-                        "type": "rect", "x0": 0, "x1": th.novelty_known_max,
-                        "y0": 0, "y1": th.uncertainty_known_max,
-                        "fillcolor": "rgba(34,197,94,0.08)",
-                        "line": {"width": 0}, "layer": "below",
-                    },
-                    {
-                        "type": "rect",
-                        "x0": th.novelty_novel_species_min,
-                        "x1": th.novelty_novel_species_max,
-                        "y0": 0, "y1": th.uncertainty_novel_species_max,
-                        "fillcolor": "rgba(245,158,11,0.08)",
-                        "line": {"width": 0}, "layer": "below",
-                    },
-                    {
-                        "type": "rect",
-                        "x0": th.novelty_novel_genus_min,
-                        "x1": th.novelty_novel_genus_max,
-                        "y0": 0, "y1": th.uncertainty_novel_genus_max,
-                        "fillcolor": "rgba(239,68,68,0.08)",
-                        "line": {"width": 0}, "layer": "below",
-                    },
-                ]
-
-                scatter_fig.add_trace(go.Scatter(
-                    x=novelty_vals,
-                    y=uncertainty_vals,
-                    mode="markers",
-                    marker={
-                        "color": cat_colors,
-                        "size": 6,
-                        "opacity": 0.7,
-                    },
-                    text=cat_labels,
-                    hovertemplate=(
-                        "In-Family Novelty: %{x:.1f}%<br>"
-                        "Inferred Uncertainty: %{y:.1f}<br>"
-                        "Would-Be: %{text}<extra></extra>"
-                    ),
-                ))
-                scatter_fig.update_layout(
-                    xaxis_title="In-Family Novelty Index (%)",
-                    yaxis_title="Inferred Uncertainty",
-                    template="plotly_white",
-                    height=450,
-                    shapes=zone_shapes,
-                    showlegend=False,
-                )
-                self._register_plot("family-novelty-scatter", scatter_fig)
-
-        # Format summary stats
-        content = FAMILY_VALIDATION_SECTION_TEMPLATE.format(
-            validated_pct=validated_pct,
-            off_target_count=off_target,
-            off_target_pct=off_target_pct,
-            target_family=(
-                self.summary.target_family or "Inferred from ANI matrix"
-            ),
-            borderline_analysis=borderline_analysis,
-            external_families_table=external_families_table,
-        )
-
-        # Histogram of family_bitscore_ratio -- exclude ratio=1.0 reads
-        # to avoid a dominant spike that obscures the off-target distribution
-        if "family_bitscore_ratio" in self.df.columns:
-            all_ratios = self.df["family_bitscore_ratio"].drop_nulls()
-            n_total = len(all_ratios)
-            n_at_one = len(all_ratios.filter(all_ratios == 1.0))
-            sub_ratios = all_ratios.filter(all_ratios < 1.0).to_list()
-
-            if sub_ratios:
-                fig = go.Figure(data=[go.Histogram(
-                    x=sub_ratios,
-                    nbinsx=50,
-                    marker_color="#4a90d9",
-                    name="Reads",
-                )])
-                fig.update_layout(
-                    xaxis_title="Family Bitscore Ratio",
-                    yaxis_title="Read Count",
-                    template="plotly_white",
-                    height=400,
-                )
-                fig.add_vline(
-                    x=0.8,
-                    line_dash="dash",
-                    line_color="red",
-                    annotation_text="Threshold (0.8)",
-                )
-                if n_at_one > 0:
-                    fig.add_annotation(
-                        text=(
-                            f"{n_at_one:,} reads at ratio=1.0 "
-                            f"({n_at_one / n_total * 100:.0f}% "
-                            "of total, not shown)"
-                        ),
-                        xref="paper", yref="paper",
-                        x=0.98, y=0.98,
-                        showarrow=False,
-                        font={"size": 11, "color": "#666"},
-                        align="right",
-                        bgcolor="rgba(255,255,255,0.8)",
-                        bordercolor="#ccc",
-                        borderwidth=1,
-                    )
-                self._register_plot("family-ratio-histogram", fig)
-            elif n_at_one > 0:
-                # All reads at 1.0 -- show a simple note instead of empty plot
-                fig = go.Figure()
-                fig.update_layout(
-                    template="plotly_white",
-                    height=200,
-                    annotations=[{
-                        "text": (
-                            f"All {n_at_one:,} reads have "
-                            "family bitscore ratio = 1.0 "
-                            "(entirely in-family)"
-                        ),
-                        "xref": "paper", "yref": "paper",
-                        "x": 0.5, "y": 0.5,
-                        "showarrow": False,
-                        "font": {"size": 14},
-                    }],
-                    xaxis={"visible": False},
-                    yaxis={"visible": False},
-                )
-                self._register_plot("family-ratio-histogram", fig)
-
-        # Pie chart of in-family vs off-target
-        fig_pie = go.Figure(data=[go.Pie(
-            labels=["In-Family", "Off-target"],
-            values=[in_family, off_target],
-            marker_colors=["#4a90d9", "#e74c3c"],
-            hole=0.4,
-        )])
-        fig_pie.update_layout(
-            template="plotly_white",
-            height=400,
-        )
-        self._register_plot("family-pie-chart", fig_pie)
-
-        return TAB_SECTION_TEMPLATE.format(
-            tab_id="family-validation",
-            active_class="",
-            section_title="Family Validation",
-            content=content,
         )
 
     def _build_toggle_heatmap_content(
