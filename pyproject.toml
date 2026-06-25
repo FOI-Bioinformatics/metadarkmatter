@@ -29,7 +29,10 @@ keywords = ["metagenomics", "eDNA", "taxonomy", "ANI", "microbial-ecology", "env
 dependencies = [
     "polars>=1.36.0",
     "pyarrow>=15.0.0",
-    "numpy>=1.26.0",
+    # Cap below 2.5: numpy 2.5's type stubs use PEP 695 `type` statements that
+    # mypy (configured for python_version 3.11) cannot parse, breaking the
+    # type-check on the 3.12+ CI legs. Revisit when bumping mypy / min Python.
+    "numpy>=1.26.0,<2.5",
     "scipy>=1.11.0",
     "pandas>=2.0.0",
     "biopython>=1.83",
