@@ -167,10 +167,12 @@ class NovelDiversityAnalyzer:
             root = find(g)
             components.setdefault(root, []).append(g)
 
-        # Pick representative = genome with most novel reads in each component
+        # Pick representative = genome with most novel reads in each component.
+        # Break count ties by accession so the choice is deterministic across
+        # processes (polars .unique() does not guarantee order).
         mapping: dict[str, str] = {}
         for members in components.values():
-            representative = max(members, key=lambda g: genome_counts.get(g, 0))
+            representative = max(members, key=lambda g: (genome_counts.get(g, 0), g))
             for g in members:
                 mapping[g] = representative
 
@@ -350,8 +352,10 @@ class NovelDiversityAnalyzer:
                 .alias("effective_uncertainty")
             )
 
-        # Step 3: Build genome neighborhoods and map to representatives
-        unique_genomes = novel_df["best_match_genome"].unique().to_list()
+        # Step 3: Build genome neighborhoods and map to representatives.
+        # Sort for a deterministic genome order (polars .unique() is unordered),
+        # so neighborhood construction and tie-breaks are reproducible.
+        unique_genomes = sorted(novel_df["best_match_genome"].unique().to_list())
         genome_neighborhood = self._build_genome_neighborhoods(unique_genomes)
 
         novel_df = novel_df.with_columns(
@@ -409,8 +413,12 @@ class NovelDiversityAnalyzer:
         # Re-filter after merging (shouldn't shrink, but be safe)
         rows = [r for r in rows if r["read_count"] >= self._min_cluster_size]
 
-        # Sort by read count descending
-        rows.sort(key=lambda r: r["read_count"], reverse=True)
+        # Sort by read count descending, with deterministic tiebreakers
+        # (representative genome, then call) so sequential cluster IDs are
+        # assigned reproducibly when read counts tie.
+        rows.sort(
+            key=lambda r: (-r["read_count"], r["representative_genome"], r["taxonomic_call"])
+        )
 
         # Step 7-9: Build NovelCluster objects
         clusters: list[NovelCluster] = []

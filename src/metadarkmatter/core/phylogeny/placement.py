@@ -349,8 +349,13 @@ def extract_novel_clusters(
     if len(grouped) == 0:
         return []
 
-    # Sort by read count descending
-    grouped = grouped.sort("read_count", descending=True)
+    # Sort by read count descending, with genome/call tiebreakers so that
+    # sequential cluster IDs (NSP_001, ...) are assigned deterministically
+    # across processes when read counts tie.
+    grouped = grouped.sort(
+        ["read_count", "best_match_genome", "taxonomic_call"],
+        descending=[True, False, False],
+    )
 
     # Build NovelCluster objects
     clusters: list[NovelCluster] = []
