@@ -288,6 +288,32 @@ class ReportConfig:
         return "AAI" if self.alignment_mode == "protein" else "ANI"
 
 
+@dataclass(frozen=True)
+class _EnhancedScoringMetrics:
+    """Mean enhanced-scoring / discovery metrics for a classification set."""
+
+    mean_inferred_uncertainty: float | None = None
+    mean_alignment_quality: float | None = None
+    mean_identity_confidence: float | None = None
+    mean_placement_confidence: float | None = None
+    mean_discovery_score: float | None = None
+    novel_with_discovery_score: int = 0
+    high_priority_discoveries: int = 0
+
+
+@dataclass(frozen=True)
+class _BayesianMetrics:
+    """Mean posterior entropy and confidence / agreement counts."""
+
+    mean_posterior_entropy: float = 0.0
+    high_confidence_count: int = 0
+    high_confidence_pct: float = 0.0
+    boundary_count: int = 0
+    boundary_pct: float = 0.0
+    map_agreement_count: int = 0
+    map_agreement_pct: float = 0.0
+
+
 class ReportGenerator:
     """
     Generates unified HTML reports from classification results.
@@ -404,67 +430,27 @@ class ReportGenerator:
             single_hit_count = len(single_hit_df)
             single_hit_pct = (single_hit_count / len(self.df) * 100) if len(self.df) > 0 else 0.0
 
-        # Calculate enhanced scoring metrics if available
-        mean_inferred_uncertainty = None
-        mean_alignment_quality = None
-        mean_identity_confidence = None
-        mean_placement_confidence = None
-        mean_discovery_score = None
-        novel_with_discovery_score = 0
-        high_priority_discoveries = 0
-
-        if has_inferred_uncertainty:
-            inferred_df = self.df.filter(pl.col("inferred_uncertainty").is_not_null())
-            if len(inferred_df) > 0:
-                mean_inferred_uncertainty = _safe_float(inferred_df["inferred_uncertainty"].mean()) or 0.0
-
-        if has_enhanced_scoring:
-            if "alignment_quality" in self.df.columns:
-                mean_alignment_quality = _safe_float(self.df["alignment_quality"].mean()) or 0.0
-            if "identity_confidence" in self.df.columns:
-                mean_identity_confidence = _safe_float(self.df["identity_confidence"].mean()) or 0.0
-            if "placement_confidence" in self.df.columns:
-                mean_placement_confidence = _safe_float(self.df["placement_confidence"].mean()) or 0.0
-            if "discovery_score" in self.df.columns:
-                discovery_df = self.df.filter(pl.col("discovery_score").is_not_null())
-                novel_with_discovery_score = len(discovery_df)
-                if novel_with_discovery_score > 0:
-                    mean_discovery_score = _safe_float(discovery_df["discovery_score"].mean()) or 0.0
-                    high_priority_discoveries = len(
-                        discovery_df.filter(pl.col("discovery_score") >= 75)
-                    )
+        enh = self._compute_enhanced_scoring_metrics(
+            has_enhanced_scoring, has_inferred_uncertainty
+        )
+        mean_inferred_uncertainty = enh.mean_inferred_uncertainty
+        mean_alignment_quality = enh.mean_alignment_quality
+        mean_identity_confidence = enh.mean_identity_confidence
+        mean_placement_confidence = enh.mean_placement_confidence
+        mean_discovery_score = enh.mean_discovery_score
+        novel_with_discovery_score = enh.novel_with_discovery_score
+        high_priority_discoveries = enh.high_priority_discoveries
 
         # Check for Bayesian posterior columns
         has_bayesian = "posterior_entropy" in self.df.columns
-        mean_posterior_entropy = 0.0
-        high_confidence_count = 0
-        high_confidence_pct = 0.0
-        boundary_count = 0
-        boundary_pct = 0.0
-        map_agreement_count = 0
-        map_agreement_pct = 0.0
-
-        if has_bayesian:
-            total_n = len(self.df) if len(self.df) > 0 else 1
-            mean_posterior_entropy = _safe_float(self.df["posterior_entropy"].mean()) or 0.0
-            high_confidence_count = len(
-                self.df.filter(pl.col("posterior_entropy") < 1.0)
-            )
-            high_confidence_pct = high_confidence_count / total_n * 100
-            boundary_count = len(
-                self.df.filter(pl.col("posterior_entropy") > 1.5)
-            )
-            boundary_pct = boundary_count / total_n * 100
-            # In the Bayesian-primary workflow, taxonomic_call IS the Bayesian
-            # MAP + Stage 2 result, so agreement with legacy_call shows how
-            # often the two classifiers concur.
-            if "legacy_call" in self.df.columns:
-                map_agreement_count = len(
-                    self.df.filter(
-                        pl.col("legacy_call") == pl.col("taxonomic_call")
-                    )
-                )
-                map_agreement_pct = map_agreement_count / total_n * 100
+        bay = self._compute_bayesian_metrics(has_bayesian)
+        mean_posterior_entropy = bay.mean_posterior_entropy
+        high_confidence_count = bay.high_confidence_count
+        high_confidence_pct = bay.high_confidence_pct
+        boundary_count = bay.boundary_count
+        boundary_pct = bay.boundary_pct
+        map_agreement_count = bay.map_agreement_count
+        map_agreement_pct = bay.map_agreement_pct
 
         return TaxonomicSummary(
             total_reads=len(self.df),
@@ -501,6 +487,92 @@ class ReportGenerator:
             high_priority_discoveries=high_priority_discoveries,
             # Bayesian
             has_bayesian=has_bayesian,
+            mean_posterior_entropy=mean_posterior_entropy,
+            high_confidence_count=high_confidence_count,
+            high_confidence_pct=high_confidence_pct,
+            boundary_count=boundary_count,
+            boundary_pct=boundary_pct,
+            map_agreement_count=map_agreement_count,
+            map_agreement_pct=map_agreement_pct,
+        )
+
+    def _compute_enhanced_scoring_metrics(
+        self, has_enhanced_scoring: bool, has_inferred_uncertainty: bool
+    ) -> _EnhancedScoringMetrics:
+        """Compute mean enhanced-scoring / discovery metrics."""
+        # Calculate enhanced scoring metrics if available
+        mean_inferred_uncertainty = None
+        mean_alignment_quality = None
+        mean_identity_confidence = None
+        mean_placement_confidence = None
+        mean_discovery_score = None
+        novel_with_discovery_score = 0
+        high_priority_discoveries = 0
+
+        if has_inferred_uncertainty:
+            inferred_df = self.df.filter(pl.col("inferred_uncertainty").is_not_null())
+            if len(inferred_df) > 0:
+                mean_inferred_uncertainty = _safe_float(inferred_df["inferred_uncertainty"].mean()) or 0.0
+
+        if has_enhanced_scoring:
+            if "alignment_quality" in self.df.columns:
+                mean_alignment_quality = _safe_float(self.df["alignment_quality"].mean()) or 0.0
+            if "identity_confidence" in self.df.columns:
+                mean_identity_confidence = _safe_float(self.df["identity_confidence"].mean()) or 0.0
+            if "placement_confidence" in self.df.columns:
+                mean_placement_confidence = _safe_float(self.df["placement_confidence"].mean()) or 0.0
+            if "discovery_score" in self.df.columns:
+                discovery_df = self.df.filter(pl.col("discovery_score").is_not_null())
+                novel_with_discovery_score = len(discovery_df)
+                if novel_with_discovery_score > 0:
+                    mean_discovery_score = _safe_float(discovery_df["discovery_score"].mean()) or 0.0
+                    high_priority_discoveries = len(
+                        discovery_df.filter(pl.col("discovery_score") >= 75)
+                    )
+
+        return _EnhancedScoringMetrics(
+            mean_inferred_uncertainty=mean_inferred_uncertainty,
+            mean_alignment_quality=mean_alignment_quality,
+            mean_identity_confidence=mean_identity_confidence,
+            mean_placement_confidence=mean_placement_confidence,
+            mean_discovery_score=mean_discovery_score,
+            novel_with_discovery_score=novel_with_discovery_score,
+            high_priority_discoveries=high_priority_discoveries,
+        )
+
+    def _compute_bayesian_metrics(self, has_bayesian: bool) -> _BayesianMetrics:
+        """Compute mean posterior entropy and confidence/agreement counts."""
+        mean_posterior_entropy = 0.0
+        high_confidence_count = 0
+        high_confidence_pct = 0.0
+        boundary_count = 0
+        boundary_pct = 0.0
+        map_agreement_count = 0
+        map_agreement_pct = 0.0
+
+        if has_bayesian:
+            total_n = len(self.df) if len(self.df) > 0 else 1
+            mean_posterior_entropy = _safe_float(self.df["posterior_entropy"].mean()) or 0.0
+            high_confidence_count = len(
+                self.df.filter(pl.col("posterior_entropy") < 1.0)
+            )
+            high_confidence_pct = high_confidence_count / total_n * 100
+            boundary_count = len(
+                self.df.filter(pl.col("posterior_entropy") > 1.5)
+            )
+            boundary_pct = boundary_count / total_n * 100
+            # In the Bayesian-primary workflow, taxonomic_call IS the Bayesian
+            # MAP + Stage 2 result, so agreement with legacy_call shows how
+            # often the two classifiers concur.
+            if "legacy_call" in self.df.columns:
+                map_agreement_count = len(
+                    self.df.filter(
+                        pl.col("legacy_call") == pl.col("taxonomic_call")
+                    )
+                )
+                map_agreement_pct = map_agreement_count / total_n * 100
+
+        return _BayesianMetrics(
             mean_posterior_entropy=mean_posterior_entropy,
             high_confidence_count=high_confidence_count,
             high_confidence_pct=high_confidence_pct,
@@ -848,6 +920,20 @@ class ReportGenerator:
                 link="",
             ))
 
+        action_card = self._build_overview_action_items_card()
+        if action_card:
+            cards.append(action_card)
+
+        if not cards:
+            return ""
+
+        return OVERVIEW_KEY_FINDINGS_TEMPLATE.format(
+            findings_cards="\n".join(cards),
+        )
+
+    def _build_overview_action_items_card(self) -> str:
+        """Build the conditional action-items finding card ("" if none)."""
+        s = self.summary
         # Conditional action items
         action_items = []
         if s.high_priority_discoveries > 0:
@@ -882,20 +968,15 @@ class ReportGenerator:
                     '<a class="finding-link" onclick="showTab(\'data\')">'
                     "Review off-target reads in Data tab</a>"
                 )
-            cards.append(OVERVIEW_FINDING_CARD_TEMPLATE.format(
+            return OVERVIEW_FINDING_CARD_TEMPLATE.format(
                 card_class="action",
                 icon="!",
                 headline="Action items",
                 detail="; ".join(action_items),
                 link=link_html,
-            ))
+            )
+        return ""
 
-        if not cards:
-            return ""
-
-        return OVERVIEW_KEY_FINDINGS_TEMPLATE.format(
-            findings_cards="\n".join(cards),
-        )
 
     def _build_metric_cards(self) -> str:
         """Build the metric cards HTML."""
@@ -1091,15 +1172,25 @@ class ReportGenerator:
         Classification Confidence tab. Returns empty string if no Bayesian
         or enhanced scoring data is available.
         """
-        import plotly.graph_objects as go
-
         s = self.summary
 
         if not (s.has_bayesian or s.has_enhanced_scoring or s.has_inferred_uncertainty):
             return ""
 
-        content_parts: list[str] = []
+        parts = [
+            self._confidence_summary_cards(),
+            self._confidence_entropy_distribution(),
+            self._confidence_posterior_bar(),
+            self._confidence_discovery_distribution(),
+            self._confidence_uncertainty_types(),
+            self._confidence_landscape_scatter(),
+        ]
+        return "\n".join(p for p in parts if p)
 
+    def _confidence_summary_cards(self) -> str:
+        """Build the merged Bayesian / enhanced-scoring summary cards."""
+        s = self.summary
+        parts: list[str] = []
         # --- Merged summary cards ---
         if s.has_bayesian:
             summary_html = CONFIDENCE_SUMMARY_TEMPLATE.format(
@@ -1116,8 +1207,8 @@ class ReportGenerator:
                 boundary_pct=s.boundary_pct,
                 boundary_count=s.boundary_count,
             )
-            content_parts.append(summary_html)
-            content_parts.append(BAYESIAN_INTERPRETATION_TEMPLATE)
+            parts.append(summary_html)
+            parts.append(BAYESIAN_INTERPRETATION_TEMPLATE)
         elif s.has_enhanced_scoring or s.has_inferred_uncertainty:
             # Fallback: show discovery-only summary when no Bayesian data
             summary_html = ENHANCED_SCORING_SUMMARY_TEMPLATE.format(
@@ -1129,8 +1220,14 @@ class ReportGenerator:
                 mean_discovery_score=s.mean_discovery_score or 0.0,
                 novel_count=s.novel_with_discovery_score,
             )
-            content_parts.append(summary_html)
+            parts.append(summary_html)
 
+        return "\n".join(parts)
+
+    def _confidence_entropy_distribution(self) -> str:
+        """Build the posterior-entropy distribution histogram block."""
+        s = self.summary
+        parts: list[str] = []
         # --- Posterior Entropy Distribution ---
         if s.has_bayesian and "posterior_entropy" in self.df.columns:
             entropy_id = "plot-bayesian-entropy"
@@ -1148,7 +1245,7 @@ class ReportGenerator:
                 x_range=[0, 2.7],
             )
 
-            content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
+            parts.append(PLOT_CONTAINER_TEMPLATE.format(
                 extra_class="full-width",
                 title="Posterior Entropy Distribution",
                 description=(
@@ -1160,6 +1257,14 @@ class ReportGenerator:
                 plot_id=entropy_id,
             ))
 
+        return "\n".join(parts)
+
+    def _confidence_posterior_bar(self) -> str:
+        """Build the stacked mean-posterior bar chart by MAP category."""
+        import plotly.graph_objects as go
+
+        s = self.summary
+        parts: list[str] = []
         # --- Stacked Posterior Bar by Category ---
         if s.has_bayesian and "taxonomic_call" in self.df.columns:
             posterior_cols = [
@@ -1207,7 +1312,7 @@ class ReportGenerator:
             bar_id = "plot-bayesian-posterior-bar"
             self._register_plot(bar_id, bar_fig)
 
-            content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
+            parts.append(PLOT_CONTAINER_TEMPLATE.format(
                 extra_class="full-width",
                 title="Posterior Composition by Category",
                 description=(
@@ -1218,6 +1323,12 @@ class ReportGenerator:
                 plot_id=bar_id,
             ))
 
+        return "\n".join(parts)
+
+    def _confidence_discovery_distribution(self) -> str:
+        """Build the discovery-score distribution histogram block."""
+        s = self.summary
+        parts: list[str] = []
         # --- Discovery Score Distribution ---
         if s.has_enhanced_scoring and "discovery_score" in self.df.columns:
             discovery_df = self.df.filter(pl.col("discovery_score").is_not_null())
@@ -1236,7 +1347,7 @@ class ReportGenerator:
                     ],
                 )
 
-                content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
+                parts.append(PLOT_CONTAINER_TEMPLATE.format(
                     extra_class="full-width",
                     title="Discovery Score Distribution",
                     description=(
@@ -1246,6 +1357,12 @@ class ReportGenerator:
                     plot_id=discovery_hist_id,
                 ))
 
+        return "\n".join(parts)
+
+    def _confidence_uncertainty_types(self) -> str:
+        """Build the measured-vs-inferred uncertainty breakdown block."""
+        s = self.summary
+        parts: list[str] = []
         # --- Uncertainty types breakdown ---
         if s.has_inferred_uncertainty and "uncertainty_type" in self.df.columns:
             measured_df = self.df.filter(pl.col("uncertainty_type") == "measured")
@@ -1261,8 +1378,14 @@ class ReportGenerator:
                 inferred_pct=inferred_count / total * 100,
                 single_hit_pct=s.single_hit_pct,
             )
-            content_parts.append(uncertainty_types_html)
+            parts.append(uncertainty_types_html)
 
+        return "\n".join(parts)
+
+    def _confidence_landscape_scatter(self) -> str:
+        """Build the novelty-vs-entropy confidence-landscape scatter block."""
+        s = self.summary
+        parts: list[str] = []
         # --- Confidence Landscape Scatter ---
         if s.has_bayesian and "posterior_entropy" in self.df.columns and "novelty_index" in self.df.columns:
             scatter_id = "plot-bayesian-landscape"
@@ -1276,7 +1399,7 @@ class ReportGenerator:
                 y_range=[0, 2.7],
             )
 
-            content_parts.append(PLOT_CONTAINER_TEMPLATE.format(
+            parts.append(PLOT_CONTAINER_TEMPLATE.format(
                 extra_class="full-width",
                 title="Confidence Landscape",
                 description=(
@@ -1287,7 +1410,7 @@ class ReportGenerator:
                 plot_id=scatter_id,
             ))
 
-        return "\n".join(content_parts)
+        return "\n".join(parts)
 
     def _build_novel_diversity_section(self) -> str:
         """Build the novel diversity tab section with cluster analysis."""
@@ -2108,6 +2231,49 @@ class ReportGenerator:
             similarity_type=self.config.similarity_type,
         )
 
+        rows_html = self._build_data_table_rows(table_df)
+
+        table_html = DATA_TABLE_TEMPLATE.format(
+            table_rows=rows_html,
+            page_size=self.config.page_size,
+            total_rows=len(table_df),
+        )
+
+        # Add JavaScript to show enhanced scoring columns and guide if data available
+        enhanced_js = ""
+        if self.summary.has_enhanced_scoring or self.summary.has_inferred_uncertainty:
+            enhanced_js = """
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Show enhanced scoring column options
+    var divider = document.getElementById('enhancedColsDivider');
+    if (divider) divider.style.display = 'block';
+    for (var i = 11; i <= 15; i++) {
+        var label = document.getElementById('colLabel' + i);
+        if (label) label.style.display = 'block';
+    }
+    // Show enhanced guide section
+    var enhancedGuide = document.getElementById('enhancedGuide');
+    if (enhancedGuide) enhancedGuide.style.display = 'block';
+});
+</script>
+"""
+
+        # Combine all sections
+        content = (
+            truncation_notice + summary_html + quick_filters_html +
+            column_guide_html + table_html + enhanced_js
+        )
+
+        return TAB_SECTION_TEMPLATE.format(
+            tab_id="data",
+            active_class="",
+            section_title="Classification Data",
+            content=content,
+        )
+
+    def _build_data_table_rows(self, table_df: pl.DataFrame) -> str:
+        """Render the data-table body rows for the given (truncated) frame."""
         # Build table rows with additional columns
         rows_html = ""
         for row in table_df.iter_rows(named=True):
@@ -2174,44 +2340,7 @@ class ReportGenerator:
                 placement_confidence=pl_conf_str,
             )
 
-        table_html = DATA_TABLE_TEMPLATE.format(
-            table_rows=rows_html,
-            page_size=self.config.page_size,
-            total_rows=len(table_df),
-        )
-
-        # Add JavaScript to show enhanced scoring columns and guide if data available
-        enhanced_js = ""
-        if self.summary.has_enhanced_scoring or self.summary.has_inferred_uncertainty:
-            enhanced_js = """
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Show enhanced scoring column options
-    var divider = document.getElementById('enhancedColsDivider');
-    if (divider) divider.style.display = 'block';
-    for (var i = 11; i <= 15; i++) {
-        var label = document.getElementById('colLabel' + i);
-        if (label) label.style.display = 'block';
-    }
-    // Show enhanced guide section
-    var enhancedGuide = document.getElementById('enhancedGuide');
-    if (enhancedGuide) enhancedGuide.style.display = 'block';
-});
-</script>
-"""
-
-        # Combine all sections
-        content = (
-            truncation_notice + summary_html + quick_filters_html +
-            column_guide_html + table_html + enhanced_js
-        )
-
-        return TAB_SECTION_TEMPLATE.format(
-            tab_id="data",
-            active_class="",
-            section_title="Classification Data",
-            content=content,
-        )
+        return rows_html
 
     def _build_phylogeny_section(
         self,
