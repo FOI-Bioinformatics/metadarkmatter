@@ -1,7 +1,7 @@
 """
 Unit tests for I/O utility functions.
 
-Tests for write_dataframe, write_dataframe_append, and read_dataframe functions.
+Tests for write_dataframe and read_dataframe functions.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ import pytest
 from metadarkmatter.core.io_utils import (
     read_dataframe,
     write_dataframe,
-    write_dataframe_append,
 )
 
 
@@ -66,58 +65,6 @@ class TestWriteDataframe:
 
         # Parquet with compression should be smaller
         assert parquet_path.stat().st_size < csv_path.stat().st_size
-
-
-class TestWriteDataframeAppend:
-    """Tests for write_dataframe_append function."""
-
-    def test_first_write_creates_file(
-        self, sample_df: pl.DataFrame, tmp_path: Path
-    ) -> None:
-        """First write should create new file."""
-        output = tmp_path / "output.csv"
-        write_dataframe_append(sample_df, output, "csv", is_first=True)
-
-        assert output.exists()
-        loaded = pl.read_csv(output)
-        assert loaded.shape == sample_df.shape
-
-    def test_append_csv(self, sample_df: pl.DataFrame, tmp_path: Path) -> None:
-        """Should append to existing CSV file."""
-        output = tmp_path / "output.csv"
-
-        # First write
-        write_dataframe_append(sample_df, output, "csv", is_first=True)
-
-        # Append
-        write_dataframe_append(sample_df, output, "csv", is_first=False)
-
-        loaded = pl.read_csv(output)
-        assert loaded.height == sample_df.height * 2
-
-    def test_append_parquet(self, sample_df: pl.DataFrame, tmp_path: Path) -> None:
-        """Should append to existing Parquet file."""
-        output = tmp_path / "output.parquet"
-
-        # First write
-        write_dataframe_append(sample_df, output, "parquet", is_first=True)
-
-        # Append
-        write_dataframe_append(sample_df, output, "parquet", is_first=False)
-
-        loaded = pl.read_parquet(output)
-        assert loaded.height == sample_df.height * 2
-
-    def test_multiple_appends(self, sample_df: pl.DataFrame, tmp_path: Path) -> None:
-        """Should handle multiple appends correctly."""
-        output = tmp_path / "output.csv"
-
-        write_dataframe_append(sample_df, output, "csv", is_first=True)
-        write_dataframe_append(sample_df, output, "csv", is_first=False)
-        write_dataframe_append(sample_df, output, "csv", is_first=False)
-
-        loaded = pl.read_csv(output)
-        assert loaded.height == sample_df.height * 3
 
 
 class TestReadDataframe:
