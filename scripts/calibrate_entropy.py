@@ -86,7 +86,15 @@ def _fit_isotonic(
     except ImportError:
         return _fit_per_bin_average(entropy, correct, bins)
 
-    iso = IsotonicRegression(increasing=False, y_min=0.0, y_max=1.0)
+    # out_of_bounds="clip" clamps predictions for grid points outside the
+    # observed entropy range to the boundary values. Without it, sklearn
+    # returns NaN there (default "nan"), which propagates into the saved
+    # knots whenever the data does not span the full [0, _MAX_ENTROPY_6]
+    # grid -- the common case, since posterior entropy rarely reaches 0 or
+    # the uniform-distribution maximum. Clipping preserves monotonicity.
+    iso = IsotonicRegression(
+        increasing=False, y_min=0.0, y_max=1.0, out_of_bounds="clip"
+    )
     iso.fit(entropy, correct.astype(float))
 
     grid = np.linspace(0.0, _MAX_ENTROPY_6, bins)
