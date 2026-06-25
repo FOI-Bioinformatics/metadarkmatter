@@ -19,7 +19,7 @@ import pytest
 from metadarkmatter.models.genomes import AccessionList
 
 if TYPE_CHECKING:
-    from click.testing import Result
+    from typer.testing import Result
 
 
 pytestmark = pytest.mark.e2e

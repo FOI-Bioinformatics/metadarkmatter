@@ -20,7 +20,7 @@ from metadarkmatter.cli.main import app
 from tests.factories import E2ETestDataset
 
 if TYPE_CHECKING:
-    from click.testing import Result
+    from typer.testing import Result
 
 
 # =============================================================================

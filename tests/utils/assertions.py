@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 
 if TYPE_CHECKING:
-    from click.testing import Result
+    from typer.testing import Result
 
 
 # =============================================================================

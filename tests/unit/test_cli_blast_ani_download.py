@@ -971,14 +971,14 @@ class TestANIHelperFunctions:
 
     def test_detect_backend_none_exits(self):
         """Raises typer.Exit when no backend is available."""
-        from click.exceptions import Exit
+        import typer
 
         from metadarkmatter.cli.ani import _detect_backend
 
         with (
             patch("metadarkmatter.external.skani.Skani.check_available", return_value=False),
             patch("metadarkmatter.external.fastani.FastANI.check_available", return_value=False),
-            pytest.raises(Exit),
+            pytest.raises(typer.Exit),
         ):
             _detect_backend()
 
