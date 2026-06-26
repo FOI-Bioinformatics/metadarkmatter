@@ -70,15 +70,28 @@ class TestLiveGTDBAPI:
         assert "Francisella" in result.genus_counts
 
     def test_live_query_small_genus(self):
-        """Query a smaller genus to verify response parsing."""
+        """Query a small genus to verify response parsing.
+
+        The genus is derived from a live family query rather than hardcoded.
+        GTDB reclassifies taxa between releases (``g__Allofrancisella``, used
+        here previously, was removed and now 404s), so any fixed genus name is
+        inherently brittle; picking the smallest genus currently in
+        Francisellaceae keeps the test exercising small-response parsing
+        without breaking on taxonomy changes.
+        """
         with GTDBClient(timeout=30.0) as client:
-            result = client.query_genomes("g__Allofrancisella")
+            family = client.query_genomes("f__Francisellaceae")
+            # Smallest genus by genome count; alphabetical tiebreak for stability.
+            small_genus = min(
+                sorted(family.genus_counts), key=lambda g: family.genus_counts[g]
+            )
+            result = client.query_genomes(f"g__{small_genus}")
 
         assert isinstance(result, GTDBQueryResult)
         assert result.total_count >= 1
 
         for genome in result.genomes:
-            assert "Allofrancisella" in genome.gtdb_taxonomy
+            assert small_genus in genome.gtdb_taxonomy
 
     def test_live_query_unknown_taxon(self):
         """Should handle unknown taxon gracefully."""
