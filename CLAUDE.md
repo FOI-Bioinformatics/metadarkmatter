@@ -222,6 +222,7 @@ validation against a held-out family.
 - Avoid Unicode in any Nextflow workflow files (if workflows are added)
 - FASTA headers are standardized to `{accession}|{contig_id}` format in BLAST databases
 - Classification thresholds differ between nucleotide (default) and protein mode (`--alignment-mode protein`)
+- Reports must be reproducible: polars `group_by`/`.unique()` do NOT preserve order, so sort their outputs and give cluster-ID/representative selection total-order tiebreaks (see `core/novel_diversity/clustering.py`, `core/phylogeny/placement.py`; guarded by `tests/unit/test_clustering_determinism.py`). A full report is byte-identical across processes except the generation timestamp.
 
 ## Phylogeny Tab
 
@@ -243,7 +244,7 @@ metadarkmatter report generate --classifications results.csv --ani ani.csv --no-
 - `core/phylogeny/tree_builder.py` - `ani_to_newick()`, `load_user_tree()`
 - `core/phylogeny/placement.py` - `NovelCluster`, `extract_novel_clusters()`, `place_novel_clusters()`
 - `visualization/report/templates.py` - `PHYLOGENY_SECTION_TEMPLATE`, `PHYLOTREE_JS_TEMPLATE`
-- `visualization/report/generator.py` - `_build_phylogeny_section()`
+- `visualization/report/sections/phylogeny.py` - `PhylogenyMixin._build_phylogeny_section()`
 
 **Requirements:**
 - ANI matrix with >= 3 genomes
@@ -298,14 +299,34 @@ src/metadarkmatter/
 ├── clients/          # API clients (GTDB with retry logic, on-disk TTL cache via METADARKMATTER_GTDB_CACHE_DIR)
 └── visualization/    # Plotly charts and HTML report generation
     └── report/
-        ├── generator.py      # Single-sample reports; ReportConfig.report_mode='offline' default in v0.2.0
+        ├── generator.py      # ReportGenerator FACADE: ReportGenerator(*section mixins, _ReportBase) + __init__/generate/_build_html/_build_navigation; re-exports public API via __all__
+        ├── models.py         # TaxonomicSummary, _Enhanced/_BayesianMetrics, ReportConfig, _safe_float (plain data, no self-state)
         ├── multi_generator.py # Multi-sample comparative reports
+        ├── sections/         # Section-builder mixins (one class per report tab/responsibility)
+        │   ├── _base.py      # _ReportBase: shared instance-attr annotations + plot/label primitives (_register_plot, _build_histogram, _build_category_scatter, genome-label helpers)
+        │   ├── summary.py    # SummaryMixin (_compute_summary + overview/metric cards)
+        │   ├── classification.py # ClassificationMixin (+ _confidence_* panel builders)
+        │   ├── novel.py      # NovelMixin (novel-diversity tab)
+        │   ├── reference.py  # ReferenceMixin (ANI/AAI heatmaps, recruitment, species bar)
+        │   ├── phylogeny.py  # PhylogenyMixin (_build_phylogeny_content / _build_phylogeny_section)
+        │   └── data.py       # DataMixin (interactive data table)
         ├── assets/           # Bundled JS (Plotly inlined; D3 vendored on demand) + SRI cache (v0.2.0)
         └── components/       # Report building blocks
             ├── clustering.py          # perform_hierarchical_clustering()
             ├── heatmap_builder.py     # HeatmapConfig, unified ANI/AAI heatmaps
             └── extended_matrix_builder.py # Novel-to-reference extended matrices
 ```
+
+**Report section mixins:** `ReportGenerator` is a thin facade composed of the
+`sections/*.py` mixins (all inheriting `sections/_base._ReportBase`, which
+declares shared `self.*` attributes for mypy and holds the plotting
+primitives). Public symbols (`ReportGenerator`, `ReportConfig`,
+`TaxonomicSummary`, `generate_report`) stay importable from
+`report.generator` and are kept in `__all__` so ruff doesn't prune the
+type-only re-exports. To add a tab: add a method to the relevant mixin (or a
+new mixin added to the `ReportGenerator(...)` bases) and call it from
+`_build_html`. Cross-mixin calls need the callee declared on `_ReportBase`
+(only `_build_phylogeny_content` currently is).
 
 Companion artifacts at the repo root:
 
