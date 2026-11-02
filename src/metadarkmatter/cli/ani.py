@@ -388,14 +388,13 @@ def compute(
                     total=None,
                 )
 
-                from metadarkmatter.external import FastANI, create_genome_list_file
+                from metadarkmatter.external import FastANI
 
-                # Create genome list file
+                # Write the list from the already-selected genome_files (which
+                # honours --representatives-only), not from the whole dir.
                 list_file = tmp_path / "genome_list.txt"
-                create_genome_list_file(
-                    genomes,
-                    list_file,
-                    patterns=(genome_pattern, "*.fna", "*.fa", "*.fasta"),
+                list_file.write_text(
+                    "".join(f"{p.resolve()}\n" for p in sorted(genome_files))
                 )
 
                 raw_output = tmp_path / "fastani_output.txt"
@@ -429,6 +428,10 @@ def compute(
                         result_stderr = tool_result.stderr
                 except ToolExecutionError as e:
                     console.print(f"\n[red]fastANI failed:[/red]\n{e.message}")
+                    raise typer.Exit(code=1) from None
+                except RuntimeError as e:
+                    # compute_parallel_batches raises a plain RuntimeError
+                    console.print(f"\n[red]fastANI failed:[/red]\n{e}")
                     raise typer.Exit(code=1) from None
 
                 if verbose:

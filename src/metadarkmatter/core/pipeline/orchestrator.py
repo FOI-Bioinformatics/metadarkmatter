@@ -21,7 +21,8 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
+from datetime import UTC, datetime
 from enum import Enum, StrEnum
 from pathlib import Path
 
@@ -66,9 +67,17 @@ class StepResult:
 
 @dataclass
 class PipelineLayout:
-    """Single source of truth for all pipeline file paths under one root."""
+    """Single source of truth for all pipeline file paths under one root.
+
+    ``sample_name`` and ``family_taxid`` determine the Kraken2 output and
+    extracted-read filenames, which must match what ``mdm kraken2 classify``
+    (``{sample}.kraken`` / ``{sample}.kreport`` in its ``--output`` dir) and
+    ``mdm kraken2 extract`` (``{sample}_taxid{taxid}_R1.fastq.gz``) write.
+    """
 
     root: Path
+    sample_name: str = "sample"
+    family_taxid: int | None = None
 
     @property
     def genomes_dir(self) -> Path:
@@ -83,20 +92,33 @@ class PipelineLayout:
         return self.root / "genome_metadata.tsv"
 
     @property
+    def kraken_dir(self) -> Path:
+        """Directory passed as ``--output`` to ``kraken2 classify``."""
+        return self.root
+
+    @property
     def kraken_output(self) -> Path:
-        return self.root / "sample.kraken"
+        return self.kraken_dir / f"{self.sample_name}.kraken"
+
+    @property
+    def kraken_report(self) -> Path:
+        return self.kraken_dir / f"{self.sample_name}.kreport"
 
     @property
     def extraction_dir(self) -> Path:
         return self.root / "extraction"
 
+    def _extracted_reads(self, mate: int) -> Path:
+        taxid = f"_taxid{self.family_taxid}" if self.family_taxid is not None else ""
+        return self.extraction_dir / f"{self.sample_name}{taxid}_R{mate}.fastq.gz"
+
     @property
     def extracted_reads_1(self) -> Path:
-        return self.extraction_dir / "reads_R1.fastq.gz"
+        return self._extracted_reads(1)
 
     @property
     def extracted_reads_2(self) -> Path:
-        return self.extraction_dir / "reads_R2.fastq.gz"
+        return self._extracted_reads(2)
 
     def database(self, aligner: Aligner) -> Path:
         sub = "blastdb" if aligner == Aligner.BLAST else "mmseqs_db"
@@ -175,12 +197,22 @@ def _is_present(path: Path) -> bool:
     return path.exists() and path.stat().st_size > 0
 
 
-def _db_present(db_prefix: Path) -> bool:
-    """A makedb output is present if any file with the db prefix exists."""
-    parent = db_prefix.parent
-    if not parent.is_dir():
-        return False
-    return any(p.name.startswith(db_prefix.name) and p.stat().st_size > 0 for p in parent.iterdir())
+def _db_present(db_prefix: Path, aligner: Aligner = Aligner.BLAST) -> bool:
+    """A makedb output is present only when the finished database files exist.
+
+    Intermediate files that share the prefix (e.g. the concatenated
+    ``pangenome.fasta`` or ``pangenome_id_mapping.tsv`` written before the
+    tool runs) do not count. BLAST: ``<prefix>.nhr`` / ``<prefix>.nal`` or a
+    first volume ``<prefix>.00.nhr``. MMseqs2: ``<prefix>.dbtype``.
+    """
+    suffixes: tuple[str, ...] = (
+        (".nhr", ".nal", ".00.nhr") if aligner == Aligner.BLAST else (".dbtype",)
+    )
+    for suffix in suffixes:
+        candidate = db_prefix.parent / f"{db_prefix.name}{suffix}"
+        if candidate.is_file() and candidate.stat().st_size > 0:
+            return True
+    return False
 
 
 @dataclass
@@ -204,9 +236,15 @@ class Pipeline:
         force: bool = False,
         runner: StepRunner = _default_runner,
         log: Callable[[str], None] | None = None,
+        extracted_reads_2: Path | None = None,
     ) -> None:
         self.config = config
+        # Extracted-read filenames embed the taxid; derive it from the config
+        # when the caller did not set it on the layout.
+        if layout.family_taxid is None and config.family_taxid is not None:
+            layout = replace(layout, family_taxid=config.family_taxid)
         self.layout = layout
+        self.extracted_reads_2 = extracted_reads_2
         self.dry_run = dry_run
         self.force = force
         self._runner = runner
@@ -225,9 +263,19 @@ class Pipeline:
         genomes_dir = cfg.genomes_dir or lay.genomes_dir
         kraken_output = cfg.kraken_output or lay.kraken_output
         reads_1 = cfg.extracted_reads_1 or lay.extracted_reads_1
-        # When the user pre-supplies extracted reads, R2 is unknown to us; use
-        # the pipeline's extracted R2 only when we run extraction ourselves.
-        produced_reads_2 = lay.extracted_reads_2
+        # Paired-end alignment input: the user-supplied extracted R2 when the
+        # reads were pre-extracted, otherwise our own extracted R2 only when
+        # the raw input was paired.
+        reads_2: Path | None
+        if cfg.extracted_reads_1 is not None:
+            reads_2 = self.extracted_reads_2
+        else:
+            reads_2 = lay.extracted_reads_2 if cfg.reads_2 is not None else None
+
+        # download writes genome_metadata.tsv next to genomes.tsv, so it will
+        # exist by the time later steps run even though it is absent now.
+        download_enabled = cfg.genomes_dir is None
+        use_metadata = download_enabled or _is_present(lay.metadata_tsv)
 
         db = lay.database(cfg.aligner)
         alignment = lay.alignment(cfg.aligner)
@@ -244,7 +292,7 @@ class Pipeline:
         steps.append(
             _Step(
                 step=PipelineStep.DOWNLOAD,
-                enabled=cfg.genomes_dir is None,
+                enabled=download_enabled,
                 argv=download_argv,
                 outputs=[lay.genomes_dir],
                 present=lambda: _is_present(lay.genomes_dir),
@@ -256,7 +304,8 @@ class Pipeline:
             *MDM_INVOCATION, "kraken2", "classify",
             "--reads-1", str(cfg.reads_1) if cfg.reads_1 else "",
             "--kraken-db", str(cfg.kraken_db) if cfg.kraken_db else "",
-            "--output", str(lay.kraken_output), "--threads", threads,
+            "--output", str(lay.kraken_dir), "--sample-name", lay.sample_name,
+            "--threads", threads,
         ]
         if cfg.reads_2:
             kc_argv += ["--reads-2", str(cfg.reads_2)]
@@ -265,8 +314,8 @@ class Pipeline:
                 step=PipelineStep.KRAKEN_CLASSIFY,
                 enabled=cfg.extracted_reads_1 is None and cfg.kraken_output is None,
                 argv=kc_argv,
-                outputs=[lay.kraken_output],
-                present=lambda: _is_present(lay.kraken_output),
+                outputs=[lay.kraken_output, lay.kraken_report],
+                present=lambda: _is_present(lay.kraken_output) and _is_present(lay.kraken_report),
             )
         )
 
@@ -276,7 +325,7 @@ class Pipeline:
             "--kraken-output", str(kraken_output),
             "--reads-1", str(cfg.reads_1) if cfg.reads_1 else "",
             "--taxid", str(cfg.family_taxid) if cfg.family_taxid is not None else "",
-            "--output", str(lay.extraction_dir),
+            "--output", str(lay.extraction_dir), "--sample-name", lay.sample_name,
         ]
         if cfg.reads_2:
             ke_argv += ["--reads-2", str(cfg.reads_2)]
@@ -307,7 +356,7 @@ class Pipeline:
                 enabled=True,
                 argv=makedb_argv,
                 outputs=[db],
-                present=lambda: _db_present(db),
+                present=lambda: _db_present(db, cfg.aligner),
             )
         )
 
@@ -319,14 +368,16 @@ class Pipeline:
                 "--output", str(alignment), "--threads", threads,
             ]
         else:
+            query_args = (
+                ["--query-1", str(reads_1), "--query-2", str(reads_2)]
+                if reads_2 is not None
+                else ["--query", str(reads_1)]
+            )
             align_argv = [
                 *MDM_INVOCATION, "mmseqs2", "search",
-                "--query-1", str(reads_1), "--database", str(db),
+                *query_args, "--database", str(db),
                 "--output", str(alignment), "--threads", threads,
             ]
-            if cfg.extracted_reads_1 is None and produced_reads_2 is not None:
-                # paired-end available only when we extracted reads ourselves
-                align_argv += ["--query-2", str(produced_reads_2)]
         steps.append(
             _Step(
                 step=PipelineStep.ALIGN,
@@ -343,7 +394,7 @@ class Pipeline:
             "--genomes", str(genomes_dir), "--output", str(lay.ani_matrix),
             "--threads", threads,
         ]
-        if _is_present(lay.metadata_tsv):
+        if use_metadata:
             ani_argv += ["--metadata", str(lay.metadata_tsv), "--representatives-only"]
         steps.append(
             _Step(
@@ -361,7 +412,7 @@ class Pipeline:
             "--alignment", str(alignment), "--ani", str(lay.ani_matrix),
             "--output", str(lay.classifications), "--summary", str(lay.summary_json),
         ]
-        if _is_present(lay.metadata_tsv):
+        if use_metadata:
             classify_argv += ["--metadata", str(lay.metadata_tsv)]
         steps.append(
             _Step(
@@ -379,7 +430,7 @@ class Pipeline:
             "--classifications", str(lay.classifications), "--ani", str(lay.ani_matrix),
             "--output", str(lay.report), "--report-mode", "offline",
         ]
-        if _is_present(lay.metadata_tsv):
+        if use_metadata:
             report_argv += ["--metadata", str(lay.metadata_tsv)]
         steps.append(
             _Step(
@@ -410,6 +461,7 @@ class Pipeline:
             output_dir=str(self.layout.root),
             aligner=self.config.aligner.value,
             config={k: _jsonable(v) for k, v in self.config.model_dump().items()},
+            started_at=_now_iso(),
         )
 
         for step in plan:
@@ -436,7 +488,9 @@ class Pipeline:
 
             command_str = " ".join(step.argv)
 
-            if not self.force and step.present():
+            # --from forces the selected step and every later one to re-run.
+            forced = self.force or from_step is not None
+            if not forced and step.present():
                 self._log(f"[cached] {step.step.value}: outputs present, skipping")
                 manifest.steps.append(StepResult(step.step.value, StepStatus.CACHED,
                                                  command=command_str,
@@ -457,6 +511,7 @@ class Pipeline:
             if code != 0:
                 manifest.steps.append(StepResult(step.step.value, StepStatus.FAILED,
                                                  command=command_str, elapsed_s=elapsed))
+                manifest.finished_at = _now_iso()
                 self._write_manifest(manifest)
                 raise PipelineStepError(
                     message=f"Pipeline step '{step.step.value}' failed (exit code {code}).",
@@ -471,6 +526,7 @@ class Pipeline:
                                              outputs=[str(p) for p in step.outputs],
                                              elapsed_s=round(elapsed, 2)))
 
+        manifest.finished_at = _now_iso()
         self._write_manifest(manifest)
         return manifest
 
@@ -493,6 +549,10 @@ class Pipeline:
             return
         self.layout.manifest.parent.mkdir(parents=True, exist_ok=True)
         self.layout.manifest.write_text(manifest.to_json())
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _jsonable(value: object) -> object:

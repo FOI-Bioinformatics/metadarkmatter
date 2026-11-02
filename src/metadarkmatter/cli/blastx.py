@@ -26,6 +26,7 @@ from rich.progress import (
 )
 
 from metadarkmatter.cli.utils import QuietConsole, spinner_progress
+from metadarkmatter.core.genome_utils import extract_accession_from_filename
 from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.external import ToolExecutionError
 from metadarkmatter.external.diamond import Diamond
@@ -49,6 +50,21 @@ def _check_diamond_available() -> tuple[bool, str]:
     if Diamond.check_available():
         return True, ""
     return False, "diamond"
+
+
+_PROTEIN_SUFFIXES = (".faa.gz", ".fasta.gz", ".fa.gz", ".faa", ".fasta", ".fa", ".gz")
+
+
+def _protein_file_accession(protein_file: Path) -> str:
+    """Genome accession for a protein FASTA filename (handles .faa.gz and _protein)."""
+    name = protein_file.name
+    for suffix in _PROTEIN_SUFFIXES:
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    if name.endswith("_protein"):
+        name = name[: -len("_protein")]
+    return extract_accession_from_filename(name)
 
 
 def _concatenate_proteins(
@@ -75,10 +91,9 @@ def _concatenate_proteins(
 
     with output_fasta.open("w") as out_f:
         for protein_file in protein_files:
-            # Extract accession from filename (e.g., GCA_000001.1.faa -> GCA_000001.1)
-            accession = protein_file.stem
-            if accession.endswith("_protein"):
-                accession = accession[:-8]  # Remove _protein suffix
+            # Extract accession from filename (GCA_000001.1.faa[.gz] or
+            # GCF_x.1_ASM1_protein.faa -> GCA_000001.1 / GCF_x.1)
+            accession = _protein_file_accession(protein_file)
 
             genome_count += 1
 
@@ -95,8 +110,10 @@ def _concatenate_proteins(
                         # Rewrite header with genome prefix
                         out_f.write(f">{accession}|{original_id}\n")
                         protein_count += 1
-                    else:
-                        out_f.write(line)
+                    elif line.strip():
+                        # Always newline-terminate so a file without a final
+                        # newline cannot merge into the next file's header.
+                        out_f.write(line if line.endswith("\n") else line + "\n")
 
     return genome_count, protein_count
 
@@ -316,10 +333,13 @@ def align_reads(
         help="Number of threads",
         min=1,
     ),
-    compress: bool = typer.Option(
-        True,
+    compress: bool | None = typer.Option(
+        None,
         "--compress/--no-compress",
-        help="Compress output with gzip (default: auto based on .gz extension)",
+        help=(
+            "Compress output with gzip (default: auto, compress only when --output "
+            "ends in .gz; --compress appends .gz)"
+        ),
     ),
     skip_if_exists: bool = typer.Option(
         False,
@@ -394,7 +414,7 @@ def align_reads(
     output.parent.mkdir(parents=True, exist_ok=True)
 
     # Determine if output should be compressed
-    should_compress = compress or output.suffix == ".gz"
+    should_compress = bool(compress) or output.suffix == ".gz"
     if should_compress and output.suffix != ".gz":
         output = Path(str(output) + ".gz")
 
@@ -510,7 +530,7 @@ def align_reads(
 
     out.print(
         f"\n[dim]Next step: metadarkmatter score classify "
-        f"--blast {final_output} --ani <ani_matrix.csv> "
+        f"--alignment {final_output} --ani <ani_matrix.csv> "
         f"--alignment-mode protein --output classifications.csv[/dim]"
     )
     out.print()

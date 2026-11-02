@@ -399,7 +399,7 @@ U = 100 - 0.0 = 100.0  # Maximum uncertainty
 
 **Best practice:** Validate ANI matrix covers all BLAST database genomes:
 ```bash
-metadarkmatter ani validate --ani ani_matrix.csv --genomes genomes/
+metadarkmatter ani validate --ani ani_matrix.csv --blast sample.blast.tsv.gz
 ```
 
 ### Edge Cases

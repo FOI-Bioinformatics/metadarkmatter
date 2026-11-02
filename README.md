@@ -70,7 +70,7 @@ ANI -> classify -> report) with per-step checkpointing, `--from` resume, and a
 
 ```bash
 mdm run pipeline \
-  --family f__Francisellaceae --family-taxid 119060 \
+  --family f__Francisellaceae --family-taxid 34064 \
   --reads-1 sample_R1.fastq.gz --reads-2 sample_R2.fastq.gz \
   --kraken-db db/ --output-dir results/run01
 
@@ -97,7 +97,7 @@ mdm download genomes fetch --accessions genomes.tsv --output-dir genomes/
 #    see https://github.com/DerrickWood/kraken2/wiki for db construction.
 mdm kraken2 classify --reads-1 sample_R1.fastq.gz --kraken-db db/ --output kraken_out/
 mdm kraken2 extract --kraken-output kraken_out/sample.kraken \
-  --reads-1 sample_R1.fastq.gz --taxid 119060 --output extraction/
+  --reads-1 sample_R1.fastq.gz --taxid 34064 --output extraction/
 
 # 3. Build BLAST database and align.
 #    Default --task is blastn (word_size 7), tuned for divergent recruitment
@@ -105,7 +105,7 @@ mdm kraken2 extract --kraken-output kraken_out/sample.kraken \
 #    ANI hits, --task dc-megablast gives ~10x speedup with similar
 #    sensitivity in that range.
 mdm blast makedb --genomes genomes/ --output blastdb/pangenome
-mdm blast align --query extraction/reads_R1.fastq.gz \
+mdm blast align --query extraction/sample_taxid34064_R1.fastq.gz \
   --database blastdb/pangenome --output sample.blast.tsv.gz --threads 16
 # Optionally add --task dc-megablast for closely-related references.
 

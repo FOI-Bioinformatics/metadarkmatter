@@ -206,7 +206,13 @@ class BlastN(ExternalTool):
 
     @staticmethod
     def _is_fastq_file(file_path: Path) -> bool:
-        """Check if file is FASTQ based on extension.
+        """Check if file is FASTQ.
+
+        Sniffs the first record marker (``@`` = FASTQ, ``>`` = FASTA) when the
+        file is readable, so a FASTA file with a misleading ``.fastq`` name
+        (e.g. a decompressed temp file) is not run through the 4-line FASTQ
+        converter, which would silently drop records. Falls back to the
+        extension when the file cannot be read.
 
         Args:
             file_path: Path to check.
@@ -214,6 +220,15 @@ class BlastN(ExternalTool):
         Returns:
             True if file appears to be FASTQ format.
         """
+        try:
+            opener = gzip.open if str(file_path).endswith(".gz") else open
+            with opener(file_path, "rt") as fh:
+                for line in fh:
+                    stripped = line.strip()
+                    if stripped:
+                        return stripped.startswith("@")
+        except (OSError, EOFError, UnicodeDecodeError):
+            pass
         name_lower = file_path.name.lower()
         return name_lower.endswith(('.fastq', '.fq', '.fastq.gz', '.fq.gz'))
 

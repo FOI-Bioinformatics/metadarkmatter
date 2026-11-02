@@ -113,7 +113,7 @@ class MMseqs2(ExternalTool):
             mode: Operation mode ('createdb' or 'search')
             input_fasta: Input FASTA file (for createdb)
             database: MMseqs2 database path (for both modes)
-            dbtype: Database type - 0=amino acid, 1=nucleotide, 2=auto (for createdb)
+            dbtype: Database type - 0=auto, 1=amino acid, 2=nucleotide (for createdb)
             query: Query sequences (for search)
             output: Output file path (for search)
             tmp_dir: Temporary directory for search (auto-created if None)
@@ -170,7 +170,7 @@ class MMseqs2(ExternalTool):
             exe: Path to MMseqs2 executable
             input_fasta: Input FASTA file
             database: Output database path
-            dbtype: Database type - 0=amino acid, 1=nucleotide, 2=auto
+            dbtype: Database type - 0=auto, 1=amino acid, 2=nucleotide
 
         Returns:
             Command as list of strings.
@@ -299,7 +299,7 @@ class MMseqs2(ExternalTool):
         Args:
             input_fasta: Input FASTA file
             database: Output database path
-            dbtype: Database type - 0=amino acid, 1=nucleotide, 2=auto (default)
+            dbtype: Database type - 0=auto, 1=amino acid, 2=nucleotide (None: auto)
             timeout: Optional timeout in seconds
 
         Raises:
@@ -501,7 +501,11 @@ class MMseqs2(ExternalTool):
         result_db = tmp_dir / "resultDB"
 
         exe = str(self.get_executable())
-        dbtype = search_type - 1  # 3->2 for nucleotide, 2->1 for protein
+        # Query reads are always nucleotide (mmseqs createdb --dbtype 2), for
+        # both nucleotide (3) and translated (2) search; translated search
+        # translates the nucleotide query itself. A 1 here would build an
+        # amino-acid query DB and find nothing.
+        dbtype = 2
 
         def _run_step(cmd: list[str]) -> float:
             """Run an MMseqs2 sub-command and translate failures.

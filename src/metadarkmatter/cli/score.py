@@ -7,6 +7,7 @@ the ANI-weighted placement uncertainty algorithm on existing BLAST results.
 
 from __future__ import annotations
 
+import gzip
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,6 +41,7 @@ from metadarkmatter.core.classification.runner import (
 )
 from metadarkmatter.core.exceptions import ConfigurationError
 from metadarkmatter.core.io_utils import OutputFormat, read_dataframe, write_dataframe
+from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.models.classification import TaxonomicSummary
 from metadarkmatter.models.config import ScoringConfig
 
@@ -186,6 +188,57 @@ class _ClassifyOptions:
     preset: str | None
 
 
+def _is_gzip(path: Path) -> bool:
+    """True when the file starts with the gzip magic bytes."""
+    try:
+        with path.open("rb") as f:
+            return f.read(2) == b"\x1f\x8b"
+    except OSError:
+        return False
+
+
+def _explicit_flag_overrides(opts: _ClassifyOptions) -> dict[str, Any]:
+    """Return the ScoringConfig fields whose CLI flags differ from their defaults.
+
+    Used to layer explicitly-set flags on top of a ``--config`` YAML or a
+    ``--preset`` without discarding fields that only the YAML/preset sets.
+    """
+    overrides: dict[str, Any] = {}
+    if opts.alignment_mode != "nucleotide":
+        overrides["alignment_mode"] = opts.alignment_mode
+    if opts.bitscore_threshold != 95.0:
+        overrides["bitscore_threshold_pct"] = opts.bitscore_threshold
+    if opts.min_alignment_length != 100:
+        overrides["min_alignment_length"] = opts.min_alignment_length
+    if opts.min_alignment_fraction != 0.3:
+        overrides["min_alignment_fraction"] = opts.min_alignment_fraction
+    if opts.coverage_weight_mode != "linear":
+        overrides["coverage_weight_mode"] = opts.coverage_weight_mode
+    if opts.coverage_weight_strength != 0.5:
+        overrides["coverage_weight_strength"] = opts.coverage_weight_strength
+    if opts.uncertainty_mode != "second":
+        overrides["uncertainty_mode"] = opts.uncertainty_mode
+    if opts.single_hit_uncertainty_threshold != 10.0:
+        overrides["single_hit_uncertainty_threshold"] = opts.single_hit_uncertainty_threshold
+    if opts.target_family is not None:
+        overrides["target_family"] = opts.target_family
+    if opts.family_ratio_threshold != 0.8:
+        overrides["family_ratio_threshold"] = opts.family_ratio_threshold
+    if opts.max_evalue != 0.0:
+        overrides["max_evalue"] = opts.max_evalue
+    if opts.min_percent_identity != 0.0:
+        overrides["min_percent_identity"] = opts.min_percent_identity
+    if opts.min_bitscore != 0.0:
+        overrides["min_bitscore"] = opts.min_bitscore
+    if opts.min_read_length != 0:
+        overrides["min_read_length"] = opts.min_read_length
+    if opts.min_query_coverage != 0.0:
+        overrides["min_query_coverage"] = opts.min_query_coverage
+    if opts.include_legacy_scores:
+        overrides["include_legacy_scores"] = True
+    return overrides
+
+
 def build_classify_config(opts: _ClassifyOptions) -> tuple[ScoringConfig, list[str]]:
     """Resolve the scoring config with precedence --config > flags > preset > defaults.
 
@@ -233,39 +286,7 @@ def build_classify_config(opts: _ClassifyOptions) -> tuple[ScoringConfig, list[s
         messages.append(f"[dim]Loaded config from: {opts.config_file}[/dim]")
 
         # CLI flags override YAML values
-        overrides: dict[str, Any] = {}
-        if opts.alignment_mode != "nucleotide":
-            overrides["alignment_mode"] = opts.alignment_mode
-        if opts.bitscore_threshold != 95.0:
-            overrides["bitscore_threshold_pct"] = opts.bitscore_threshold
-        if opts.min_alignment_length != 100:
-            overrides["min_alignment_length"] = opts.min_alignment_length
-        if opts.min_alignment_fraction != 0.3:
-            overrides["min_alignment_fraction"] = opts.min_alignment_fraction
-        if opts.coverage_weight_mode != "linear":
-            overrides["coverage_weight_mode"] = opts.coverage_weight_mode
-        if opts.coverage_weight_strength != 0.5:
-            overrides["coverage_weight_strength"] = opts.coverage_weight_strength
-        if opts.uncertainty_mode != "second":
-            overrides["uncertainty_mode"] = opts.uncertainty_mode
-        if opts.single_hit_uncertainty_threshold != 10.0:
-            overrides["single_hit_uncertainty_threshold"] = opts.single_hit_uncertainty_threshold
-        if opts.target_family is not None:
-            overrides["target_family"] = opts.target_family
-        if opts.family_ratio_threshold != 0.8:
-            overrides["family_ratio_threshold"] = opts.family_ratio_threshold
-        if opts.max_evalue != 0.0:
-            overrides["max_evalue"] = opts.max_evalue
-        if opts.min_percent_identity != 0.0:
-            overrides["min_percent_identity"] = opts.min_percent_identity
-        if opts.min_bitscore != 0.0:
-            overrides["min_bitscore"] = opts.min_bitscore
-        if opts.min_read_length != 0:
-            overrides["min_read_length"] = opts.min_read_length
-        if opts.min_query_coverage != 0.0:
-            overrides["min_query_coverage"] = opts.min_query_coverage
-        if opts.include_legacy_scores:
-            overrides["include_legacy_scores"] = True
+        overrides = _explicit_flag_overrides(opts)
         if overrides:
             config = config.model_copy(update=overrides)
         return config, messages
@@ -279,40 +300,11 @@ def build_classify_config(opts: _ClassifyOptions) -> tuple[ScoringConfig, list[s
             )
         config = THRESHOLD_PRESETS[preset_lower]
         messages.append(f"[dim]Using preset: {preset_lower}[/dim]")
-        # Override bitscore/alignment-mode/weighting/uncertainty if explicitly provided
-        if (
-            opts.bitscore_threshold != 95.0
-            or opts.alignment_mode != "nucleotide"
-            or opts.coverage_weight_mode != "linear"
-            or opts.uncertainty_mode != "second"
-        ):
-            config = ScoringConfig(
-                alignment_mode=opts.alignment_mode,
-                bitscore_threshold_pct=opts.bitscore_threshold,
-                novelty_known_max=config.novelty_known_max,
-                novelty_novel_species_min=config.novelty_novel_species_min,
-                novelty_novel_species_max=config.novelty_novel_species_max,
-                novelty_novel_genus_min=config.novelty_novel_genus_min,
-                novelty_novel_genus_max=config.novelty_novel_genus_max,
-                uncertainty_known_max=config.uncertainty_known_max,
-                uncertainty_novel_species_max=config.uncertainty_novel_species_max,
-                uncertainty_novel_genus_max=config.uncertainty_novel_genus_max,
-                uncertainty_conserved_min=config.uncertainty_conserved_min,
-                min_alignment_length=config.min_alignment_length,
-                min_alignment_fraction=config.min_alignment_fraction,
-                max_evalue=opts.max_evalue,
-                min_percent_identity=opts.min_percent_identity,
-                min_bitscore=opts.min_bitscore,
-                min_read_length=opts.min_read_length,
-                min_query_coverage=opts.min_query_coverage,
-                coverage_weight_mode=opts.coverage_weight_mode,
-                coverage_weight_strength=opts.coverage_weight_strength,
-                uncertainty_mode=opts.uncertainty_mode,
-                single_hit_uncertainty_threshold=opts.single_hit_uncertainty_threshold,
-                target_family=opts.target_family,
-                family_ratio_threshold=opts.family_ratio_threshold,
-                include_legacy_scores=opts.include_legacy_scores,
-            )
+        # Layer explicitly-set flags on top of the preset; model_copy keeps
+        # preset-only fields (Bayesian settings, gap thresholds, ...).
+        preset_overrides = _explicit_flag_overrides(opts)
+        if preset_overrides:
+            config = config.model_copy(update=preset_overrides)
         return config, messages
 
     config = ScoringConfig(
@@ -723,7 +715,7 @@ def classify(
         raise typer.Exit(code=1) from None
 
     # Dry-run mode: validate and show what would be processed
-    if dry_run:
+    if dry_run or is_dry_run():
         console.print("[bold cyan]DRY RUN MODE[/bold cyan] - Validating inputs only\n")
 
         # Show alignment file info
@@ -733,10 +725,11 @@ def classify(
 
         # Count lines (estimate reads)
         try:
-            with alignment.open("rb") as f:
+            opener = gzip.open if _is_gzip(alignment) else open
+            with opener(alignment, "rb") as f:
                 line_count = sum(1 for _ in f)
             console.print(f"  Alignments: ~{line_count:,}")
-        except OSError:
+        except (OSError, EOFError):
             console.print("  Alignments: (unable to count)")
 
         # Show ANI matrix info
@@ -1305,29 +1298,28 @@ def batch(
             raise typer.Exit(code=1) from None
         config = THRESHOLD_PRESETS[preset_lower]
         console.print(f"[dim]Using preset: {preset_lower}[/dim]")
-        # Override with alignment mode if protein or non-default uncertainty mode
-        if alignment_mode_lower != "nucleotide" or uncertainty_mode_lower != "second":
-            config = ScoringConfig(
-                alignment_mode=alignment_mode_lower,
-                bitscore_threshold_pct=config.bitscore_threshold_pct,
-                novelty_known_max=config.novelty_known_max,
-                novelty_novel_species_min=config.novelty_novel_species_min,
-                novelty_novel_species_max=config.novelty_novel_species_max,
-                novelty_novel_genus_min=config.novelty_novel_genus_min,
-                novelty_novel_genus_max=config.novelty_novel_genus_max,
-                uncertainty_known_max=config.uncertainty_known_max,
-                uncertainty_novel_species_max=config.uncertainty_novel_species_max,
-                uncertainty_novel_genus_max=config.uncertainty_novel_genus_max,
-                uncertainty_conserved_min=config.uncertainty_conserved_min,
-                min_alignment_length=config.min_alignment_length,
-                min_alignment_fraction=config.min_alignment_fraction,
-                max_evalue=max_evalue,
-                min_percent_identity=min_percent_identity,
-                min_bitscore=min_bitscore,
-                min_read_length=min_read_length,
-                min_query_coverage=min_query_coverage,
-                uncertainty_mode=uncertainty_mode_lower,
-            )
+        # Layer explicitly-set flags onto the preset (model_copy keeps
+        # preset-only fields); previously the filter flags were dropped.
+        batch_overrides: dict[str, Any] = {}
+        flag_values: list[tuple[str, Any, Any]] = [
+            ("alignment_mode", alignment_mode_lower, "nucleotide"),
+            ("bitscore_threshold_pct", bitscore_threshold, 95.0),
+            ("min_alignment_length", min_alignment_length, 100),
+            ("min_alignment_fraction", min_alignment_fraction, 0.3),
+            ("max_evalue", max_evalue, 0.0),
+            ("min_percent_identity", min_percent_identity, 0.0),
+            ("min_bitscore", min_bitscore, 0.0),
+            ("min_read_length", min_read_length, 0),
+            ("min_query_coverage", min_query_coverage, 0.0),
+            ("coverage_weight_mode", coverage_weight_mode, "linear"),
+            ("coverage_weight_strength", coverage_weight_strength, 0.5),
+            ("uncertainty_mode", uncertainty_mode_lower, "second"),
+        ]
+        for field_name, value, default in flag_values:
+            if value != default:
+                batch_overrides[field_name] = value
+        if batch_overrides:
+            config = config.model_copy(update=batch_overrides)
     else:
         config = ScoringConfig(
             alignment_mode=alignment_mode_lower,

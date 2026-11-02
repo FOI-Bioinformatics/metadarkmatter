@@ -205,6 +205,18 @@ def run_classification(
     """
     config = request.config
 
+    # ID mapping is applied only by the in-memory path. Silently ignoring it in
+    # streaming mode would leave contig IDs unmapped, so every hit would miss
+    # the ANI matrix; fail fast instead.
+    if request.streaming and (request.id_mapping is not None or request.genomes is not None):
+        raise ConfigurationError(
+            "--id-mapping/--genomes is not supported with --streaming.",
+            suggestion=(
+                "Remove --streaming (use the in-memory path), or pre-transform the "
+                "alignment so sseqids use the {accession}|{contig_id} format."
+            ),
+        )
+
     # Summarize the active alignment filters so the user can see what is applied.
     active_filters = []
     if config.min_alignment_length > 0:
@@ -367,14 +379,9 @@ def run_classification(
 
         if genome_metadata:
             log(
-                "[yellow]Note: --metadata is not supported with --streaming mode.[/yellow]\n"
-                "[yellow]Species columns will not be added to output.[/yellow]\n"
-            )
-
-        if contig_mapping:
-            log(
-                "[yellow]Note: --genomes/--id-mapping is not supported with --streaming mode.[/yellow]\n"
-                "[yellow]ID transformation will not be applied. Remove --streaming to enable it.[/yellow]\n"
+                "[yellow]Note: with --streaming, --metadata is used for the representative "
+                "mapping and target-family inference only.[/yellow]\n"
+                "[yellow]Species/genus columns will not be added to output.[/yellow]\n"
             )
 
         vectorized = VectorizedClassifier(

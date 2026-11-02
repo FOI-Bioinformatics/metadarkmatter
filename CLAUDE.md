@@ -28,7 +28,7 @@ mdm download genomes fetch --accessions genomes.tsv --output-dir genomes/
 
 # 2. Extract family reads with Kraken2 (requires a built kraken2 DB).
 mdm kraken2 extract --kraken-output sample.kraken --reads-1 sample_R1.fastq.gz \
-  --reads-2 sample_R2.fastq.gz --taxid 119060 --output extraction/
+  --reads-2 sample_R2.fastq.gz --taxid 34064 --output extraction/
 
 # 3. Compute ANI matrix (auto-selects fastANI, falls back to skani).
 mdm ani compute --genomes genomes/ --output ani_matrix.csv --threads 16
@@ -39,13 +39,13 @@ mdm ani compute --genomes genomes/ --output ani_matrix.csv --threads 16
 # slow); for closely-related references add '--task dc-megablast
 # --word-size 11' for ~10x speedup with similar 80-100% ANI sensitivity.
 mdm blast makedb --genomes genomes/ --output blastdb/pangenome
-mdm blast align --query extraction/reads_R1.fastq.gz --database blastdb/pangenome \
+mdm blast align --query extraction/sample_taxid34064_R1.fastq.gz --database blastdb/pangenome \
   --output sample.blast.tsv.gz --threads 16
 
 # Option B: MMseqs2 (supports paired-end, best for >100K reads, 5-100x faster)
 mdm mmseqs2 makedb --genomes genomes/ --output mmseqs_db/pangenome
 mdm mmseqs2 search \
-  --query-1 extraction/reads_R1.fastq.gz --query-2 extraction/reads_R2.fastq.gz \
+  --query-1 extraction/sample_taxid34064_R1.fastq.gz --query-2 extraction/sample_taxid34064_R2.fastq.gz \
   --database mmseqs_db/pangenome --output sample.mmseqs2.tsv.gz --threads 16
 
 # 5. Classify reads (target family auto-inferred from --metadata).

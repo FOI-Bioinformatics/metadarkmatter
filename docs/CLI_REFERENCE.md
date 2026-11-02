@@ -103,13 +103,13 @@ Run BLASTN competitive alignment for ANI-weighted placement.
 
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
-| `--word-size` | `-w` | INT | 7 | Word size for seeds (smaller = more sensitive) |
+| `--word-size` | `-w` | INT | per task | Word size for seeds (smaller = more sensitive); default 7 for blastn, 11 for dc-megablast, 28 for megablast |
 | `--evalue` | `-e` | FLOAT | 1e-3 | E-value threshold |
 | `--max-targets` | `-m` | INT | 100 | Maximum target sequences per query |
 | `--min-identity` | | FLOAT | None | Minimum percent identity filter |
 | `--task` | | TEXT | blastn | BLAST task (blastn, megablast, dc-megablast) |
 | `--threads` | `-p` | INT | 4 | Number of threads |
-| `--compress/--no-compress` | | FLAG | True | Compress output with gzip |
+| `--compress/--no-compress` | | FLAG | auto | Compress output with gzip (default: only when `--output` ends in `.gz`; `--compress` appends `.gz`) |
 | `--skip-if-exists` | | FLAG | False | Skip if output file exists |
 | `--verbose` | `-v` | FLAG | False | Enable verbose output |
 | `--quiet` | `-q` | FLAG | False | Suppress progress output |
@@ -166,7 +166,6 @@ Create a Diamond protein database from reference genome protein files (.faa).
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
 | `--protein-pattern` | | TEXT | *.faa | Glob pattern for protein files (when --proteins is directory) |
-| `--threads` | `-t` | INT | 4 | Number of threads for database building |
 | `--skip-if-exists` | | FLAG | False | Skip if database already exists |
 | `--verbose` | `-v` | FLAG | False | Enable verbose output |
 | `--quiet` | `-q` | FLAG | False | Suppress progress output |
@@ -178,8 +177,7 @@ Create a Diamond protein database from reference genome protein files (.faa).
 ```bash
 metadarkmatter blastx makedb \
     --proteins reference_proteins/ \
-    --output blastdb/panproteome \
-    --threads 16
+    --output blastdb/panproteome
 ```
 
 **From single protein FASTA**
@@ -212,7 +210,7 @@ Run Diamond BLASTX alignment (DNA query vs protein database) for protein-level r
 | `--max-targets` | `-m` | INT | 500 | Maximum target sequences per query |
 | `--threads` | `-p` | INT | 4 | Number of threads |
 | `--sensitive/--fast` | | FLAG | True | Use sensitive mode (recommended for divergent sequences) |
-| `--compress/--no-compress` | | FLAG | True | Compress output with gzip |
+| `--compress/--no-compress` | | FLAG | auto | Compress output with gzip (default: only when `--output` ends in `.gz`; `--compress` appends `.gz`) |
 | `--skip-if-exists` | | FLAG | False | Skip if output file exists |
 | `--verbose` | `-v` | FLAG | False | Enable verbose output |
 | `--quiet` | `-q` | FLAG | False | Suppress progress output |

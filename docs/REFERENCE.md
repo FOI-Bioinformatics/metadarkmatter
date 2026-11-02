@@ -494,7 +494,7 @@ metadarkmatter ani compute --genomes genomes/ --output ani_matrix.csv --backend 
 metadarkmatter ani compute --genomes genomes/ --output ani_matrix.csv --backend fastani
 
 # Validate ANI matrix coverage against BLAST results
-metadarkmatter ani validate --ani ani_matrix.csv --alignment sample.blast.tsv.gz
+metadarkmatter ani validate --ani ani_matrix.csv --blast sample.blast.tsv.gz
 ```
 
 Backend comparison:

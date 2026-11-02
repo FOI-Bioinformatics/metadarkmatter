@@ -262,9 +262,10 @@ metadarkmatter report generate \
 Compare multiple samples:
 
 ```bash
+# Sample names are taken from the classification filenames in --input-dir
 metadarkmatter report multi \
-    --classifications sample1.csv sample2.csv sample3.csv \
-    --names "Site A" "Site B" "Site C" \
+    --input-dir classifications/ \
+    --pattern "*.csv" \
     --output comparison.html
 ```
 
@@ -305,7 +306,6 @@ Process multiple samples with shared ANI matrix:
 metadarkmatter score batch \
     --alignment-dir blast_results/ \
     --ani ani_matrix.csv \
-    --metadata genome_metadata.tsv \
     --output-dir classifications/
 ```
 
@@ -345,7 +345,7 @@ Validate ANI matrix covers all genomes in BLAST database:
 ```bash
 metadarkmatter ani validate \
     --ani ani_matrix.csv \
-    --genomes genomes/
+    --blast sample.blast.tsv.gz
 ```
 
 ### Species-Level Tracking
