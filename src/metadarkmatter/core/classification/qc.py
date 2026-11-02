@@ -187,7 +187,14 @@ def compute_post_qc(
 
     # Confidence score analysis
     if "confidence_score" in result_df.columns:
-        low_confidence = result_df.filter(pl.col("confidence_score") < 0.5)
+        # confidence_score is on a 0-100 scale; prefer the classifier's own
+        # low_confidence flag when present.
+        if "low_confidence" in result_df.columns:
+            low_confidence = result_df.filter(pl.col("low_confidence"))
+        else:
+            low_confidence = result_df.filter(
+                pl.col("confidence_score") < 50.0  # ScoringConfig default
+            )
         qc.low_confidence_fraction = low_confidence.height / max(1, result_df.height)
 
     # Post-classification warnings

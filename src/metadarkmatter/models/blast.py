@@ -113,10 +113,17 @@ class BlastHit(BaseModel):
 
     @model_validator(mode="after")
     def validate_query_positions(self) -> Self:
-        """Ensure query end >= query start after all fields are set."""
+        """Normalize query coordinates so that qstart <= qend.
+
+        MMseqs2 (and some other aligners) report reverse-strand hits with
+        qstart > qend. The span is the same either way, so swap the two
+        instead of rejecting the hit; otherwise every coverage computation
+        (qend - qstart + 1) goes negative for minus-strand alignments.
+        """
         if self.qend < self.qstart:
-            msg = f"qend ({self.qend}) must be >= qstart ({self.qstart})"
-            raise ValueError(msg)
+            qstart, qend = self.qend, self.qstart
+            object.__setattr__(self, "qstart", qstart)
+            object.__setattr__(self, "qend", qend)
         return self
 
     def calculate_coverage(self, read_length: int | None = None) -> float:

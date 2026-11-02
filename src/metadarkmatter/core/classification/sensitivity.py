@@ -83,23 +83,17 @@ def run_sensitivity_analysis(
     for novelty_thresh, uncertainty_thresh in zip(novelty_values, uncertainty_values, strict=False):
         # Create modified config with swept thresholds
         # Maintain continuous boundaries: species_min = known_max
-        config = ScoringConfig(
-            bitscore_threshold_pct=base_config.bitscore_threshold_pct,
+        # Start from the full base config (keeps alignment_mode, genus and
+        # identity-gap settings, ...); only the swept thresholds change.
+        data = base_config.model_dump()
+        data.update(
             novelty_known_max=novelty_thresh,
             novelty_novel_species_min=novelty_thresh,  # Continuous boundary
-            novelty_novel_species_max=base_config.novelty_novel_species_max,
-            novelty_novel_genus_min=base_config.novelty_novel_genus_min,
-            novelty_novel_genus_max=base_config.novelty_novel_genus_max,
             uncertainty_known_max=uncertainty_thresh,
             uncertainty_novel_species_max=uncertainty_thresh,
             uncertainty_novel_genus_max=uncertainty_thresh,
-            uncertainty_conserved_min=base_config.uncertainty_conserved_min,
-            uncertainty_mode=base_config.uncertainty_mode,
-            coverage_weight_mode=base_config.coverage_weight_mode,
-            coverage_weight_strength=base_config.coverage_weight_strength,
-            min_alignment_fraction=base_config.min_alignment_fraction,
-            single_hit_uncertainty_threshold=base_config.single_hit_uncertainty_threshold,
         )
+        config = ScoringConfig.model_validate(data)
 
         # Re-classify with modified thresholds
         classified = apply_classification_thresholds(df, config)

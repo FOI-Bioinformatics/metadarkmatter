@@ -20,6 +20,7 @@ def _build_threshold_cascade(
     *,
     has_scope: bool,
     has_genus: bool,
+    has_secondary: bool = True,
 ) -> Any:
     """Build the shared hard-threshold classification cascade.
 
@@ -35,6 +36,11 @@ def _build_threshold_cascade(
         config: ScoringConfig with threshold values to apply.
         has_scope: Whether the ``ambiguity_scope`` column is present.
         has_genus: Whether the ``genus_uncertainty`` column is present.
+        has_secondary: Whether the ``num_secondary_genomes`` column is
+            present. ``score classify`` output omits it; ``ambiguity_scope ==
+            "unambiguous"`` (equivalent to zero secondary genomes) is used
+            instead so re-thresholding saved CSVs (``score sensitivity``)
+            works.
     """
     eff = config.get_effective_thresholds()
 
@@ -108,7 +114,15 @@ def _build_threshold_cascade(
             & (pl.col("placement_uncertainty") < eff["uncertainty_novel_genus_max"])
             & (
                 (pl.col("genus_uncertainty") < config.genus_uncertainty_ambiguous_min)
-                | (pl.col("num_secondary_genomes") <= 0)
+                | (
+                    (pl.col("num_secondary_genomes") <= 0)
+                    if has_secondary
+                    else (
+                        (pl.col("ambiguity_scope") == "unambiguous")
+                        if has_scope
+                        else pl.lit(False)
+                    )
+                )
             )
         ).then(pl.lit("Novel Genus"))
     else:
@@ -164,6 +178,7 @@ def apply_classification_thresholds(
             config,
             has_scope="ambiguity_scope" in df.columns,
             has_genus="genus_uncertainty" in df.columns,
+            has_secondary="num_secondary_genomes" in df.columns,
         )
         .otherwise(pl.lit("Unclassified"))
         .alias("taxonomic_call")
@@ -215,6 +230,7 @@ def apply_legacy_thresholds(
             config,
             has_scope="ambiguity_scope" in df.columns,
             has_genus="genus_uncertainty" in df.columns,
+            has_secondary="num_secondary_genomes" in df.columns,
         )
         .otherwise(pl.lit("Unclassified"))
         .alias("legacy_call")

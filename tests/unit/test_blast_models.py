@@ -74,15 +74,16 @@ class TestBlastHit:
 
         assert "length" in str(exc_info.value)
 
-    def test_qend_less_than_qstart_rejected(self, valid_blast_hit_dict):
-        """Query end < query start should raise validation error."""
+    def test_reverse_strand_coordinates_normalized(self, valid_blast_hit_dict):
+        """MMseqs2 minus-strand hits (qstart > qend) are swapped, not rejected."""
         valid_blast_hit_dict["qstart"] = 150
         valid_blast_hit_dict["qend"] = 1
+        valid_blast_hit_dict["qlen"] = 150
 
-        with pytest.raises(ValidationError) as exc_info:
-            BlastHit(**valid_blast_hit_dict)
+        hit = BlastHit(**valid_blast_hit_dict)
 
-        assert "qend" in str(exc_info.value).lower() or "qstart" in str(exc_info.value).lower()
+        assert (hit.qstart, hit.qend) == (1, 150)
+        assert hit.calculate_coverage() == pytest.approx(1.0)
 
     def test_qstart_zero_rejected(self, valid_blast_hit_dict):
         """Query start position of 0 should raise validation error (1-based)."""

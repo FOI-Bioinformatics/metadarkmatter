@@ -119,7 +119,10 @@ def concatenate_genomes_with_mapping(
                         )
                         contig_count += 1
                     else:
-                        out_f.write(line)
+                        # Guarantee a newline so a file lacking a trailing
+                        # newline does not glue the next genome's header onto
+                        # its last sequence line.
+                        out_f.write(line if line.endswith("\n") else line + "\n")
 
     # Write contig mapping
     if mappings:

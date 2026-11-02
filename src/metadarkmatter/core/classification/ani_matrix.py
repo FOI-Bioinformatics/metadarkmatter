@@ -35,7 +35,7 @@ class ANIMatrix:
     - Memory: 8MB for 1000 genomes vs 150MB with nested dicts (18x reduction)
     - Lookup: O(1) array access vs O(hash) string lookups (16x faster)
 
-    The matrix stores ANI values as float32, with genome names mapped to
+    The matrix stores ANI values as float64, with genome names mapped to
     integer indices for fast array-based lookups.
 
     Missing ANI values (0.0 in the matrix) are treated as distant organisms
@@ -95,11 +95,13 @@ class ANIMatrix:
             genome: idx for idx, genome in enumerate(self._genomes)
         }
 
-        # Build NumPy array: float32 is sufficient for ANI values (0-100)
-        # Memory: 1000 genomes = 1000 * 1000 * 4 bytes = 4 MB
+        # Build NumPy array. float64 so ANI-derived outputs are exact for
+        # values given with two decimals (float32 turned 98.6 into
+        # 98.59999847 -> U=1.4000015, which can flip a 1.4 threshold).
+        # Memory: 1000 genomes = 1000 * 1000 * 8 bytes = 8 MB
         self._ani_array: np.ndarray = np.zeros(
             (self._num_genomes, self._num_genomes),
-            dtype=np.float32,
+            dtype=np.float64,
         )
 
         # Fill diagonal with 100.0 (self-ANI)
@@ -112,6 +114,27 @@ class ANIMatrix:
                 if genome2 in self._genome_to_idx:
                     j = self._genome_to_idx[genome2]
                     self._ani_array[i, j] = ani_value
+
+        # Fill one-directional pairs: if only ANI(a,b) was supplied (the
+        # reverse is 0 = missing), mirror it. The vectorized classifier reads
+        # the upper triangle only, so a value present only in the lower
+        # triangle was otherwise silently replaced by the default ANI.
+        arr = self._ani_array
+        missing = (arr == 0.0) & (arr.T > 0.0)
+        arr[missing] = arr.T[missing]
+
+        # Detect fraction-scaled (0-1) matrices, which would otherwise make
+        # every placement uncertainty ~99 and every read Conserved Region.
+        if self._num_genomes >= 2:
+            off_diag = arr[~np.eye(self._num_genomes, dtype=bool)]
+            positive = off_diag[off_diag > 0.0]
+            if positive.size and float(positive.max()) <= 1.0:
+                msg = (
+                    "ANI matrix values appear to be fractions (max off-diagonal "
+                    f"value {float(positive.max()):.3f} <= 1.0); expected percent "
+                    "identity on a 0-100 scale. Multiply the matrix by 100."
+                )
+                raise ValueError(msg)
 
     @staticmethod
     def _check_input_symmetry(
