@@ -7,7 +7,7 @@ This document provides visual diagrams of the metadarkmatter system architecture
 ```mermaid
 flowchart TB
     subgraph Inputs["Input Files"]
-        BLAST["BLAST Results<br/>(TSV/TSV.GZ)"]
+        BLAST["BLAST / MMseqs2 Results<br/>(TSV/TSV.GZ, outfmt 6)"]
         ANI["ANI Matrix<br/>(CSV/TSV)"]
     end
 
@@ -24,8 +24,8 @@ flowchart TB
     end
 
     subgraph Classifiers["Classifier Variants"]
-        STD["ANIWeightedClassifier<br/>(Standard)"]
-        VEC["VectorizedClassifier<br/>(Polars Native)"]
+        STD["ANIWeightedClassifier<br/>(programmatic API, not used by CLI)"]
+        VEC["VectorizedClassifier<br/>(Polars Native, all CLI paths)"]
     end
 
     subgraph Output["Output"]
@@ -66,71 +66,97 @@ flowchart LR
         direction TB
 
         subgraph cli["cli/"]
-            main["main.py<br/>App entrypoint"]
-            score["score.py<br/>classify/batch commands"]
-            report_cli["report.py<br/>report commands"]
+            main["main.py<br/>App entrypoint, global --dry-run"]
+            score["score.py<br/>classify/batch/export-config/<br/>extract-novel/sensitivity/evaluate"]
+            report_cli["report.py<br/>report generate/multi/summarize/vendor-*"]
+            run_cli["run.py<br/>mdm run (pipeline)"]
+            other_cli["aai, ani, blast, blastx, mmseqs2,<br/>kraken2, map, proteins, download,<br/>mapping (util), tree, validate,<br/>visualize, doctor"]
         end
 
         subgraph core["core/"]
             parsers["parsers.py<br/>BLAST/ANI parsing"]
-            ani_placement["ani_placement.py<br/>Classification algorithms"]
+            ani_placement["ani_placement.py<br/>Re-exports classifiers (compat)"]
             exceptions["exceptions.py<br/>Custom errors"]
+            core_misc["metadata.py, id_mapping.py,<br/>genome_utils.py, io_utils.py,<br/>ani_matrix_builder.py, aai_matrix_builder.py,<br/>recruitment.py,<br/>constants.py, protein_constants.py,<br/>random.py, runtime.py, sequence_validation.py"]
 
             subgraph classification["classification/"]
-                thresholds_mod["thresholds.py<br/>Threshold application"]
+                thresholds_mod["thresholds.py<br/>Legacy threshold cascade"]
                 qc_mod["qc.py<br/>QC metrics"]
                 sensitivity_mod["sensitivity.py<br/>Threshold sweep"]
                 adaptive_mod["adaptive.py<br/>GMM boundary detection"]
-                bayesian_mod["bayesian.py<br/>Posterior probabilities"]
+                bayesian_mod["bayesian.py<br/>Bayesian-primary classifier"]
+                evaluation_mod["evaluation.py<br/>Accuracy / ECE"]
+                ani_matrix_mod["ani_matrix.py<br/>ANIMatrix"]
+                runner_mod["runner.py<br/>run_classification()"]
 
                 subgraph classifiers["classifiers/"]
-                    base_cls["base.py<br/>Base classifier"]
-                    vec_cls["vectorized.py<br/>Polars classifier"]
+                    base_cls["base.py<br/>ANIWeightedClassifier"]
+                    vec_cls["vectorized.py<br/>VectorizedClassifier"]
                 end
+            end
+
+            subgraph novel_diversity["novel_diversity/"]
+                nd_mods["clustering.py, models.py,<br/>neighborhood.py"]
             end
 
             subgraph phylogeny["phylogeny/"]
                 tree_builder["tree_builder.py<br/>ANI-to-Newick"]
                 placement["placement.py<br/>Novel cluster placement"]
             end
+
+            subgraph pipeline["pipeline/"]
+                orchestrator["orchestrator.py<br/>Pipeline, PipelineLayout, RunManifest"]
+            end
         end
 
         subgraph models["models/"]
             blast["blast.py<br/>BlastHit, BlastResult"]
-            classification["classification.py<br/>ReadClassification"]
-            config["config.py<br/>ScoringConfig"]
+            classification["classification.py<br/>ReadClassification, TaxonomicSummary"]
+            config["config.py<br/>ScoringConfig, BayesianConfig, BlastConfig"]
+            genomes["genomes.py<br/>GenomeAccession, AccessionList"]
+            pipeline_config["pipeline_config.py<br/>Aligner, PipelineStep"]
+        end
+
+        subgraph external["external/"]
+            ext_mods["base.py (ExternalTool) + wrappers:<br/>blast, mmseqs2, diamond, kraken, fastani,<br/>skani, bowtie2, samtools, prodigal,<br/>mashtree, ncbi_datasets"]
+        end
+
+        subgraph clients["clients/"]
+            gtdb["gtdb.py<br/>GTDBClient"]
         end
 
         subgraph visualization["visualization/"]
+            recruitment_plots["recruitment_plots.py"]
             subgraph plots["plots/"]
                 base["base.py<br/>BasePlot, colors"]
                 distributions["distributions.py<br/>Histograms"]
                 scatter["scatter_2d.py<br/>Scatter plots"]
-                charts["classification_charts.py<br/>Donut, bar charts"]
+                charts["classification_charts.py<br/>Donut, bar, sunburst charts"]
                 multi["multi_sample.py<br/>Comparison plots"]
             end
             subgraph report["report/"]
-                generator["generator.py<br/>ReportGenerator"]
+                generator["generator.py<br/>ReportGenerator facade"]
+                report_models["models.py<br/>ReportConfig, TaxonomicSummary"]
+                sections["sections/<br/>_base, summary, classification,<br/>novel, reference, phylogeny, data"]
+                components["components/<br/>clustering, heatmap_builder,<br/>extended_matrix_builder"]
                 multi_gen["multi_generator.py<br/>MultiSampleReportGenerator"]
+                novel_section["novel_section.py<br/>Novel-diversity templates"]
                 styles["styles.py<br/>CSS themes"]
                 templates["templates.py<br/>HTML templates"]
+                assets["assets/<br/>Bundled JS + SRI cache"]
             end
-        end
-
-        subgraph io["io/"]
-            io_init["File I/O utilities"]
-        end
-
-        subgraph utils["utils/"]
-            utils_init["Helper functions"]
         end
     end
 
     cli --> core
     cli --> models
     cli --> visualization
+    cli --> external
+    cli --> clients
     core --> models
+    core --> external
     visualization --> models
+    visualization --> core
 ```
 
 ## Classification Algorithm
@@ -139,63 +165,56 @@ flowchart LR
 flowchart TD
     START["Read BLAST Results"]
 
-    START --> GROUP["Group hits by read_id"]
-    GROUP --> BEST["Find best hit<br/>(max bitscore)"]
+    START --> GROUP["Group hits by read_id<br/>(qstart > qend normalized)"]
+    GROUP --> BEST["Find best hit<br/>(max coverage-weighted bitscore)"]
 
     BEST --> N["Calculate Novelty Index<br/>N = 100 - pident"]
-    BEST --> AMB["Find ambiguous hits<br/>(within 95% of best bitscore)"]
+    BEST --> AMBHITS["Find ambiguous hits<br/>(within 95% of best bitscore)"]
 
-    AMB --> ANI["Lookup ANI values<br/>best_genome vs secondary_genomes"]
-    ANI --> U["Calculate Placement Uncertainty<br/>U = 100 - max(ANI)"]
+    AMBHITS --> ANI["Lookup ANI values<br/>best_genome vs secondary_genomes"]
+    ANI --> U["Calculate Placement Uncertainty<br/>U = 100 - ANI(best, second genome)<br/>(default 'second'; 'max' mode uses max ANI)"]
 
-    N --> THRESHOLD["Apply Classification Thresholds"]
+    N --> BAYES["Stage 1: Bayesian MAP<br/>6-category 2D Gaussian posteriors"]
+    U --> BAYES
+    BAYES --> STAGE2["Stage 2: discrete refinement<br/>(Conserved Region, Ambiguous Within Genus)"]
+    STAGE2 --> CALL["taxonomic_call<br/>+ p_* posteriors, entropy, confidence_score"]
+
+    N --> THRESHOLD["Legacy threshold cascade"]
     U --> THRESHOLD
+    THRESHOLD --> LEGACY["legacy_call"]
 
-    THRESHOLD --> |"U >= 5.0"| CONSERVED["Conserved Region"]
-    THRESHOLD --> |"N < 4, U < 1.5"| KNOWN["Known Species"]
-    THRESHOLD --> |"4 <= N < 20, U < 1.5"| NOVEL_SP["Novel Species"]
-    THRESHOLD --> |"20 <= N <= 25, U < 1.5"| NOVEL_GEN["Novel Genus"]
-    THRESHOLD --> |"1.5 <= U < 5"| BOUNDARY["Species Boundary"]
-    THRESHOLD --> |"Otherwise"| AMB["Ambiguous"]
-
-    CONSERVED --> OUTPUT["Output Classification"]
-    KNOWN --> OUTPUT
-    NOVEL_SP --> OUTPUT
-    NOVEL_GEN --> OUTPUT
-    BOUNDARY --> OUTPUT
-    AMB --> OUTPUT
+    CALL --> OUTPUT["Output Classification"]
+    LEGACY --> OUTPUT
 ```
+
+The legacy cascade (`core/classification/thresholds.py`) applies, in order: identity gap < 2 with >1 hit -> Ambiguous; U >= 5 across genera -> Conserved Region; U >= 5 -> Ambiguous; U >= 1.5 -> Species Boundary; N < 4 and U < 1.5 -> Known Species; single-hit read with high inferred uncertainty -> Ambiguous; 4 <= N < 20 -> Novel Species; 20 <= N <= 25 -> Novel Genus; otherwise Unclassified. The Bayesian boundaries in `taxonomic_call` do not coincide exactly with these thresholds.
 
 ## Data Flow: Streaming Processing
 
 ```mermaid
 sequenceDiagram
-    participant CLI as CLI Command
+    participant CLI as score classify --streaming
     participant Parser as StreamingBlastParser
     participant ANI as ANIMatrix
-    participant Classifier as Classifier
-    participant Writer as Output Writer
+    participant Classifier as VectorizedClassifier
+    participant Writer as StreamingWriter
 
-    CLI->>Parser: Open BLAST file
     CLI->>ANI: Load ANI matrix
+    CLI->>Classifier: stream_to_file(partition_size = --chunk-size)
+    Classifier->>Parser: parse_lazy().collect_batches()
 
-    loop For each chunk (1M rows)
-        Parser->>Parser: Read batch
-        Parser->>Parser: Extract genome names
-        Parser->>Parser: Group by read_id
-
-        loop For each read
-            Parser->>Classifier: BlastResult
-            Classifier->>ANI: get_ani(genome1, genome2)
-            ANI-->>Classifier: ANI value
-            Classifier->>Classifier: Calculate N, U
-            Classifier->>Classifier: Apply thresholds
-            Classifier->>Writer: ReadClassification
-        end
+    loop For each partition (default 1M rows)
+        Parser-->>Classifier: Partition DataFrame
+        Classifier->>Classifier: Extract genome names
+        Classifier->>Classifier: Check hits are contiguous per read (else ValueError)
+        Classifier->>Classifier: Hold back last read (may span partitions)
+        Classifier->>Classifier: classify_file(complete reads)<br/>ANI via pre-built join table
+        Classifier->>Writer: DataFrame (fixed schema)
+        Writer->>Writer: Append (CSV) / row group (Parquet, zstd)
     end
-
-    Writer->>Writer: Write to file
 ```
+
+Streaming requires each read's hits to be contiguous (as BLAST and MMseqs2 emit them) and is not combined with `--id-mapping` / `--genomes` (the classification runner rejects that combination).
 
 ## Classifier Performance Tiers
 
@@ -223,8 +242,8 @@ graph LR
 flowchart TB
     subgraph dense["ANIMatrix (Dense)"]
         direction LR
-        D_DESC["NumPy float32 array<br/>O(1) lookup<br/>Memory: n^2 * 4 bytes"]
-        D_USE["1K genomes ~ 4 MB"]
+        D_DESC["NumPy float64 array<br/>O(1) lookup<br/>Memory: n^2 * 8 bytes"]
+        D_USE["1K genomes ~ 8 MB"]
     end
 
     FILE["ANI Matrix File"] --> dense
@@ -238,6 +257,12 @@ classDiagram
     MetadarkmatterError <|-- ANIMatrixError
     MetadarkmatterError <|-- BlastFileError
     MetadarkmatterError <|-- ConfigurationError
+    MetadarkmatterError <|-- GenomeCoverageWarning
+    MetadarkmatterError <|-- PipelineStepError
+    MetadarkmatterError <|-- ToolNotFoundError
+    MetadarkmatterError <|-- ToolExecutionError
+    MetadarkmatterError <|-- UnsafePathError
+    ToolExecutionError <|-- ToolTimeoutError
 
     ANIMatrixError <|-- ANIMatrixNotSquareError
     ANIMatrixError <|-- ANIMatrixRowColumnMismatchError
@@ -271,6 +296,8 @@ classDiagram
     }
 ```
 
+`ToolNotFoundError`, `ToolExecutionError`, `ToolTimeoutError` and `UnsafePathError` are defined in `external/base.py`; `PipelineStepError` in `core/pipeline/orchestrator.py`; the others in `core/exceptions.py`. External tools run without a timeout by default (`ExternalTool.DEFAULT_TIMEOUT = None`); when a timeout is set and exceeded, `ToolTimeoutError` is raised and can be handled as a `ToolExecutionError`.
+
 ## CLI Command Structure
 
 ```mermaid
@@ -284,7 +311,7 @@ flowchart TB
             BATCH["batch"]
 
             subgraph classify_opts["classify options"]
-                BLAST_OPT["--alignment, -b"]
+                BLAST_OPT["--alignment"]
                 ANI_OPT["--ani, -a"]
                 OUTPUT_OPT["--output, -o"]
                 SUMMARY_OPT["--summary, -s"]
@@ -331,6 +358,7 @@ classDiagram
         +int send
         +float evalue
         +float bitscore
+        +int|None qlen
         +genome_name: str
     }
 
@@ -358,7 +386,12 @@ classDiagram
         +int known_species
         +int novel_species
         +int novel_genus
+        +int species_boundary
+        +int ambiguous
+        +int ambiguous_within_genus
         +int conserved_regions
+        +int unclassified
+        +int off_target
         +float mean_novelty_index
         +float mean_placement_uncertainty
         +dict genome_hit_counts
@@ -419,13 +452,7 @@ flowchart TD
 
 ## Memory Usage by Processing Mode
 
-```mermaid
-xychart-beta
-    title "Memory Usage per 10M Alignments"
-    x-axis ["Default", "Streaming"]
-    y-axis "Memory (GB)" 0 --> 5
-    bar [4, 0.5]
-```
+The default (vectorized, in-memory) mode loads the full alignment table; its own estimate is about 1.5x the uncompressed file size (`VectorizedClassifier._check_memory`), and `CLAUDE.md` reports an estimate of about 18 GB at 10M hits. Streaming mode bounds memory by the partition size (`--chunk-size`, default 1,000,000 rows). No measured per-mode figures are maintained in this document.
 
 ## Recommended Mode Selection
 
@@ -433,8 +460,8 @@ xychart-beta
 flowchart TD
     START["Number of alignments?"]
 
-    START --> |"< 100M"| DEFAULT["Use Default"]
-    START --> |"> 100M"| STREAM["Use --streaming"]
+    START --> |"< 5M"| DEFAULT["Use Default"]
+    START --> |"> 5M"| STREAM["Use --streaming --chunk-size 500000"]
 
     DEFAULT --> OUTPUT["Output"]
     STREAM --> OUTPUT
@@ -465,6 +492,7 @@ flowchart TB
 
         subgraph SCATTER_TYPES["scatter_2d.py"]
             NOV_UNC["NoveltyUncertaintyScatter"]
+            CONF_NOV["ConfidenceNoveltyScatter"]
             NOV_DENS["NoveltyUncertaintyDensity"]
             SCATTER_MAT["ClassificationScatterMatrix"]
         end
@@ -472,8 +500,11 @@ flowchart TB
         subgraph CHART_TYPES["classification_charts.py"]
             DONUT["ClassificationDonutChart"]
             BAR["ClassificationBarChart"]
+            SUMMARY_PLOT["ClassificationSummaryPlot"]
             GAUGE["NovelDiversityGauge"]
             CARDS["ClassificationMetricsCards"]
+            DIV_DONUT["DiversityDonutChart"]
+            SUNBURST["DiversitySunburstChart"]
         end
 
         subgraph MULTI_TYPES["multi_sample.py"]
@@ -513,25 +544,23 @@ sequenceDiagram
     participant File as HTML File
 
     CLI->>Gen: Create with DataFrame
-    Gen->>Gen: Compute summary statistics
+    Gen->>Gen: Compute summary statistics (SummaryMixin)
 
-    Gen->>Gen: Build overview section
-    Gen->>Plots: ClassificationDonutChart
-    Plots-->>Gen: Plotly figure
-    Gen->>Plots: ClassificationBarChart
-    Plots-->>Gen: Plotly figure
+    Gen->>Gen: Build Summary tab (SummaryMixin)
 
-    Gen->>Gen: Build distributions section
-    Gen->>Plots: NoveltyHistogram
+    Gen->>Gen: Build Classification tab (ClassificationMixin)
+    Gen->>Plots: DiversitySunburstChart
     Plots-->>Gen: Plotly figure
-    Gen->>Plots: UncertaintyHistogram
-    Plots-->>Gen: Plotly figure
+    Gen->>Plots: NoveltyHistogram / UncertaintyHistogram
+    Plots-->>Gen: Plotly figures
     Gen->>Plots: NoveltyUncertaintyScatter
     Plots-->>Gen: Plotly figure
 
-    Gen->>Gen: Build remaining sections
+    Gen->>Gen: Novel Diversity tab if novel reads (NovelMixin)
+    Gen->>Gen: Reference tab: heatmaps, phylogeny, recruitment (ReferenceMixin, PhylogenyMixin)
+    Gen->>Gen: Data tab (DataMixin)
 
-    Gen->>Template: Get CSS styles
+    Gen->>Template: Get CSS styles (styles.get_css_styles)
     Template-->>Gen: CSS string
     Gen->>Template: Get HTML template
     Template-->>Gen: HTML template
@@ -553,25 +582,25 @@ flowchart TB
 
         subgraph tabs["Tab Sections"]
             direction LR
-            OVERVIEW["Overview<br/>Metrics + Charts"]
-            DIST["Distributions<br/>Histograms + Scatter"]
-            RECRUIT["Recruitment<br/>Alignment plots"]
-            GENOMES["Genomes<br/>Per-genome stats"]
-            ANI["ANI Matrix<br/>Heatmap"]
-            DATA["Data Table<br/>Interactive search"]
+            OVERVIEW["Summary<br/>Metric cards + key findings"]
+            DIST["Classification<br/>Distributions, scatter, confidence"]
+            NOVEL["Novel Diversity<br/>(only when novel reads present)"]
+            REFERENCE["Reference<br/>ANI/AAI heatmaps, phylogeny,<br/>recruitment, species bar"]
+            DATA["Data<br/>Interactive table"]
         end
 
+        METHODS["Methods footer"]
         SCRIPTS["<script><br/>Tab navigation + Plotly init"]
     end
 
     HEAD --> tabs
-    tabs --> SCRIPTS
+    tabs --> METHODS
+    METHODS --> SCRIPTS
 
     style OVERVIEW fill:#bfb
     style DIST fill:#bbf
-    style RECRUIT fill:#fbf
-    style GENOMES fill:#fbb
-    style ANI fill:#bff
+    style NOVEL fill:#fbf
+    style REFERENCE fill:#bff
     style DATA fill:#ffb
 ```
 
@@ -620,22 +649,19 @@ flowchart TD
 
     INPUT --> ADAPTIVE{"--adaptive-thresholds?"}
     ADAPTIVE --> |Yes| GMM["Gaussian Mixture Model<br/>detect_species_boundary()"]
-    ADAPTIVE --> |No| DEFAULT["Default thresholds<br/>(N < 4%, U < 1.5%)"]
+    ADAPTIVE --> |No| DEFAULT["Default thresholds<br/>(N < 4%, U < 1.5%)<br/>or --config YAML"]
     GMM --> CONFIG["ScoringConfig<br/>(adaptive boundary)"]
     DEFAULT --> CONFIG
 
     CONFIG --> PRE_QC["Pre-Classification QC<br/>compute_pre_qc()"]
-    PRE_QC --> CLASSIFY["Classification<br/>VectorizedClassifier"]
-    CLASSIFY --> POST_QC["Post-Classification QC<br/>compute_post_qc()"]
-
-    POST_QC --> BAYESIAN{"--bayesian?"}
-    BAYESIAN --> |Yes| BAYES["BayesianClassifier<br/>classify_dataframe()"]
-    BAYESIAN --> |No| OUT["Output CSV"]
-    BAYES --> OUT
+    PRE_QC --> CLASSIFY["Classification<br/>VectorizedClassifier<br/>(Bayesian-primary, always on)"]
+    CLASSIFY --> BAYES["BayesianClassifier<br/>posteriors + Stage 2"]
+    BAYES --> POST_QC["Post-Classification QC<br/>compute_post_qc()"]
+    POST_QC --> OUT["Output CSV / Parquet"]
 
     CONFIG --> SENSITIVITY{"sensitivity subcommand?"}
     SENSITIVITY --> |Yes| SWEEP["Threshold Sweep<br/>run_sensitivity_analysis()"]
-    SWEEP --> SENS_OUT["Sensitivity JSON"]
+    SWEEP --> SENS_OUT["Sensitivity TSV or JSON"]
 
     PRE_QC --> QC_OUT["QC Metrics JSON"]
 
@@ -672,6 +698,9 @@ flowchart LR
 
     VEC --> THRESH
     VEC --> QC
+    VEC --> BAYES
+    VEC --> ANI_MAT
+    BASE --> BAYES
     SENS --> THRESH
     ADAPT --> ANI_MAT
     ADAPT --> SKLEARN
@@ -693,16 +722,24 @@ flowchart TB
             BATCH["batch"]
             SENSITIVITY["sensitivity"]
 
+            EXPORT["export-config"]
+            EXTRACT["extract-novel"]
+            EVALUATE["evaluate"]
+
             subgraph classify_new_opts["classify new options"]
                 ADAPTIVE_OPT["--adaptive-thresholds"]
-                BAYESIAN_OPT["--bayesian"]
+                BAYESIAN_OPT["--bayesian (deprecated, always on)"]
                 QC_OPT["--qc-output"]
+                CONFIG_OPT["--config"]
+                CHUNK_OPT["--chunk-size"]
             end
         end
 
         subgraph report["report"]
             GENERATE["generate"]
             MULTI["multi"]
+            SUMMARIZE["summarize"]
+            VENDOR["vendor-d3 / vendor-cdn-sri"]
 
             subgraph gen_opts["generate options"]
                 CLASS_OPT["--classifications, -c"]
@@ -712,6 +749,9 @@ flowchart TB
                 BAM_OPT["--bam, -b"]
                 THEME_OPT["--theme"]
                 MAX_PTS["--max-points"]
+                META_OPT["--metadata, -m"]
+                TREE_OPT["--tree / --no-phylogeny"]
+                MODE_OPT["--report-mode"]
             end
 
             subgraph multi_opts["multi options"]
@@ -738,8 +778,8 @@ flowchart TB
 ```mermaid
 flowchart LR
     subgraph themes["CSS Themes"]
-        LIGHT["Light Theme<br/>--bg: #ffffff<br/>--text: #333333"]
-        DARK["Dark Theme<br/>--bg: #1a1a2e<br/>--text: #eaeaea"]
+        LIGHT["Light Theme<br/>--bg-card: #ffffff<br/>--text-primary: #1a1a2e"]
+        DARK["Dark Theme<br/>--bg-primary: #1a1a2e<br/>--text-primary: #eaeaea"]
     end
 
     subgraph elements["Styled Elements"]
@@ -768,19 +808,19 @@ flowchart LR
         CONSERVED["Conserved Region<br/>#95a5a6"]
     end
 
-    subgraph ani["ANI Colorscale"]
-        ANI75["75%<br/>#440154"]
-        ANI85["85%<br/>#31688e"]
-        ANI95["95%<br/>#35b779"]
-        ANI100["100%<br/>#fde725"]
+    subgraph ani["ANI Colorscale (plots/base.py ANI_COLORSCALE)"]
+        ANI75["75%<br/>#d73027"]
+        ANI85["87.5%<br/>#fee090"]
+        ANI95["93.75%<br/>#91bfdb"]
+        ANI100["100%<br/>#4575b4"]
     end
 
     style KNOWN fill:#2ecc71,color:#fff
     style NOVEL_SP fill:#f39c12,color:#fff
     style NOVEL_GEN fill:#e74c3c,color:#fff
     style CONSERVED fill:#95a5a6,color:#fff
-    style ANI75 fill:#440154,color:#fff
-    style ANI85 fill:#31688e,color:#fff
-    style ANI95 fill:#35b779,color:#fff
-    style ANI100 fill:#fde725,color:#000
+    style ANI75 fill:#d73027,color:#fff
+    style ANI85 fill:#fee090,color:#000
+    style ANI95 fill:#91bfdb,color:#000
+    style ANI100 fill:#4575b4,color:#fff
 ```

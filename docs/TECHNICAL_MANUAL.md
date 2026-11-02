@@ -1,7 +1,9 @@
 # Metadarkmatter Technical Manual
 
-**Version:** 0.1.0
-**Last Updated:** 2026-02-20
+**Version:** 0.2.0
+**Last Updated:** 2026-11-02
+
+> Scope note: several sections of this manual overlap with `docs/ARCHITECTURE.md`, `docs/API_REFERENCE.md` and `docs/METHODS.md`. Benchmark tables in sections 4 and 9 are historical figures from an earlier version and have not been re-measured for v0.2.0.
 
 ---
 
@@ -67,7 +69,7 @@ graph TB
 
     subgraph "Core Algorithm"
         ANIM[ANIMatrix<br/>NumPy array O(1) lookup]
-        ANIC[ANIWeightedClassifier<br/>Programmatic API]
+        ANIC[ANIWeightedClassifier<br/>Programmatic API, not used by CLI]
         VEC[VectorizedClassifier<br/>Polars-native vectorized]
     end
 
@@ -93,20 +95,20 @@ graph TB
     ANI --> AP
 
     BP --> BM
+    BP --> VEC
     AP --> ANIM
     BM --> ANIC
-    BM --> VEC
     ANIM --> ANIC
     ANIM --> VEC
     CFG --> ANIC
     CFG --> VEC
 
     ANIC --> CM
-    VEC --> CM
+    VEC --> DF[Polars DataFrame<br/>fixed output schema]
 
-    CM --> CSV
-    CM --> PARQ
-    CM --> JSON
+    DF --> CSV
+    DF --> PARQ
+    DF --> JSON
 
     MAIN --> SCORE
     MAIN --> BATCH
@@ -123,29 +125,49 @@ metadarkmatter/
 │   ├── core/                    # Core algorithm implementation
 │   │   ├── constants.py         # Nucleotide thresholds
 │   │   ├── protein_constants.py # Protein thresholds
-│   │   ├── parsers.py           # Streaming parsers
+│   │   ├── parsers.py           # Streaming parsers, extract_genome_name_expr()
+│   │   ├── io_utils.py          # StreamingWriter (CSV append / Parquet row groups)
+│   │   ├── metadata.py          # GenomeMetadata, representative mapping
+│   │   ├── id_mapping.py        # ContigIdMapping
+│   │   ├── genome_utils.py      # Accession extraction, genome concatenation
+│   │   ├── exceptions.py        # MetadarkmatterError hierarchy
+│   │   ├── ani_placement.py     # Backward-compatible re-exports
+│   │   ├── ani_matrix_builder.py / aai_matrix_builder.py
+│   │   ├── recruitment.py, random.py, runtime.py, sequence_validation.py,
+│   │   │   logging_config.py
 │   │   ├── classification/      # Classification pipeline
-│   │   │   ├── thresholds.py    # Threshold application logic
+│   │   │   ├── thresholds.py    # Legacy threshold cascade
 │   │   │   ├── qc.py            # Pre/post-classification QC
 │   │   │   ├── sensitivity.py   # Threshold sensitivity analysis
 │   │   │   ├── adaptive.py      # GMM-based adaptive thresholds
-│   │   │   ├── bayesian.py      # Bayesian posterior probabilities
+│   │   │   ├── bayesian.py      # Bayesian-primary classifier
+│   │   │   ├── evaluation.py    # Accuracy / ECE / confusion matrix
+│   │   │   ├── runner.py        # run_classification() used by score classify
 │   │   │   ├── ani_matrix.py    # ANIMatrix class
 │   │   │   └── classifiers/     # Classifier implementations
 │   │   │       ├── base.py      # ANIWeightedClassifier (programmatic API)
 │   │   │       └── vectorized.py# VectorizedClassifier (CLI classifier)
-│   │   └── phylogeny/           # Phylogenetic tree building
+│   │   ├── novel_diversity/     # Novel-read clustering
+│   │   ├── phylogeny/           # Phylogenetic tree building and placement
+│   │   └── pipeline/            # orchestrator.py: end-to-end `mdm run`
 │   ├── models/                  # Pydantic data models
 │   │   ├── blast.py             # BLAST hit models
 │   │   ├── classification.py    # Result models
-│   │   └── config.py            # ScoringConfig
-│   ├── cli/                     # Command-line interface
+│   │   ├── config.py            # ScoringConfig, BayesianConfig, BlastConfig
+│   │   ├── genomes.py           # GenomeAccession, AccessionList
+│   │   └── pipeline_config.py   # Aligner, PipelineStep
+│   ├── cli/                     # Command-line interface (Typer)
 │   │   ├── main.py              # CLI entry point
-│   │   └── score.py             # Scoring commands
-│   ├── io/                      # File I/O utilities
-│   ├── utils/                   # Helper utilities
+│   │   ├── score.py             # Scoring commands
+│   │   └── ...                  # aai, ani, blast, blastx, mmseqs2, kraken2, map,
+│   │                            # proteins, download, mapping, report, run, tree,
+│   │                            # validate, visualize, doctor
+│   ├── clients/                 # GTDB API client
 │   ├── external/                # External tool wrappers
 │   └── visualization/           # Plotly charts and HTML reports
+│       ├── plots/               # Plot classes
+│       └── report/              # ReportGenerator facade + sections/ mixins,
+│                                # components/, assets/
 ├── tests/                       # Test suite
 ├── config/                      # Default configurations
 └── docs/                        # Documentation
@@ -189,7 +211,7 @@ All parsers implement streaming iterators to maintain bounded memory:
 # File size: 10 GB BLAST results
 # Memory usage: ~1.8 GB (constant regardless of file size)
 # VectorizedClassifier streaming mode processes in bounded partitions
-vectorized = VectorizedClassifier(ani_matrix, config)
+vectorized = VectorizedClassifier(ani_matrix, config=config)
 num_classified = vectorized.stream_to_file(
     blast_path=blast_path,
     output_path=output_path,
@@ -226,7 +248,7 @@ result = (
     .filter(pl.col("bitscore") > 100)
     .group_by("qseqid")
     .first()
-    .collect(streaming=True)  # Execute in streaming mode
+    .collect(engine="streaming")  # Execute in streaming mode
 )
 ```
 
@@ -258,10 +280,11 @@ Within bacterial taxonomy, species are typically defined by ANI >= 96% (N <= 4%)
 
 **Formula:**
 ```
-U = 100 - max(ANI(TopHit, SecondaryHit))
+U = 100 - ANI(TopHitGenome, SecondBestGenome)          # uncertainty_mode="second" (default)
+U = 100 - max(ANI(TopHitGenome, SecondaryHitGenome))   # uncertainty_mode="max"
 ```
 
-Where `SecondaryHit` ranges over all BLAST hits within 95% of top bitscore.
+Where secondary hits are all BLAST hits within `bitscore_threshold_pct` (default 95%) of the top bitscore, and the second-best genome is the highest-ranked competing genome using the same ordering as best-hit selection.
 
 **Interpretation:**
 - `U < 1.5`: Confident placement (competing genomes share >98.5% ANI)
@@ -273,13 +296,17 @@ High placement uncertainty indicates conserved genomic regions (e.g., ribosomal 
 
 ### 3.2 Classification Decision Tree
 
+The primary output `taxonomic_call` is the Bayesian MAP category: posteriors over six categories (Known Species, Novel Species, Novel Genus, Species Boundary, Ambiguous, Unclassified) from 2D Gaussians in (N, U) space, followed by a Stage 2 refinement that can assign Conserved Region or Ambiguous Within Genus (`core/classification/bayesian.py`). Its decision boundaries do not coincide exactly with the hard thresholds. The hard-threshold cascade is retained as `legacy_call` (`core/classification/thresholds.py`); the tree below is a simplified view of that cascade. The full legacy order is: identity gap < 2 with >1 hit -> Ambiguous; U >= 5 across genera -> Conserved Region; U >= 5 -> Ambiguous; U >= 1.5 -> Species Boundary; Known Species; single-hit read with high inferred uncertainty -> Ambiguous; Novel Species; Novel Genus; otherwise Unclassified.
+
 ```mermaid
 graph TD
     START[Read with BLAST hits] --> CHECK_U{U >= 5.0?}
 
-    CHECK_U -->|Yes| CONSERVED[Conserved Region<br/>Too ambiguous]
+    CHECK_U -->|Yes| CONSERVED[Conserved Region if hits span genera,<br/>otherwise Ambiguous]
 
-    CHECK_U -->|No| CHECK_KNOWN{N < 4.0 AND<br/>U < 1.5?}
+    CHECK_U -->|No| CHECK_SB{U >= 1.5?}
+    CHECK_SB -->|Yes| SB[Species Boundary]
+    CHECK_SB -->|No| CHECK_KNOWN{N < 4.0 AND<br/>U < 1.5?}
 
     CHECK_KNOWN -->|Yes| KNOWN[Known Species<br/>High identity, unambiguous]
 
@@ -291,7 +318,7 @@ graph TD
 
     CHECK_NOVEL_GEN -->|Yes| NOVEL_GEN[Novel Genus<br/>High divergence]
 
-    CHECK_NOVEL_GEN -->|No| DEFAULT[Conserved Region<br/>Default fallback]
+    CHECK_NOVEL_GEN -->|No| DEFAULT[Unclassified<br/>Default fallback]
 
     style NOVEL_SP fill:#ffeb3b
     style NOVEL_GEN fill:#ff9800
@@ -350,10 +377,14 @@ for secondary_hit in ambiguous_hits:
 placement_uncertainty = 100.0 - max_ani if max_ani > 0 else 100.0
 ```
 
+This shows `uncertainty_mode="max"`. With the default `uncertainty_mode="second"`, the ANI to the first competing genome (second-best by score) is used instead of the maximum.
+
 **Complexity:** O(k) where k = number of ambiguous hits
 **Per-lookup cost:** O(1) via NumPy array (vs O(log n) for nested dict)
 
 #### Step 5: Threshold-Based Classification
+
+The snippet below is a simplified form of the legacy cascade that produces `legacy_call`; it omits the identity-gap, Species Boundary, single-hit and Ambiguous rules listed in section 3.2, and its fallback is `Unclassified`, not Conserved Region. `taxonomic_call` comes from the Bayesian classifier.
 
 ```python
 # High uncertainty → Conserved region
@@ -442,9 +473,9 @@ class ANIMatrix:
         self._genomes = tuple(sorted(ani_dict.keys()))
         self._genome_to_idx = {g: i for i, g in enumerate(self._genomes)}
 
-        # Create dense float32 array
+        # Create dense float64 array
         n = len(self._genomes)
-        self._ani_array = np.zeros((n, n), dtype=np.float32)
+        self._ani_array = np.zeros((n, n), dtype=np.float64)
 
         # Populate array
         for g1, inner in ani_dict.items():
@@ -465,6 +496,8 @@ class ANIMatrix:
         # O(1) array indexing
         return float(self._ani_array[i, j])
 ```
+
+Simplified. The actual `ANIMatrix` (`core/classification/ani_matrix.py`) also: returns 0.0 when a genome is absent; returns `default_ani` (70.0) for pairs stored as 0.0; mirrors one-directional pairs; runs an optional symmetry check (`symmetry_check="warn"` by default); and rejects matrices on a 0-1 scale with `ValueError`.
 
 **Performance Gains:**
 
@@ -497,16 +530,16 @@ grouped = df.groupby("qseqid")
 # Lazy evaluation - no data loaded yet
 lazy_df = pl.scan_csv("blast.tsv", separator="\t", has_header=False)
 
-# Vectorized regex extraction in Rust
+# Vectorized regex extraction in Rust (accession before the first '|')
 lazy_df = lazy_df.with_columns([
     pl.col("sseqid")
-      .str.extract(r"^(GCF_\d+\.\d+)", 1)
-      .fill_null(pl.col("sseqid"))
+      .str.extract(r"^([^|]+)\|", 1)
+      .fill_null("unknown")
       .alias("genome_name")
 ])
 
 # Streaming execution with bounded memory
-result = lazy_df.collect(streaming=True)
+result = lazy_df.collect(engine="streaming")
 ```
 
 **Performance Comparison (100M BLAST hits):**
@@ -522,6 +555,8 @@ result = lazy_df.collect(streaming=True)
 ### 4.4 Vectorized Classification Architecture
 
 The `VectorizedClassifier` eliminates Python loops entirely by using Polars' Rust backend:
+
+> **Note:** The code below is a simplified sketch of the approach, not the current implementation. See the referenced source file for the actual code.
 
 ```python
 def classify_file(self, blast_path: Path) -> pl.DataFrame:
@@ -627,11 +662,16 @@ classDiagram
     }
 
     class TaxonomicCall {
-        <<Enum>>
+        <<StrEnum>>
         KNOWN_SPECIES
         NOVEL_SPECIES
         NOVEL_GENUS
+        SPECIES_BOUNDARY
+        AMBIGUOUS
+        AMBIGUOUS_WITHIN_GENUS
         CONSERVED_REGION
+        UNCLASSIFIED
+        OFF_TARGET
     }
 
     class ScoringConfig {
@@ -662,7 +702,7 @@ classDiagram
 
 ### 5.2 BlastHit Model
 
-**File:** `/Users/andreassjodin/Code/metadarkmatter/src/metadarkmatter/models/blast.py`
+**File:** `src/metadarkmatter/models/blast.py`
 
 **Purpose:** Represents a single BLAST alignment with comprehensive validation.
 
@@ -674,6 +714,7 @@ class BlastHit(BaseModel):
     pident: float            # Percent identity [0, 100]
     bitscore: float          # BLAST bitscore (≥ 0)
     evalue: float            # E-value (≥ 0)
+    qlen: int | None         # Query length (13-column input), optional
     # ... 7 additional fields for alignment coordinates
 ```
 
@@ -688,12 +729,14 @@ class BlastHit(BaseModel):
        return max(0.0, min(100.0, float(v)))
    ```
 
-2. **Alignment Coordinate Consistency:**
+2. **Alignment Coordinate Normalization:** reverse-strand hits reported with qstart > qend (MMseqs2, DIAMOND) are accepted and the two coordinates are swapped, so coverage is computed on the correct span.
    ```python
    @model_validator(mode="after")
    def validate_query_positions(self) -> Self:
        if self.qend < self.qstart:
-           raise ValueError(f"qend ({self.qend}) must be >= qstart ({self.qstart})")
+           qstart, qend = self.qend, self.qstart
+           object.__setattr__(self, "qstart", qstart)
+           object.__setattr__(self, "qend", qend)
        return self
    ```
 
@@ -701,15 +744,23 @@ class BlastHit(BaseModel):
    ```python
    GENOME_PATTERN = re.compile(
        r"^(?P<genome>GCF_\d+\.\d+|GCA_\d+\.\d+|NZ_[A-Z]+\d+\.\d+)"
+       r"|(?P<alt>[^|]+\|(?P<name>[^|]+))"
    )
 
    @property
    def genome_name(self) -> str:
+       if not self.sseqid or not self.sseqid.strip():
+           return "unknown"
        match = self.GENOME_PATTERN.match(self.sseqid)
-       if match and match.group("genome"):
-           return match.group("genome")
-       return self.sseqid.split()[0] if self.sseqid else "unknown"
+       if match:
+           if match.group("genome"):
+               return match.group("genome")
+           if match.group("name"):
+               return match.group("name")   # part after the first '|'
+       return self.sseqid.split()[0]
    ```
+
+   Note: the vectorized path (`extract_genome_name_expr()`, section 6.1.2) takes the text *before* the first `|`, which matches the standardized `{accession}|{contig_id}` headers. For non-accession `a|b` IDs the two paths differ.
 
 **Design Rationale:**
 
@@ -778,8 +829,12 @@ class ReadClassification(BaseModel):
     num_ambiguous_hits: int
     taxonomic_call: TaxonomicCall
 
+    # ... plus optional enhanced-scoring fields (second_hit_identity,
+    # identity_gap, genus_uncertainty, confidence_score, inferred_uncertainty, ...)
+
     model_config = {"frozen": True}
 
+    # diversity_status (Known/Novel/Uncertain) is also a computed field
     @computed_field
     @property
     def is_novel(self) -> bool:
@@ -808,7 +863,8 @@ class ScoringConfig(BaseModel):
     novelty_novel_genus_min: float = 20.0
     novelty_novel_genus_max: float = 25.0
 
-    # Uncertainty thresholds (U = 100 - max ANI between competing genomes)
+    # Uncertainty thresholds (U = 100 - ANI to second-best genome by default;
+    # uncertainty_mode="max" uses the max ANI between competing genomes)
     uncertainty_known_max: float = 1.5       # U < 1.5% = confident placement
     uncertainty_novel_species_max: float = 1.5
     uncertainty_novel_genus_max: float = 1.5
@@ -819,11 +875,16 @@ class ScoringConfig(BaseModel):
         """Ensure thresholds form valid hierarchy."""
         if self.novelty_novel_species_min < self.novelty_known_max:
             raise ValueError("Novel species min must be >= known max")
+        # Also enforced: novelty_novel_genus_min == novelty_novel_species_max,
+        # uncertainty_novel_species_max <= uncertainty_novel_genus_max, and
+        # coverage_weight_strength > 0 when coverage weighting is enabled.
 
         return self
 
     model_config = {"frozen": True}
 ```
+
+Excerpt only; `ScoringConfig` (`models/config.py`) has further fields for alignment filters, coverage weighting, `uncertainty_mode`, family validation, AAI, `bayesian` (BayesianConfig) and YAML I/O (`from_yaml`, `to_yaml`).
 
 **Design Decision:** Frozen configuration prevents runtime modification, ensuring reproducibility. Users must create new config instances for different thresholds.
 
@@ -853,6 +914,8 @@ class ScoringConfig(BaseModel):
             ...
         }
 ```
+
+In protein mode the returned thresholds are fixed constants; custom novelty/uncertainty values set on `ScoringConfig` (directly, via `--config` YAML, or via `--adaptive-thresholds`) are not applied. The actual return type is the `EffectiveThresholds` TypedDict, which also carries confidence-score scaling parameters.
 
 **Rationale:** Protein sequences are more conserved than nucleotide sequences due to the degeneracy of the genetic code. At the genus level, nucleotide identity degrades faster than protein identity, making BLASTX more sensitive for detecting divergent homology.
 
@@ -885,13 +948,15 @@ PROTEIN_UNCERTAINTY_CONSERVED_MIN = 10.0
 
 ### 6.1 StreamingBlastParser Architecture
 
-**File:** `/Users/andreassjodin/Code/metadarkmatter/src/metadarkmatter/core/parsers.py:90-448`
+**File:** `src/metadarkmatter/core/parsers.py` (`StreamingBlastParser`)
 
 **Challenge:** BLAST output files can contain 100 million alignments (10+ GB), exceeding typical RAM constraints.
 
 **Solution:** Chunk-based streaming with read-boundary detection.
 
 #### 6.1.1 Chunk Processing with Boundary Handling
+
+> **Note:** The code below is a simplified sketch of the approach, not the current implementation. See the referenced source file for the actual code.
 
 ```python
 class StreamingBlastParser:
@@ -903,11 +968,8 @@ class StreamingBlastParser:
         """Stream reads with correct boundary handling."""
         pending_hits: dict[str, list[BlastHitFast]] = {}
 
-        # Use scan_csv with collect_batches for streaming
-        batches = pl.scan_csv(
-            self.blast_path,
-            separator="\t",
-        ).collect_batches(chunk_size=self.chunk_size)
+        # parse_lazy() applies an explicit schema and '#' comment handling
+        batches = self.parse_lazy().collect_batches(chunk_size=self.chunk_size)
 
         for chunk_df in batches:
             if chunk_df.is_empty():
@@ -941,7 +1003,7 @@ class StreamingBlastParser:
 
 **Key Design Elements:**
 
-1. **Polars Batched Reader:** Reads file in configurable chunks (default 1M rows)
+1. **Polars Batched Reader:** Reads file in configurable chunks (default 1M rows), using an explicit schema for 12- or 13-column (with `qlen`) input
 2. **Pending Buffer:** Accumulates hits for reads spanning chunk boundaries
 3. **Last-Read Exclusion:** Holds back the last read in each chunk until next batch confirms completion
 4. **Vectorized Operations:** Genome extraction and sorting happen in Polars (Rust) before Python iteration
@@ -960,17 +1022,16 @@ class StreamingBlastParser:
 
 ```python
 def extract_genome_name_expr() -> pl.Expr:
-    """Create Polars expression for vectorized genome extraction."""
-    refseq_pattern = r"^(GCF_\d+\.\d+|GCA_\d+\.\d+|NZ_[A-Z]+\d+\.\d+)"
-
+    """Extract the accession from standardized '{accession}|{contig_id}' headers."""
     return (
         pl.col("sseqid")
-        .str.extract(refseq_pattern, 1)      # Regex in Rust
-        .fill_null(pl.col("sseqid"))         # Fallback to full sseqid
-        .fill_null("unknown")                # Handle empty strings
+        .str.extract(r"^([^|]+)\|", 1)   # Regex in Rust: text before first '|'
+        .fill_null("unknown")            # No pipe -> 'unknown'
         .alias("genome_name")
     )
 ```
+
+Subject IDs without a `|` map to `unknown`; external alignments with other ID formats need `--id-mapping` (see `ContigIdMapping`, which also handles `ref|ACC|` IDs).
 
 **Benchmark (100M rows):**
 
@@ -984,7 +1045,7 @@ def extract_genome_name_expr() -> pl.Expr:
 
 ### 6.2 ANIMatrixParser
 
-**File:** `/Users/andreassjodin/Code/metadarkmatter/src/metadarkmatter/core/parsers.py:469-609`
+**File:** `src/metadarkmatter/core/parsers.py` (`ANIMatrixParser`)
 
 **Purpose:** Parse and validate ANI matrices with comprehensive error checking.
 
@@ -1000,12 +1061,14 @@ GCF_000003.1,87.2,88.5,100.0
 
 **Requirements:**
 - Square matrix: `n_rows = n_columns - 1` (first column is genome names)
-- Symmetric: `ANI[i,j] = ANI[j,i]`
+- Symmetric: `ANI[i,j] = ANI[j,i]` (not checked by the parser; `ANIMatrix` warns on pairs differing by more than 0.5 by default, raises with `symmetry_check="strict"`, and mirrors pairs given in one direction only)
 - Diagonal: `ANI[i,i] = 100.0`
-- Range: `0 ≤ ANI ≤ 100`
-- No null values
+- Range: `0 ≤ ANI ≤ 100`, percent scale (a 0-1 scaled matrix is rejected by `ANIMatrix`)
+- No null values; 0 marks an uncomputed pair and is looked up as the default unrelated ANI (70)
 
 #### 6.2.2 Validation Pipeline
+
+> **Note:** The code below is a simplified sketch of the approach, not the current implementation. See the referenced source file for the actual code.
 
 ```python
 class ANIMatrixParser:
@@ -1098,13 +1161,25 @@ ani_matrix = ANIMatrix(ani_dict)  # Converts to NumPy
 
 #### 7.2.1 Core Classification Method
 
+> **Note:** The code below is a simplified sketch of the approach, not the current implementation. See the referenced source file for the actual code.
+
+The actual method also selects the best hit by coverage-weighted bitscore, computes genus uncertainty, inferred uncertainty and confidence, and sets `taxonomic_call` from the Bayesian posteriors (Stage 1 + Stage 2) rather than from `_classify_by_thresholds()` alone.
+
 ```python
 class ANIWeightedClassifier:
-    def __init__(self, ani_matrix: ANIMatrix, config: ScoringConfig | None = None):
+    def __init__(
+        self,
+        ani_matrix: ANIMatrix,
+        aai_matrix: AAIMatrix | None = None,
+        config: ScoringConfig | None = None,
+    ):
         self.ani_matrix = ani_matrix
+        self.aai_matrix = aai_matrix
         self.config = config or ScoringConfig()
 
-    def classify_read(self, blast_result: BlastResult) -> ReadClassification | None:
+    def classify_read(
+        self, blast_result: BlastResult, read_length: int | None = None
+    ) -> ReadClassification | None:
         """Classify single read with full validation."""
         if not blast_result.hits:
             return None
@@ -1169,10 +1244,14 @@ def _calculate_placement_uncertainty(
     if num_ambiguous_hits <= 1:
         return 0.0, num_ambiguous_hits  # Single hit, no uncertainty
 
-    if max_ani == 0.0:
-        return 100.0, num_ambiguous_hits  # No ANI data, max uncertainty
+    # The actual method also tracks the ANI to the first competing genome
+    # and uses it when uncertainty_mode == "second" (the default).
+    effective_ani = second_genome_ani if self.config.uncertainty_mode == "second" else max_ani
 
-    return 100.0 - max_ani, num_ambiguous_hits
+    if effective_ani == 0.0:
+        return 100.0, num_ambiguous_hits  # Genome absent from ANI matrix
+
+    return 100.0 - effective_ani, num_ambiguous_hits
 ```
 
 **Iterator Advantage:**
@@ -1185,6 +1264,10 @@ Using `iter_ambiguous_hits()` allows early termination when bitscore drops below
 **Architecture:** Zero Python loops -- entire classification in Polars/Rust. This is the sole classifier used by all CLI paths (both batch and streaming).
 
 #### 7.3.1 Vectorized Classification Pipeline
+
+> **Note:** The code below is a simplified sketch of the approach, not the current implementation. See the referenced source file for the actual code.
+
+The sketch shows the original threshold-only pipeline. The current `classify_file(blast_input, id_mapping=None, compute_qc=False)` additionally applies alignment filters and coverage weighting, uses a total-order tie-break for best and second genome, computes `uncertainty_mode="second"` by default, family validation (Off-target), inferred uncertainty for single-hit reads, Bayesian posteriors (`taxonomic_call`, `p_*`, `posterior_entropy`, `confidence_score`) and the legacy cascade (`legacy_call`), and conforms the result to a fixed output schema (section 12.2.3).
 
 ```python
 class VectorizedClassifier:
@@ -1338,7 +1421,10 @@ def _build_ani_lookup(self) -> None:
     genomes = np.array(self.ani_matrix._genomes)
     genome1_arr = genomes[idx1]
     genome2_arr = genomes[idx2]
-    ani_arr = self.ani_matrix._ani_array[idx1, idx2]
+    ani_arr = self.ani_matrix._ani_array[idx1, idx2].astype(np.float64)
+
+    # Replace missing ANI values (0.0) with the default for distant organisms
+    ani_arr[ani_arr == 0.0] = self.ani_matrix._default_ani
 
     # Build DataFrame from NumPy arrays (fast)
     self._ani_lookup = pl.DataFrame({
@@ -1388,14 +1474,21 @@ secondary_with_ani = ambiguous.join(
 
 ### 8.1 Command Structure
 
-**File:** `/Users/andreassjodin/Code/metadarkmatter/src/metadarkmatter/cli/score.py`
+**File:** `src/metadarkmatter/cli/score.py` (the `mdm` and `metadarkmatter` entry points are interchangeable)
 
 ```
-metadarkmatter (main entry point)
+metadarkmatter (main entry point; global --dry-run, --log-level, --debug)
 ├── score
-│   ├── classify  # Single-file classification
-│   └── batch     # Multi-file batch processing
-└── [future commands: extract, map, viz, etc.]
+│   ├── classify       # Single-file classification
+│   ├── batch          # Multi-file batch processing
+│   ├── export-config  # Write editable YAML config
+│   ├── extract-novel  # Extract candidate novel taxa
+│   ├── sensitivity    # Threshold sweep
+│   └── evaluate       # Score against ground truth
+├── report (generate, multi, summarize, vendor-d3, vendor-cdn-sri)
+├── run (end-to-end pipeline)
+└── aai, ani, blast, blastx, mmseqs2, kraken2, map, proteins, download,
+    util, tree, validate, visualize, doctor
 ```
 
 ### 8.2 Score Classify Command
@@ -1408,11 +1501,19 @@ metadarkmatter score classify \
   --output OUTPUT_PATH \
   [--summary SUMMARY_JSON] \
   [--format {csv,parquet}] \
-  [--streaming] \
+  [--streaming [--chunk-size N]] \
+  [--metadata genome_metadata.tsv] \
+  [--config scoring.yaml] \
   [--verbose]
 ```
 
+See `mdm score classify --help` for the full option list (alignment filters, coverage weighting, `--id-mapping`, `--target-family`, `--qc-output`, `--adaptive-thresholds`, `--alignment-mode`, `--preset`, `--dry-run`, ...).
+
 **Implementation:**
+
+> **Note:** The code below is a simplified sketch of the approach, not the current implementation. See the referenced source file for the actual code.
+
+The command builds a `ClassificationRequest` and calls `run_classification()` in `core/classification/runner.py`, which wraps the steps below.
 
 ```python
 @app.command(name="classify")
@@ -1431,7 +1532,7 @@ def classify(
     config = ScoringConfig()
 
     # All CLI paths use VectorizedClassifier
-    vectorized = VectorizedClassifier(ani_matrix, config)
+    vectorized = VectorizedClassifier(ani_matrix, config=config)
 
     if streaming:
         # Streaming mode: direct-to-file, bounded memory
@@ -1612,7 +1713,7 @@ metadarkmatter score classify --streaming --alignment huge.tsv.gz --ani ani.csv 
 
 | Genomes | ANI Matrix Size | Load Time | Memory | Lookup Time |
 |---------|----------------|-----------|--------|-------------|
-| 100 | 100 KB | 15 ms | 400 KB | 6 ns |
+| 100 | 100 KB | 15 ms | 80 KB | 6 ns |
 | 500 | 2 MB | 85 ms | 2 MB | 7 ns |
 | 1,000 | 8 MB | 180 ms | 8 MB | 7.5 ns |
 | 5,000 | 200 MB | 1.2 s | 200 MB | 9 ns |
@@ -1620,7 +1721,7 @@ metadarkmatter score classify --streaming --alignment huge.tsv.gz --ani ani.csv 
 
 **Key Insights:**
 
-1. **NumPy array scales linearly:** Memory = `4n²` bytes (float32)
+1. **NumPy array scales quadratically with genome count:** Memory = `8n²` bytes (float64)
 2. **Lookup time constant:** O(1) array indexing regardless of size
 3. **Load time dominated by parsing:** CSV read is bottleneck, not NumPy conversion
 
@@ -1693,24 +1794,22 @@ metadarkmatter score classify --streaming --alignment huge.tsv.gz --ani ani.csv 
 
 ### 10.1 Test Suite Organization
 
-**Location:** `/Users/andreassjodin/Code/metadarkmatter/tests/`
+**Location:** `tests/`
 
 ```
 tests/
-├── unit/                    # Unit tests for individual components
-│   ├── test_blast_models.py         # BlastHit, BlastResult validation
-│   ├── test_classification.py       # ReadClassification model
-│   ├── test_ani_matrix.py           # ANI matrix operations
-│   ├── test_parsers.py              # File parsing logic
-│   └── test_config.py               # Configuration validation
-├── integration/             # End-to-end integration tests
-│   ├── test_classify_workflow.py   # Full classification pipeline
-│   ├── test_cli.py                  # CLI command execution
-│   └── test_performance.py          # Performance regression tests
-└── fixtures/                # Test data
-    ├── blast_sample.tsv     # 1000-read BLAST sample
-    ├── ani_matrix_10.csv    # 10-genome ANI matrix
-    └── expected_results.csv # Known-good classification outputs
+├── conftest.py, factories.py        # Shared fixtures and synthetic data builders
+├── unit/                            # Unit tests (e.g. test_blast_models.py,
+│                                    #   test_classification.py, test_ani_matrix_class.py,
+│                                    #   test_bayesian.py, test_classifier_equivalence.py,
+│                                    #   test_clustering_determinism.py, test_cli_*.py)
+├── integration/                     # Integration tests (test_cli.py,
+│                                    #   test_family_validation.py,
+│                                    #   test_pipeline_determinism.py, ...)
+├── e2e/                             # End-to-end tests (marker `e2e`)
+├── fixtures/                        # GTDB response fixtures, test genomes
+├── utils/                           # Shared assertions
+└── benchmark_classifiers.py         # Classifier benchmark script
 ```
 
 ### 10.2 Coverage Requirements
@@ -1723,15 +1822,11 @@ source = ["src/metadarkmatter"]
 branch = true
 
 [tool.coverage.report]
-fail_under = 80
-exclude_lines = [
-    "pragma: no cover",
-    "if TYPE_CHECKING:",
-    "raise NotImplementedError"
-]
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]
+fail_under = 78
 ```
 
-**Current Coverage (as of v0.1.0):**
+**Historical Coverage (as of v0.1.0; not updated):**
 
 | Module | Line Coverage | Branch Coverage |
 |--------|---------------|-----------------|
@@ -1761,7 +1856,7 @@ def test_blast_hit_pident_clamping():
 def test_empty_blast_result():
     """Handle read with no BLAST hits."""
     result = BlastResult(read_id="read1", hits=tuple())
-    classifier = ANIWeightedClassifier(ani_matrix, config)
+    classifier = ANIWeightedClassifier(ani_matrix, config=config)
     classification = classifier.classify_read(result)
     assert classification is None
 
@@ -1784,7 +1879,7 @@ def test_vectorized_classifier_performance(benchmark_blast_file):
     """Ensure vectorized classifier meets performance targets."""
     start = time()
 
-    classifier = VectorizedClassifier(ani_matrix, config)
+    classifier = VectorizedClassifier(ani_matrix, config=config)
     df = classifier.classify_file(benchmark_blast_file)
 
     elapsed = time() - start
@@ -1796,62 +1891,49 @@ def test_vectorized_classifier_performance(benchmark_blast_file):
 
 #### 10.3.3 Data Integrity Tests
 
+Cross-classifier equivalence is tested in `tests/unit/test_classifier_equivalence.py`: `ANIWeightedClassifier.classify_read()` (applied per read via `StreamingBlastParser.iter_reads()`) is compared against `VectorizedClassifier.classify_file()` on `best_match_genome`, `novelty_index` and `taxonomic_call` (both are Bayesian-primary; base "Ambiguous" vs vectorized "Conserved Region" is accepted because only the vectorized path has `ambiguity_scope` for Stage 2). Output determinism is guarded by `tests/integration/test_pipeline_determinism.py` (SHA-256 equality of two `score classify` runs).
+
 ```python
-def test_classification_consistency():
-    """Classifiers produce identical results."""
-    # Per-read classifier (reference)
-    standard = ANIWeightedClassifier(ani_matrix, config)
-    df_standard = standard.classify_to_dataframe(blast_path)
+def test_base_vs_vectorized(blast_file, ani_matrix, config):
+    base_clf = ANIWeightedClassifier(ani_matrix=ani_matrix, config=config)
+    vec_clf = VectorizedClassifier(ani_matrix=ani_matrix, config=config)
 
-    # Vectorized classifier (used by CLI)
-    vectorized = VectorizedClassifier(ani_matrix, config)
-    df_vectorized = vectorized.classify_file(blast_path)
+    base_df = pl.DataFrame([
+        c.to_dict()
+        for r in StreamingBlastParser(blast_file).iter_reads()
+        if (c := base_clf.classify_read(r)) is not None
+    ]).sort("read_id")
+    vec_df = vec_clf.classify_file(blast_file).sort("read_id")
 
-    # Both should produce same classifications
-    assert_frame_equal(df_standard, df_vectorized)
+    for col in ["best_match_genome", "novelty_index"]:
+        assert base_df[col].to_list() == vec_df[col].to_list()
+    allowed = {("Ambiguous", "Conserved Region")}
+    for b, v in zip(base_df["taxonomic_call"], vec_df["taxonomic_call"]):
+        assert b == v or (b, v) in allowed
 ```
 
 ### 10.4 Continuous Integration
 
-**GitHub Actions Workflow:**
+**GitHub Actions Workflow:** `.github/workflows/test.yml` (on push/PR to `main`; ubuntu and macOS, Python 3.11 and 3.12, plus a non-blocking 3.13 leg). Abridged:
 
 ```yaml
-name: Tests
+      - name: Install package and dev dependencies (frozen lockfile)
+        run: uv sync --frozen --extra dev
 
-on: [push, pull_request]
+      - name: Lint (ruff)
+        run: uv run ruff check src tests
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12"]
+      - name: Type check (mypy)
+        run: uv run mypy src/metadarkmatter
 
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install dependencies
+      - name: Run unit tests with coverage gate
         run: |
-          pip install -e ".[dev]"
-
-      - name: Run tests
-        run: |
-          pytest --cov=metadarkmatter --cov-report=xml
-
-      - name: Type checking
-        run: |
-          mypy src/metadarkmatter
-
-      - name: Linting
-        run: |
-          ruff check src/metadarkmatter
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
+          uv run pytest -m "not slow and not requires_blast and not requires_mmseqs2 and not e2e" \
+                 --cov=metadarkmatter --cov-report=term-missing --cov-report=xml \
+                 --cov-fail-under=78
 ```
+
+The coverage XML is uploaded as a workflow artifact (ubuntu, Python 3.12).
 
 ---
 
@@ -1862,9 +1944,10 @@ jobs:
 #### 11.1.1 Development Installation
 
 ```bash
-git clone https://github.com/metadarkmatter/metadarkmatter.git
+git clone https://github.com/FOI-Bioinformatics/metadarkmatter.git
 cd metadarkmatter
-pip install -e ".[dev]"
+uv sync --frozen --extra dev   # pinned environment from uv.lock
+# or: pip install -e ".[dev]"
 ```
 
 **Use case:** Active development, contributing to codebase
@@ -1945,34 +2028,16 @@ metadarkmatter score classify \
   --format parquet
 ```
 
-### 11.3 Docker Container
+### 11.3 Container Image
 
-**Dockerfile:**
-
-```dockerfile
-FROM python:3.11-slim
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install metadarkmatter
-WORKDIR /app
-COPY . /app
-RUN pip install --no-cache-dir .
-
-# Set entry point
-ENTRYPOINT ["metadarkmatter"]
-CMD ["--help"]
-```
+The repository root contains a `Containerfile` (based on `mambaorg/micromamba`) that installs the external tools from bioconda with pinned versions (see `docs/EXTERNAL_TOOLS.md`) and the Python package from the locked `uv.lock` environment. The entry point is the `metadarkmatter` CLI.
 
 **Build and run:**
 
 ```bash
-docker build -t metadarkmatter:latest .
+podman build -t metadarkmatter:dev .     # or: docker build -t metadarkmatter:dev .
 
-docker run -v /data:/data metadarkmatter:latest \
+podman run --rm -v /data:/data metadarkmatter:dev \
   score classify \
   --alignment /data/blast_results.tsv.gz \
   --ani /data/ani_matrix.csv \
@@ -2039,7 +2104,7 @@ metadarkmatter score classify ...
 
 **Novelty Index (N):** Metric quantifying sequence divergence from closest reference genome: `N = 100 - TopHitIdentity`. Higher values indicate greater evolutionary distance.
 
-**Placement Uncertainty (U):** Metric quantifying ambiguity in taxonomic assignment: `U = 100 - max(ANI(TopHit, SecondaryHits))`. High values indicate conserved regions matching distant genomes.
+**Placement Uncertainty (U):** Metric quantifying ambiguity in taxonomic assignment: `U = 100 - ANI(TopHitGenome, SecondBestGenome)` by default (`uncertainty_mode="second"`), or `U = 100 - max(ANI(TopHit, SecondaryHits))` with `uncertainty_mode="max"`. High values indicate conserved regions matching distant genomes.
 
 **Polars:** High-performance DataFrame library implemented in Rust, offering 10-100x speedups over pandas for large-scale data processing.
 
@@ -2055,7 +2120,7 @@ metadarkmatter score classify ...
 **Extension:** `.tsv`, `.blast`, `.tsv.gz` (gzipped)
 **Header:** None (comment lines starting with `#` are ignored)
 
-**Column Order (12 columns required):**
+**Column Order (12 columns required; an optional 13th column `qlen` is used for coverage when present):**
 
 | Index | Field | Type | Description |
 |-------|-------|------|-------------|
@@ -2071,8 +2136,11 @@ metadarkmatter score classify ...
 | 9 | send | int | End position in subject (1-based) |
 | 10 | evalue | float | Expectation value |
 | 11 | bitscore | float | Bit score |
+| 12 | qlen | int | Query length (optional) |
 
-**BLAST Command:**
+Reverse-strand hits with qstart > qend (MMseqs2, DIAMOND) are normalized. `sseqid` is expected in the standardized `{accession}|{contig_id}` form written by `mdm blast makedb` / `mdm mmseqs2 makedb`; otherwise supply `--id-mapping`.
+
+**BLAST Command** (`mdm blast align` runs an equivalent command):
 
 ```bash
 blastn -query reads.fasta \
@@ -2104,8 +2172,9 @@ GCF_000003.1,87.2,88.5,100.0
 - Square matrix: `n_rows = n_columns - 1`
 - Diagonal values: 100.0 (self-ANI)
 - Symmetric: `ANI[i,j] = ANI[j,i]`
+- Percent scale (0-100); a 0-1 scaled matrix is rejected
 
-**Generation Tools:**
+**Generation Tools:** `mdm ani compute` (fastANI, falling back to skani) writes this format directly. Other tools:
 
 - **FastANI:** Genome-vs-genome ANI calculation
   ```bash
@@ -2126,25 +2195,32 @@ GCF_000003.1,87.2,88.5,100.0
 
 **Schema:**
 
+The column set, order and dtypes are fixed (`VectorizedClassifier._output_schema()`), including for empty and all-Off-target inputs and for every streaming batch.
+
 | Column | Type | Description |
 |--------|------|-------------|
 | read_id | string | Original read identifier from BLAST |
-| best_match_genome | string | Genome with highest bitscore |
+| best_match_genome | string | Genome with highest (coverage-weighted) bitscore |
 | top_hit_identity | float64 | Percent identity of best hit (0-100) |
 | novelty_index | float64 | 100 - top_hit_identity |
-| placement_uncertainty | float64 | 100 - max(ANI to secondary hits) |
+| placement_uncertainty | float64 | 100 - ANI to second-best genome (default mode); null for Off-target |
+| genus_uncertainty | float64 | Uncertainty from genus-level hits (90% bitscore threshold) |
+| ambiguity_scope | string | e.g. unambiguous / within genus / across genera |
 | num_ambiguous_hits | int64 | Hits within 95% of top bitscore |
-| taxonomic_call | string | "Known Species" / "Novel Species" / "Novel Genus" / "Conserved Region" |
+| second_hit_identity | float64 | Identity of best hit to a different genome |
+| identity_gap | float64 | top_hit_identity - second_hit_identity |
+| confidence_score | float64 | (1 - entropy / log2(6)) * 100; 10.0 for Off-target |
+| taxonomic_call | string | Bayesian MAP category (after Stage 2 refinement) |
+| legacy_call | string | Hard-threshold cascade category |
+| diversity_status | string | Known / Novel / Uncertain |
 | is_novel | boolean | True if Novel Species or Novel Genus |
+| low_confidence | boolean | Low-confidence flag |
+| p_known_species, p_novel_species, p_novel_genus, p_species_boundary, p_ambiguous, p_unclassified | float64 | Posterior probabilities |
+| posterior_entropy | float64 | Shannon entropy of the posteriors (0 to 2.585) |
+| inferred_uncertainty | float64 | Inferred uncertainty for single-hit reads |
+| uncertainty_type | string | measured / inferred |
 
-**Example:**
-
-```csv
-read_id,best_match_genome,top_hit_identity,novelty_index,placement_uncertainty,num_ambiguous_hits,taxonomic_call,is_novel
-read_001,GCF_000123.1,98.5,1.5,0.2,2,Known Species,false
-read_002,GCF_000456.1,92.0,8.0,0.3,5,Novel Species,true
-read_003,GCF_000789.1,82.0,18.0,1.5,3,Novel Genus,true
-```
+Additional columns: `alignment_quality`, `identity_confidence`, `placement_confidence`, `discovery_score` with `--include-legacy-scores`; `family_bitscore_ratio`, `family_identity_gap`, `in_family_hit_fraction`, `external_best_genome`, `external_best_identity`, `in_family_identity`, `in_family_novelty_index` when a target family is set; `species`, `genus`, `family` when `--metadata` is given (not in streaming mode).
 
 #### 12.2.4 Classification Output Parquet
 
@@ -2188,7 +2264,7 @@ metadarkmatter score classify \
   --streaming
 ```
 
-**Effect:** Caps memory at ~2 GB by processing in 5M-row partitions.
+**Effect:** Bounds memory by processing in partitions of `--chunk-size` rows (default 1,000,000; e.g. `--chunk-size 500000` for tighter memory). Streaming requires each read's hits to be contiguous in the file and cannot be combined with `--id-mapping` / `--genomes`.
 
 #### 12.3.2 CPU Utilization
 
@@ -2364,13 +2440,13 @@ for result in parser.iter_reads():
 
 #### 12.5.3 Code Repository
 
-- **GitHub:** https://github.com/metadarkmatter/metadarkmatter
-- **Issues:** https://github.com/metadarkmatter/metadarkmatter/issues
-- **Documentation:** https://metadarkmatter.readthedocs.io
+- **GitHub:** https://github.com/FOI-Bioinformatics/metadarkmatter
+- **Issues:** https://github.com/FOI-Bioinformatics/metadarkmatter/issues
+- **Documentation:** `docs/` in the repository
 
 ---
 
-**Document Version:** 1.0
-**Package Version:** 0.1.0
-**Generated:** 2026-02-20
+**Document Version:** 1.1
+**Package Version:** 0.2.0
+**Generated:** 2026-02-20 (facts updated 2026-11-02)
 **Maintainer:** Metadarkmatter Development Team

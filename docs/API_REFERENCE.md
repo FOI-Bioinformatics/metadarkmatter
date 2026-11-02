@@ -2,8 +2,8 @@
 
 Complete API documentation for the metadarkmatter Python package. This reference covers all public interfaces for the ANI-weighted placement uncertainty algorithm and supporting data structures.
 
-**Package Version**: 0.1.0
-**Last Updated**: 2026-02-20
+**Package Version**: 0.2.0
+**Last Updated**: 2026-11-02
 
 ---
 
@@ -29,7 +29,12 @@ High-performance ANI matrix using NumPy arrays with integer indexing.
 #### Constructor
 
 ```python
-ANIMatrix(ani_dict: dict[str, dict[str, float]]) -> ANIMatrix
+ANIMatrix(
+    ani_dict: dict[str, dict[str, float]],
+    default_ani: float = 70.0,
+    symmetry_check: str = "warn",
+    symmetry_tolerance: float = 0.5,
+) -> ANIMatrix
 ```
 
 **Description**:
@@ -37,9 +42,17 @@ Initializes an ANI matrix from a nested dictionary of genome-to-genome similarit
 
 **Parameters**:
 - `ani_dict` (dict[str, dict[str, float]]): Nested dictionary where outer keys are genome names and inner dictionaries map genome names to ANI values. Example: `{"GCF_001": {"GCF_002": 85.5, ...}, ...}`
+- `default_ani` (float): Value returned by `get_ani()` for pairs stored as 0.0 (uncomputed by fastANI/skani) when both genomes are in the matrix (default: 70.0)
+- `symmetry_check` (str): `"off"`, `"warn"` (default) or `"strict"`. When enabled, pairs where ANI(a,b) and ANI(b,a) are both given and differ by more than `symmetry_tolerance` are logged (`"warn"`) or rejected with `ValueError` (`"strict"`)
+- `symmetry_tolerance` (float): Maximum allowed |ANI(a,b) - ANI(b,a)| (default: 0.5)
 
 **Returns**:
 ANIMatrix instance ready for classification tasks
+
+**Notes**:
+- Values are stored as float64.
+- One-directional pairs (only ANI(a,b) given, reverse missing/0) are mirrored.
+- Values must be on a 0-100 scale. A matrix whose largest positive off-diagonal value is <= 1.0 is treated as fraction-scaled and rejected with `ValueError`.
 
 **Example**:
 ```python
@@ -56,7 +69,7 @@ print(f"Memory usage: {ani_matrix.memory_usage_bytes() / 1e6:.1f} MB")
 
 **Performance Notes**:
 - Initialization time: O(n^2) where n is number of genomes (only occurs once)
-- Memory usage: ~4 MB for 1000 genomes (dense matrix)
+- Memory usage: ~8 MB for 1000 genomes (dense float64 matrix)
 - Lookup time: O(1) after initial dict lookup
 
 ---
@@ -65,21 +78,28 @@ print(f"Memory usage: {ani_matrix.memory_usage_bytes() / 1e6:.1f} MB")
 
 ```python
 @classmethod
-from_file(cls, path: Path) -> ANIMatrix
+from_file(
+    cls,
+    path: Path,
+    default_ani: float = 70.0,
+    symmetry_check: str = "warn",
+    symmetry_tolerance: float = 0.5,
+) -> ANIMatrix
 ```
 
 **Description**:
-Load ANI matrix from a CSV/TSV file using the ANIMatrixParser.
+Load ANI matrix from a CSV/TSV file (optionally gzipped) using the ANIMatrixParser. A related constructor, `ANIMatrix.from_dataframe(df, default_ani=70.0)`, builds a matrix from a Polars DataFrame.
 
 **Parameters**:
 - `path` (Path): File path to ANI matrix (CSV or TSV format)
+- `default_ani`, `symmetry_check`, `symmetry_tolerance`: see the constructor
 
 **Returns**:
 ANIMatrix instance loaded from file
 
 **Raises**:
 - `FileNotFoundError`: If file does not exist
-- `ValueError`: If matrix is not valid (non-square, missing genomes, invalid values)
+- `ValueError`: If matrix is not valid (non-square, row/column mismatch, duplicate names, null values, values outside 0-100, 0-1 scaled values, or an asymmetric pair with `symmetry_check="strict"`)
 
 **Example**:
 ```python
@@ -146,7 +166,7 @@ Get ANI value between two genomes. Uses integer-indexed NumPy array for O(1) acc
 - `genome2` (str): Second genome identifier
 
 **Returns**:
-ANI value (0-100), or 0.0 if genomes not found. Returns 100.0 if genome1 == genome2 (diagonal).
+ANI value (0-100). Returns 100.0 if genome1 == genome2 (diagonal), `default_ani` (70.0 by default) for a pair stored as 0.0 when both genomes are in the matrix, and 0.0 only if a genome is not in the matrix.
 
 **Example**:
 ```python
@@ -170,7 +190,7 @@ Get ANI value using pre-computed integer indices. This is the fastest lookup met
 - `idx2` (int): Second genome index
 
 **Returns**:
-ANI value (0-100)
+Raw stored ANI value (0-100). Unlike `get_ani()`, uncomputed pairs are returned as 0.0 (no `default_ani` substitution).
 
 **Performance Notes**:
 - Fastest method for repeated lookups: pure NumPy array access O(1)
@@ -265,6 +285,7 @@ Main classifier for detecting novel microbial diversity using ANI-weighted place
 ```python
 ANIWeightedClassifier(
     ani_matrix: ANIMatrix,
+    aai_matrix: AAIMatrix | None = None,
     config: ScoringConfig | None = None,
 ) -> ANIWeightedClassifier
 ```
@@ -274,7 +295,10 @@ Initialize the ANI-weighted classifier with an ANI matrix and optional scoring c
 
 **Parameters**:
 - `ani_matrix` (ANIMatrix): Precomputed ANI matrix for genome comparisons
+- `aai_matrix` (AAIMatrix, optional): AAI matrix for genus-level decisions
 - `config` (ScoringConfig, optional): Scoring configuration with classification thresholds. Defaults to ScoringConfig() with standard parameters.
+
+Note that `config` is the third positional parameter; pass it by keyword (`config=config`). A config passed as the second positional argument is taken as `aai_matrix`.
 
 **Returns**:
 ANIWeightedClassifier instance ready for classification
@@ -296,7 +320,7 @@ config = ScoringConfig(
     novelty_novel_species_min=4.0,
     novelty_novel_species_max=20.0,
 )
-classifier = ANIWeightedClassifier(ani_matrix, config)
+classifier = ANIWeightedClassifier(ani_matrix, config=config)
 ```
 
 ---
@@ -304,7 +328,11 @@ classifier = ANIWeightedClassifier(ani_matrix, config)
 #### ANIWeightedClassifier.classify_read()
 
 ```python
-def classify_read(self, blast_result: BlastResult) -> ReadClassification | None
+def classify_read(
+    self,
+    blast_result: BlastResult,
+    read_length: int | None = None,
+) -> ReadClassification | None
 ```
 
 **Description**:
@@ -312,16 +340,17 @@ Classify a single read based on its BLAST hits. Calculates novelty index and pla
 
 **Parameters**:
 - `blast_result` (BlastResult): BLAST results for one read containing all hits sorted by bitscore
+- `read_length` (int, optional): Read length for coverage weighting. If None, `qlen` of the first hit is used, or the maximum `qend` as a proxy
 
 **Returns**:
 ReadClassification if classification successful, None if no hits
 
 **Algorithm**:
-1. Extract top BLAST hit (highest bitscore)
+1. Extract top BLAST hit (highest coverage-weighted bitscore; raw bitscore when `coverage_weight_mode="none"`)
 2. Calculate Novelty Index: N = 100 - top_hit_identity
-3. Find secondary hits within 95% of top bitscore
-4. Calculate Placement Uncertainty: U = 100 - ANI(top_hit, secondary_hits)
-5. Classify based on N and U thresholds
+3. Find secondary hits within `bitscore_threshold_pct` (default 95%) of top bitscore
+4. Calculate Placement Uncertainty: U = 100 - ANI(top genome, second-best genome) with the default `uncertainty_mode="second"`, or U = 100 - max ANI(top genome, any competing genome) with `uncertainty_mode="max"`
+5. Classify: `taxonomic_call` is the Bayesian MAP category (2D Gaussian posteriors over N and U, followed by Stage 2 refinement); the hard N/U thresholds are used for the legacy cascade
 
 **Example**:
 ```python
@@ -349,7 +378,9 @@ Fully vectorized classifier using Polars for maximum performance. This is the so
 ```python
 VectorizedClassifier(
     ani_matrix: ANIMatrix,
+    aai_matrix: AAIMatrix | None = None,
     config: ScoringConfig | None = None,
+    representative_mapping: dict[str, str] | None = None,
 ) -> VectorizedClassifier
 ```
 
@@ -358,7 +389,9 @@ Initialize vectorized classifier using Polars' native Rust backend. All operatio
 
 **Parameters**:
 - `ani_matrix` (ANIMatrix): Precomputed ANI matrix
-- `config` (ScoringConfig, optional): Scoring configuration (uses defaults if None)
+- `aai_matrix` (AAIMatrix, optional): AAI matrix for genus-level decisions
+- `config` (ScoringConfig, optional): Scoring configuration (uses defaults if None). Pass by keyword; it is the third positional parameter.
+- `representative_mapping` (dict[str, str], optional): Genome accession -> species representative accession. ANI lookups use the representative; output keeps the actual hit genome.
 
 **Returns**:
 VectorizedClassifier instance
@@ -377,17 +410,24 @@ vectorized = VectorizedClassifier(ani_matrix)
 #### VectorizedClassifier.classify_file()
 
 ```python
-def classify_file(self, blast_path: Path) -> pl.DataFrame
+def classify_file(
+    self,
+    blast_input: Path | pl.DataFrame,
+    id_mapping: ContigIdMapping | None = None,
+    compute_qc: bool = False,
+) -> pl.DataFrame | tuple[pl.DataFrame, QCMetrics]
 ```
 
 **Description**:
 Classify BLAST file using fully vectorized Polars operations. All operations run in Polars' Rust backend with automatic parallelization.
 
 **Parameters**:
-- `blast_path` (Path): Path to BLAST tabular output
+- `blast_input` (Path | pl.DataFrame): Path to BLAST tabular output (12 or 13 columns), or an already-parsed DataFrame
+- `id_mapping` (ContigIdMapping, optional): Translates contig IDs to genome accessions for external alignment results
+- `compute_qc` (bool): When True, also return pre-classification QC metrics
 
 **Returns**:
-Polars DataFrame with classification results
+Polars DataFrame with classification results, or `(DataFrame, QCMetrics)` when `compute_qc=True`. The DataFrame is conformed to a fixed schema (column set, order and dtypes), including for empty or all-Off-target inputs. Columns: `read_id`, `best_match_genome`, `top_hit_identity`, `novelty_index`, `placement_uncertainty`, `genus_uncertainty`, `ambiguity_scope`, `num_ambiguous_hits`, `second_hit_identity`, `identity_gap`, `confidence_score`, `taxonomic_call`, `legacy_call`, `diversity_status`, `is_novel`, `low_confidence`, the six `p_*` posterior columns, `posterior_entropy`, `inferred_uncertainty`, `uncertainty_type`; plus the four legacy sub-scores when `include_legacy_scores=True`, and the family-validation columns (`family_bitscore_ratio`, `family_identity_gap`, `in_family_hit_fraction`, `external_best_genome`, `external_best_identity`, `in_family_identity`, `in_family_novelty_index`) when `target_family` is set.
 
 **Example**:
 ```python
@@ -404,7 +444,7 @@ def stream_to_file(
     self,
     blast_path: Path,
     output_path: Path,
-    output_format: str = "parquet",
+    output_format: OutputFormat = "parquet",  # Literal["csv", "parquet"]
     partition_size: int = 5_000_000,
     progress_callback: Callable[[int, int, float], None] | None = None,
 ) -> int
@@ -422,6 +462,11 @@ Stream classification results to file for very large BLAST files. Processes inpu
 
 **Returns**:
 Total number of reads classified
+
+**Raises**:
+- `ValueError`: If the hits for a read are not contiguous in the input (a read id appears in more than one run within a partition, or reappears after it was already written). BLAST and MMseqs2 emit hits grouped by query; otherwise sort by the first column (e.g. `sort -k1,1 -s`) or use `classify_file()`.
+
+Every partition is written with the same fixed output schema as `classify_file()`. The `mdm score classify --streaming` CLI passes `--chunk-size` (default 1,000,000) as `partition_size`.
 
 **Memory Usage**:
 - Bounded by partition_size
@@ -468,10 +513,11 @@ Initialize streaming BLAST parser. Uses Polars with chunked batch reading to pro
 StreamingBlastParser instance
 
 **Expected Format**:
-BLAST tabular output (-outfmt 6):
+BLAST tabular output (-outfmt 6), 12 columns or 13 with a trailing `qlen`:
 ```
-qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore
+qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore [qlen]
 ```
+Lines starting with `#` are treated as comments. Reverse-strand coordinates (qstart > qend, as reported by MMseqs2/DIAMOND) are normalized.
 
 **Example**:
 ```python
@@ -504,7 +550,7 @@ top_hits = (
     lazy_df
     .group_by("qseqid")
     .agg(pl.col("bitscore").max().alias("max_bitscore"))
-    .collect(streaming=True)
+    .collect(engine="streaming")
 )
 ```
 
@@ -713,7 +759,7 @@ Parse ANI matrix into Polars DataFrame with validation.
 Polars DataFrame with genome names as first column and ANI values
 
 **Raises**:
-- `ValueError`: If matrix is not symmetric, contains invalid values, or row/column names don't match
+- `ValueError`: If the matrix is empty or not square, row/column names don't match, names are duplicated, values are null, or values fall outside 0-100. Symmetry is not checked here; `ANIMatrix` performs the symmetry check (`symmetry_check`).
 
 **Example**:
 ```python
@@ -756,6 +802,12 @@ class BlastHitFast(NamedTuple):
     pident: float         # Percent identity (0-100)
     bitscore: float       # Bit score
     genome_name: str      # Pre-extracted genome name
+    length: int = 0       # Alignment length
+    mismatch: int = 0
+    gapopen: int = 0
+    qstart: int = 0
+    qend: int = 0
+    evalue: float = 0.0
 ```
 
 **Description**:
@@ -867,7 +919,7 @@ print(f"Dict: {classification.to_dict()}")
 Enum representing taxonomic classification categories.
 
 ```python
-class TaxonomicCall(str, Enum):
+class TaxonomicCall(StrEnum):
     KNOWN_SPECIES = "Known Species"
     NOVEL_SPECIES = "Novel Species"
     NOVEL_GENUS = "Novel Genus"
@@ -880,7 +932,7 @@ class TaxonomicCall(str, Enum):
 ```
 
 **Description**:
-Classification categories based on novelty index and placement uncertainty thresholds from competitive read recruitment methodology.
+Classification categories based on novelty index and placement uncertainty. The N/U ranges below are the hard thresholds used by the legacy cascade (`legacy_call`); `taxonomic_call` is the Bayesian MAP category, whose decision boundaries do not coincide exactly with these ranges (see `docs/METHODS.md`).
 
 **Values**:
 - `KNOWN_SPECIES`: High identity, low ambiguity (N < 4%, U < 1.5%)
@@ -914,10 +966,19 @@ class TaxonomicSummary(BaseModel):
     known_species: int
     novel_species: int
     novel_genus: int
+    species_boundary: int = 0
+    ambiguous: int = 0
+    ambiguous_within_genus: int = 0
     conserved_regions: int
+    unclassified: int = 0
+    off_target: int = 0
+    diversity_known: int = 0
+    diversity_novel: int = 0
+    diversity_uncertain: int = 0
     mean_novelty_index: float
     mean_placement_uncertainty: float
-    genome_hit_counts: dict[str, int]
+    genome_hit_counts: dict[str, int] = {}
+    species_hit_counts: dict[str, int] = {}
 ```
 
 **Description**:
@@ -929,15 +990,20 @@ Aggregates read-level classifications to provide sample-level insights into micr
 - `novel_species` (int): Reads classified as novel species (dark matter)
 - `novel_genus` (int): Reads classified as novel genus (dark matter)
 - `conserved_regions` (int): Reads in conserved/ambiguous regions
+- `species_boundary`, `ambiguous`, `ambiguous_within_genus`, `unclassified`, `off_target` (int): Counts for the remaining categories
+- `diversity_known`, `diversity_novel`, `diversity_uncertain` (int): Counts per high-level diversity status
 - `mean_novelty_index` (float): Mean novelty index across all reads
 - `mean_placement_uncertainty` (float): Mean placement uncertainty
 - `genome_hit_counts` (dict[str, int]): Read counts per reference genome (top 50)
+- `species_hit_counts` (dict[str, int]): Read counts per species (when metadata is available)
 
 **Computed Properties**:
 - `known_species_pct` (float): Percentage of reads classified as known species
 - `novel_species_pct` (float): Percentage of reads classified as novel species
 - `novel_genus_pct` (float): Percentage of reads classified as novel genus
 - `novel_diversity_pct` (float): Total percentage of novel diversity detected
+- `diversity_known_pct`, `diversity_novel_pct`, `diversity_uncertain_pct` (float): Percentages per diversity status
+- `species_count` (int): Number of species in `species_hit_counts`
 
 **Methods**:
 ```python
@@ -990,24 +1056,31 @@ class BlastHit(BaseModel):
     send: int                # End position in subject
     evalue: float            # Expectation value
     bitscore: float          # Bit score
+    qlen: int | None = None  # Query length (13-column input only)
 ```
 
 **Description**:
-Represents one alignment between a metagenomic read and a reference genome sequence. Multiple hits per read are expected in competitive recruitment scenarios.
+Represents one alignment between a metagenomic read and a reference genome sequence. Multiple hits per read are expected in competitive recruitment scenarios. `pident` is clamped to [0, 100]. Reverse-strand hits with qstart > qend (MMseqs2/DIAMOND) are accepted and normalized by swapping the two coordinates.
 
 **Properties**:
 ```python
 @property
 def genome_name(self) -> str
 ```
-Extract genome identifier from subject sequence ID. Handles common RefSeq/GenBank formats and custom pipe-delimited formats.
+Extract genome identifier from subject sequence ID. Returns a leading `GCF_`/`GCA_`/`NZ_` accession if present; otherwise, for `a|b` IDs, the part after the first pipe; otherwise the text before the first space. Note that the vectorized path (`extract_genome_name_expr()` in `core/parsers.py`) instead takes the text before the first pipe, matching the standardized `{accession}|{contig_id}` headers.
 
 **Methods**:
 ```python
 @classmethod
 def from_blast_line(cls, line: str) -> BlastHit
 ```
-Parse a single line from BLAST tabular output (outfmt 6).
+Parse a single line from BLAST tabular output (outfmt 6, 12 or 13 fields; raises `ValueError` otherwise).
+
+```python
+def calculate_coverage(self, read_length: int | None = None) -> float
+def calculate_weighted_score(self, read_length: int | None = None, mode: str = "none", strength: float = 0.5) -> float
+```
+Query coverage (0-1) and coverage-weighted bitscore (see Coverage-Weighted Hit Selection in `CLAUDE.md`).
 
 **Example**:
 ```python
@@ -1066,9 +1139,12 @@ def get_ambiguous_hits(self, threshold_pct: float = 95.0) -> list[BlastHit]
 Get hits within threshold percentage (returns list).
 
 ```python
-def sorted_by_bitscore(self) -> BlastResult
+def get_best_hit_weighted(self, read_length: int | None = None, mode: str = "none", strength: float = 0.5) -> BlastHit | None
+def iter_ambiguous_hits_weighted(self, read_length: int | None = None, mode: str = "none", strength: float = 0.5, threshold_pct: float = 95.0) -> Iterator[BlastHit]
 ```
-Return new BlastResult sorted by bitscore (already sorted on creation).
+Coverage-weighted variants of `best_hit` and `iter_ambiguous_hits()`.
+
+Hits are sorted by bitscore (descending) on creation by the `ensure_sorted` validator.
 
 **Example**:
 ```python
@@ -1128,7 +1204,19 @@ class ScoringConfig(BaseModel):
     use_aai_for_genus: bool = True
     target_family: str | None = None
     family_ratio_threshold: float = 0.8
+    max_evalue: float = 0.0              # 0 disables
+    min_percent_identity: float = 0.0    # 0 disables
+    min_bitscore: float = 0.0            # 0 disables
+    min_read_length: int = 0             # 0 disables
+    min_query_coverage: float = 0.0      # 0 disables
+    same_genus_ani_threshold: float = 80.0
+    same_species_ani_threshold: float = 95.0
+    merge_band_tolerance: float = 2.0
+    bayesian: BayesianConfig = BayesianConfig()
+    include_legacy_scores: bool = False
 ```
+
+The model is frozen (`model_config = {"frozen": True}`).
 
 **Description**:
 Thresholds define boundaries between different taxonomic classifications based on novelty index and placement uncertainty metrics.
@@ -1142,6 +1230,8 @@ Thresholds define boundaries between different taxonomic classifications based o
 - Known Species: N < 10%, U < 5%
 - Novel Species: 10% <= N < 25%, U < 5%
 - Novel Genus: 25% <= N <= 40%, U < 5%
+
+In protein mode, `get_effective_thresholds()` returns these fixed constants from `core/protein_constants.py`; custom novelty/uncertainty values passed to `ScoringConfig` (directly, via YAML, or via adaptive thresholds) are not applied.
 
 **Key Parameters**:
 - `alignment_mode` (Literal): 'nucleotide' for BLASTN, 'protein' for BLASTX results
@@ -1170,18 +1260,31 @@ Thresholds define boundaries between different taxonomic classifications based o
 - `use_aai_for_genus` (bool): Use AAI instead of ANI for genus-level decisions when available (default: True)
 - `target_family` (str | None): Target family for off-target detection (default: None)
 - `family_ratio_threshold` (float): Bitscore ratio threshold for off-target reads (default: 0.8)
+- `same_genus_ani_threshold`, `same_species_ani_threshold` (float): ANI cut-offs for same-genus / same-species grouping in phylogenetic context computation (defaults: 80.0, 95.0)
+- `merge_band_tolerance` (float): Novelty tolerance when merging adjacent novel-cluster bands (default: 2.0)
+- `bayesian` (BayesianConfig): Priors, prior boosts, entropy threshold and optional fitted `category_params` / `entropy_calibration`
+- `include_legacy_scores` (bool): Add `alignment_quality`, `identity_confidence`, `placement_confidence`, `discovery_score` to output (default: False)
 
 **Validation**:
 Configuration is validated to ensure threshold relationships:
 - novelty_novel_species_min >= novelty_known_max
 - novelty_novel_genus_min == novelty_novel_species_max (continuous boundaries)
 - uncertainty_novel_species_max <= uncertainty_novel_genus_max
+- coverage_weight_strength > 0 when coverage_weight_mode is not 'none'
 
 **Methods**:
 ```python
-def get_effective_thresholds(self) -> dict[str, float | tuple[float, ...]]
+def get_effective_thresholds(self) -> EffectiveThresholds  # TypedDict
 ```
 Get effective thresholds for the current alignment mode. In protein mode, returns wider thresholds from `protein_constants.py`.
+
+```python
+@classmethod
+def from_yaml(cls, path: Path) -> ScoringConfig
+def to_yaml(self, path: Path) -> None
+def to_yaml_str(self) -> str
+```
+Load/save the nested YAML format produced by `mdm score export-config`.
 
 ```python
 @classmethod
@@ -1217,7 +1320,8 @@ Configuration for BLAST execution parameters.
 ```python
 class BlastConfig(BaseModel):
     num_threads: int = 4
-    max_target_seqs: int = 5000
+    word_size: int = 7
+    max_target_seqs: int = 500
     evalue: float = 1e-5
     perc_identity: float = 0.0
     outfmt: str = "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore"
@@ -1225,7 +1329,8 @@ class BlastConfig(BaseModel):
 
 **Parameters**:
 - `num_threads` (int): Number of CPU threads for BLAST (default: 4)
-- `max_target_seqs` (int): Maximum number of aligned sequences to keep (default: 5000)
+- `word_size` (int): BLAST word size (default: 7)
+- `max_target_seqs` (int): Maximum number of aligned sequences to keep (default: 500)
 - `evalue` (float): Expectation value threshold (default: 1e-5)
 - `perc_identity` (float): Minimum percent identity (default: 0.0)
 - `outfmt` (str): BLAST output format specification
@@ -1240,8 +1345,8 @@ class BlastConfig(BaseModel):
 
 | Component | Dataset Size | Memory | Notes |
 |-----------|--------------|--------|-------|
-| ANIMatrix | 1000 genomes | 4 MB | Dense NumPy matrix |
-| ANIMatrix | 10000 genomes | 400 MB | Dense matrix for large sets |
+| ANIMatrix | 1000 genomes | 8 MB | Dense NumPy float64 matrix |
+| ANIMatrix | 10000 genomes | 800 MB | Dense matrix for large sets |
 | BLAST Parsing | 100M records | ~16 GB | Polars streaming keeps memory constant |
 | Full Classification | 100M records | ~32 GB | Streaming writes to disk in chunks |
 
@@ -1290,6 +1395,18 @@ assert blast_path.exists(), f"BLAST file not found: {blast_path}"
 ValueError: ANI matrix is not square: 1000 rows, 999 value columns
 ```
 
+#### ValueError: ANI matrix values appear to be fractions
+
+```python
+ValueError: ANI matrix values appear to be fractions (max off-diagonal value 0.990 <= 1.0); expected percent identity on a 0-100 scale. Multiply the matrix by 100.
+```
+
+**Solution**: Convert the matrix to percent (0-100) before loading.
+
+#### ValueError: Streaming mode requires alignment rows grouped by read
+
+Raised by `stream_to_file()` when a read's hits are not contiguous. Sort the alignment file by the first column (`sort -k1,1 -s`) or use `classify_file()`.
+
 **Solution**: Check that ANI matrix has same number of rows and columns (genome names must match both axes).
 
 #### ValueError: ANI matrix contains null/missing values
@@ -1303,8 +1420,12 @@ ValueError: ANI matrix contains null/missing values
 #### ValueError: threshold_pct validation failed
 
 ```python
-ValueError: bitscore_threshold_pct must be between 0 and 100
+pydantic.ValidationError: 1 validation error for ScoringConfig
+bitscore_threshold_pct
+  Input should be less than or equal to 100 [type=less_than_equal, ...]
 ```
+
+(`pydantic.ValidationError` is a subclass of `ValueError`.)
 
 **Solution**: Ensure threshold percentage is in valid range.
 
@@ -1411,7 +1532,7 @@ config = ScoringConfig(
     uncertainty_novel_species_max=1.0,  # Require lower ambiguity
 )
 
-vectorized = VectorizedClassifier(ani_matrix, config)
+vectorized = VectorizedClassifier(ani_matrix, config=config)
 df = vectorized.classify_file(Path("blast.tsv"))
 ```
 
