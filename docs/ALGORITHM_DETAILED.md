@@ -237,7 +237,7 @@ metadarkmatter score classify \
 
 ### Protein Mode
 
-**Uses:** BLASTX alignment + ANI matrix (an AAI matrix can be supplied but is not used by `score classify`; see below)
+**Uses:** BLASTX alignment + ANI matrix, optionally an AAI matrix for genus-level refinement (see below)
 
 ```bash
 metadarkmatter score classify \
@@ -262,9 +262,7 @@ metadarkmatter score classify \
 
 ### AAI Matrix
 
-`score classify --aai aai_matrix.csv` loads the AAI matrix and passes it to the CLI classifier, which builds an AAI lookup table but does not currently use it: placement uncertainty and all classification rules use the ANI matrix only, in both modes.
-
-AAI is used by the programmatic `ANIWeightedClassifier` (`core/classification/classifiers/base.py`) when `use_aai_for_genus` is true: for reads with N in the novel-genus range (20-25% nucleotide) and U below the confident-placement maximum, the maximum AAI from the top genome to the other hit genomes overrides the Bayesian call (AAI > 65% -> Novel Species; 58-65% -> Ambiguous Within Genus; < 58% -> Novel Genus; Riesco & Trujillo 2024). This is not reachable from `score classify`.
+`score classify --aai aai_matrix.csv` supplies an AAI matrix. Placement uncertainty still uses the ANI matrix. When `use_aai_for_genus` is true (default), both `score classify` (`VectorizedClassifier`) and the programmatic `ANIWeightedClassifier` apply the same AAI genus rule: for reads with N in the novel-genus range (20-25% nucleotide, 25-40% protein) and U below the confident-placement maximum, the maximum AAI from the top genome to the other hit genomes (pairs with AAI > 0) overrides both `taxonomic_call` and `legacy_call` (AAI > 65% -> Novel Species; 58-65% -> Ambiguous Within Genus; < 58% -> Novel Genus; Riesco & Trujillo 2024). Reads without an AAI value for any competitor keep their ANI-based call.
 
 ---
 

@@ -500,7 +500,7 @@ def classify(
         "--single-hit-threshold",
         help=(
             "Inferred uncertainty threshold for single-hit Ambiguous classification "
-            "(only applies when --use-inferred-for-single-hits is enabled). "
+            "in legacy_call (taxonomic_call does not use it). "
             "Default 10%% means reads with novelty ~7%% or higher become Ambiguous."
         ),
         min=0.0,
@@ -568,9 +568,8 @@ def classify(
         False,
         "--bayesian",
         help=(
-            "Add Bayesian posterior probability columns to output. "
-            "Provides continuous confidence (p_known_species, p_novel_species, "
-            "p_novel_genus, p_ambiguous) rather than hard category labels."
+            "Deprecated, no effect: Bayesian classification and the posterior "
+            "columns (p_known_species ... p_unclassified) are always included."
         ),
     ),
     target_family: str | None = typer.Option(
@@ -1147,7 +1146,7 @@ def batch(
         0,
         "--workers",
         "-w",
-        help="Number of worker processes (default: CPU count - 1)",
+        help="Currently unused; files are processed sequentially.",
         min=0,
     ),
 ) -> None:
@@ -1438,8 +1437,18 @@ def _generate_summary(df: pl.DataFrame) -> TaxonomicSummary:
             zip(species_counts["species"], species_counts["len"], strict=False)
         )
 
+    # High-level diversity grouping. These fields were never populated, so
+    # the summary JSON always reported 0 known / novel / uncertain reads.
+    diversity_counts: dict[str, int] = {}
+    if "diversity_status" in df.columns:
+        div = df.group_by("diversity_status").len().to_dict(as_series=False)
+        diversity_counts = dict(zip(div["diversity_status"], div["len"], strict=False))
+
     return TaxonomicSummary(
         total_reads=total_reads,
+        diversity_known=diversity_counts.get("Known", 0),
+        diversity_novel=diversity_counts.get("Novel", 0),
+        diversity_uncertain=diversity_counts.get("Uncertain", 0),
         known_species=count_dict.get("Known Species", 0),
         novel_species=count_dict.get("Novel Species", 0),
         novel_genus=count_dict.get("Novel Genus", 0),

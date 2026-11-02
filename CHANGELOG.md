@@ -101,6 +101,30 @@ Production-readiness and UX hardening pass.
     IDs. Genome concatenation handles files without a trailing newline. GTDB
     placeholder taxa such as `f__CAG-138` are accepted.
   - `anyio` and `certifi` bumped in `uv.lock` for published advisories.
+- Fixes found during the 2026-11 documentation audit:
+  - `score classify --aai` loaded the AAI matrix but never used it. The CLI
+    classifier now applies the same AAI genus rule as `ANIWeightedClassifier`
+    (novel-genus range, low U: AAI > 65% -> Novel Species, 58-65% ->
+    Ambiguous Within Genus, < 58% -> Novel Genus) to both `taxonomic_call` and
+    `legacy_call`. Output with `--aai` can therefore differ from before for
+    novel-genus candidates.
+  - `ambiguity_scope` counted hit rows instead of distinct genomes, so a
+    competitor with several contig hits made a read `across_genera`, which can
+    turn Ambiguous into Conserved Region.
+  - `score classify --summary` wrote 0 for `diversity_known/novel/uncertain`,
+    and its species counts were empty because the summary was built from the
+    table before the metadata join.
+  - `BlastHit.genome_name` returned the part after `|` for non-accession IDs
+    (e.g. MAG bins `bin_01|contig_5`), unlike the CLI classifier and the
+    `{genome}|{contig}` header standard.
+  - `ANIWeightedClassifier` reported U = 100 (Ambiguous) when all ambiguous
+    hits were to the best genome; it now reports U = 0, as the CLI classifier
+    does. Its single-hit prior boost used the nucleotide novelty threshold in
+    protein mode.
+  - Help text: `--bayesian` is described as deprecated, `--single-hit-threshold`
+    no longer refers to a non-existent flag, and `score batch --workers` is
+    marked as unused. The `pyproject.toml` repository URL now points at
+    FOI-Bioinformatics/metadarkmatter.
 
 - Streaming classification (`score classify --streaming` / `stream_to_file`)
   silently bypassed the alignment-quality filters (`min_alignment_length`,

@@ -159,11 +159,11 @@ Follow-up items, all bounded:
    change the parameterisation is a scientific decision that needs a
    validation run, not a documentation fix.
 
-5. **Smaller classifier issues found in the same re-check**
-   (documented, not changed): `score classify --aai` loads the AAI
-   matrix but the CLI classifier does not use it; `ambiguity_scope`
-   is labelled `across_genera` when a competing genome contributes
-   more than one hit in the bitscore window;
+5. **Smaller classifier issues found in the same re-check.** Fixed:
+   `score classify --aai` now applies the AAI genus rule (it was loaded
+   but unused); `ambiguity_scope` counts distinct genomes (it reported
+   `across_genera` when a competitor contributed several hits);
+   `--summary` fills the `diversity_*` and species counts. Still open:
    `ScoringConfig.confidence_threshold` (used by the
    `literature-strict` preset) has no effect on the output.
 

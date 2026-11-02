@@ -413,8 +413,14 @@ def run_classification(
             assert isinstance(result, pl.DataFrame)
             classification_df = result
 
+        # Join metadata here (not inside finalize_classification) so the
+        # returned DataFrame is the one written to disk. Callers such as
+        # `score classify --summary` read species columns from it; returning
+        # the pre-join frame left species_hit_counts empty.
+        if classification_df is not None and genome_metadata is not None:
+            classification_df = genome_metadata.join_classifications(classification_df)
         num_classified = finalize_classification(
-            classification_df, genome_metadata, request.output, request.output_format
+            classification_df, None, request.output, request.output_format
         )
 
     log(f"[green]Classified {num_classified:,} reads[/green]\n")
