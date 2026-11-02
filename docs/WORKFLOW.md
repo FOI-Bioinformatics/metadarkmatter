@@ -223,8 +223,7 @@ For highly divergent taxa where nucleotide alignment fails to detect homology, p
 # Build protein database from reference proteomes
 metadarkmatter blastx makedb \
   --proteins reference_proteins/ \
-  --output blastdb/panproteome \
-  --threads 16
+  --output blastdb/panproteome
 
 # Run BLASTX alignment (DNA reads vs protein database)
 metadarkmatter blastx align \

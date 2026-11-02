@@ -326,7 +326,7 @@ For families with > 500 genomes (e.g., Pseudomonadaceae), download only represen
 ```bash
 metadarkmatter download genomes list "f__Pseudomonadaceae" \
   --output genomes_list.tsv \
-  --representative-only
+  --reps-only
 ```
 
 ---
@@ -479,10 +479,10 @@ metadarkmatter ani compute --genomes genomes/ --output ani_matrix.csv --backend 
 ```bash
 metadarkmatter ani validate \
   --ani ani_matrix.csv \
-  --genomes genomes/
+  --blast sample.blast.tsv.gz
 ```
 
-This ensures all genomes are represented in the matrix.
+This checks that the genomes hit in the alignment file are represented in the matrix.
 
 ---
 

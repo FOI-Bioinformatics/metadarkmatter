@@ -62,24 +62,33 @@ echo "[2/9] Downloading reference genomes"
 "$MDM" download genomes fetch \
     --accessions "$OUT_DIR/genomes.tsv" \
     --output-dir "$OUT_DIR/genomes/"
+# 'download genomes list' writes genome_metadata.tsv next to genomes.tsv;
+# steps 6-8 use it for representative mapping, family inference and species.
+METADATA="$OUT_DIR/genome_metadata.tsv"
 
 echo "[3/9] Extracting family reads with Kraken2"
-KRAKEN_OUT="$OUT_DIR/sample.kraken"
-if [[ ! -s "$KRAKEN_OUT" ]]; then
-    if [[ -n "$READS_R2" ]]; then
-        kraken2 --db "$KRAKEN_DB" --threads "$THREADS" --paired \
-            --output "$KRAKEN_OUT" "$READS_R1" "$READS_R2"
-    else
-        kraken2 --db "$KRAKEN_DB" --threads "$THREADS" \
-            --output "$KRAKEN_OUT" "$READS_R1"
-    fi
+# 'mdm kraken2 classify' writes both <sample>.kraken and the <sample>.kreport
+# that 'kraken2 extract' requires.
+SAMPLE="sample"
+KRAKEN_OUT="$OUT_DIR/$SAMPLE.kraken"
+if [[ ! -s "$KRAKEN_OUT" || ! -s "$OUT_DIR/$SAMPLE.kreport" ]]; then
+    "$MDM" kraken2 classify \
+        --reads-1 "$READS_R1" \
+        ${READS_R2:+--reads-2 "$READS_R2"} \
+        --kraken-db "$KRAKEN_DB" \
+        --output "$OUT_DIR" \
+        --sample-name "$SAMPLE" \
+        --threads "$THREADS"
 fi
 "$MDM" kraken2 extract \
     --kraken-output "$KRAKEN_OUT" \
     --reads-1 "$READS_R1" \
     ${READS_R2:+--reads-2 "$READS_R2"} \
     --taxid "$FAMILY_TAXID" \
+    --sample-name "$SAMPLE" \
     --output "$OUT_DIR/extraction/"
+# Name written by 'kraken2 extract': <sample>_taxid<taxid>_R1.fastq.gz
+EXTRACTED_R1="$OUT_DIR/extraction/${SAMPLE}_taxid${FAMILY_TAXID}_R1.fastq.gz"
 
 echo "[4/9] Building BLAST database"
 "$MDM" blast makedb \
@@ -88,7 +97,7 @@ echo "[4/9] Building BLAST database"
 
 echo "[5/9] Aligning reads"
 "$MDM" blast align \
-    --query "$OUT_DIR/extraction/reads_R1.fastq.gz" \
+    --query "$EXTRACTED_R1" \
     --database "$OUT_DIR/blastdb/pangenome" \
     --output "$OUT_DIR/sample.blast.tsv.gz" \
     --threads "$THREADS"
@@ -97,18 +106,21 @@ echo "[6/9] Computing ANI matrix"
 "$MDM" ani compute \
     --genomes "$OUT_DIR/genomes/" \
     --output "$OUT_DIR/ani_matrix.csv" \
+    --metadata "$METADATA" --representatives-only \
     --threads "$THREADS"
 
 echo "[7/9] Classifying"
 "$MDM" score classify \
     --alignment "$OUT_DIR/sample.blast.tsv.gz" \
     --ani "$OUT_DIR/ani_matrix.csv" \
+    --metadata "$METADATA" \
     --output "$OUT_DIR/classifications.csv"
 
 echo "[8/9] Generating report"
 "$MDM" report generate \
     --classifications "$OUT_DIR/classifications.csv" \
     --ani "$OUT_DIR/ani_matrix.csv" \
+    --metadata "$METADATA" \
     --output "$OUT_DIR/reports/report.html" \
     --report-mode offline
 

@@ -171,15 +171,20 @@ class ToolExecutionError(MetadarkmatterError):
         self.stderr = stderr
 
 
-class ToolTimeoutError(MetadarkmatterError):
-    """Raised when an external tool exceeds the specified timeout."""
+class ToolTimeoutError(ToolExecutionError):
+    """Raised when an external tool exceeds the specified timeout.
+
+    Subclasses :class:`ToolExecutionError` so CLI commands that catch
+    execution failures (and clean up their temp files) also handle timeouts.
+    """
 
     def __init__(self, tool_name: str, timeout_seconds: float, command: list[str]):
         cmd_str = " ".join(command)
         if len(cmd_str) > 200:
             cmd_str = cmd_str[:200] + "..."
 
-        super().__init__(
+        MetadarkmatterError.__init__(
+            self,
             message=(
                 f"{tool_name} timed out after {timeout_seconds:.0f} seconds\n\n"
                 f"Command: {cmd_str}"
@@ -192,6 +197,8 @@ class ToolTimeoutError(MetadarkmatterError):
         self.tool_name = tool_name
         self.timeout_seconds = timeout_seconds
         self.command = command
+        self.return_code = -1
+        self.stderr = ""
 
 
 @dataclass(frozen=True)
@@ -269,7 +276,9 @@ class ExternalTool(ABC):
     TOOL_NAME: ClassVar[str]
     TOOL_ALIASES: ClassVar[tuple[str, ...]] = ()
     INSTALL_HINT: ClassVar[str] = ""
-    DEFAULT_TIMEOUT: ClassVar[float] = 3600.0  # 1 hour
+    # No timeout by default: alignment/ANI/database builds on real data
+    # routinely run for many hours. Callers may pass ``timeout=`` explicitly.
+    DEFAULT_TIMEOUT: ClassVar[float | None] = None
 
     _executable_cache: ClassVar[dict[str, Path | None]] = {}
     # Dependency injection for testability - defaults to shutil.which
@@ -385,7 +394,7 @@ class ExternalTool(ABC):
 
         Args:
             timeout: Maximum execution time in seconds. If None, falls back
-                to the class-level DEFAULT_TIMEOUT (1 hour).
+                to the class-level DEFAULT_TIMEOUT (None = no timeout).
             dry_run: If True, return command without execution.
             capture_output: If True, capture stdout/stderr.
             **kwargs: Arguments passed to build_command().
@@ -409,7 +418,7 @@ class ExternalTool(ABC):
                 elapsed_seconds=0.0,
             )
 
-        if timeout is None:
+        if timeout is None and self.DEFAULT_TIMEOUT is not None:
             timeout = self.DEFAULT_TIMEOUT
             logger.debug(
                 "Using default timeout of %.0fs for %s",

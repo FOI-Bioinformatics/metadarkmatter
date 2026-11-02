@@ -12,11 +12,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import typer
+import yaml
 from rich.console import Console
 from rich.table import Table
 
 from metadarkmatter import __version__
-from metadarkmatter.cli.options import DryRun, Quiet, Threads
+from metadarkmatter.cli.options import DryRun, Quiet
 from metadarkmatter.cli.utils import QuietConsole
 from metadarkmatter.core.pipeline import Pipeline, PipelineLayout, RunManifest, StepStatus
 from metadarkmatter.core.runtime import is_dry_run
@@ -64,11 +65,17 @@ def run_pipeline(
         None, "--extracted-reads-1", help="Pre-extracted family R1 reads (skips both kraken steps).",
         dir_okay=False,
     ),
-    output_dir: Path = typer.Option(
-        ..., "--output-dir", "-o", help="Root output directory for the run.",
+    extracted_reads_2: Path | None = typer.Option(
+        None, "--extracted-reads-2",
+        help="Pre-extracted family R2 reads (paired-end; used by --aligner mmseqs2 only).",
+        dir_okay=False,
     ),
-    aligner: Aligner = typer.Option(
-        Aligner.BLAST, "--aligner", help="Aligner for the alignment step.",
+    output_dir: Path | None = typer.Option(
+        None, "--output-dir", "-o",
+        help="Root output directory for the run (required unless set in --config).",
+    ),
+    aligner: Aligner | None = typer.Option(
+        None, "--aligner", help="Aligner for the alignment step [default: blast].",
     ),
     no_report: bool = typer.Option(
         False, "--no-report", help="Skip the HTML report step.",
@@ -79,7 +86,10 @@ def run_pipeline(
     force: bool = typer.Option(
         False, "--force", help="Re-run every step even if its outputs already exist.",
     ),
-    threads: Threads = 8,
+    threads: int | None = typer.Option(
+        None, "--threads", "-t", min=1,
+        help="Threads passed to each tool step [default: 8, or the --config value].",
+    ),
     quiet: Quiet = False,
     dry_run: DryRun = False,
 ) -> None:
@@ -117,18 +127,29 @@ def run_pipeline(
         "report": False if no_report else None,
     }
 
+    # CLI flags default to None so that values from --config are only
+    # overridden when the user passes them explicitly; PipelineConfig supplies
+    # the remaining defaults (aligner=blast, threads=8).
     if config is not None:
         cfg = PipelineConfig.from_yaml(config, **overrides)
+        if extracted_reads_2 is None:
+            extracted_reads_2 = _yaml_path(config, "extracted_reads_2")
     else:
+        if output_dir is None:
+            raise ValueError("Provide --output-dir (or output_dir in a --config YAML).")
         cfg = PipelineConfig(**{k: v for k, v in overrides.items() if v is not None})
 
-    layout = PipelineLayout(root=cfg.output_dir)
+    if extracted_reads_2 is not None and cfg.extracted_reads_1 is None:
+        raise ValueError("--extracted-reads-2 requires --extracted-reads-1.")
+
+    layout = PipelineLayout(root=cfg.output_dir, family_taxid=cfg.family_taxid)
     pipeline = Pipeline(
         cfg,
         layout,
         dry_run=effective_dry_run,
         force=force,
         log=lambda msg: out.print(msg),
+        extracted_reads_2=extracted_reads_2,
     )
 
     if effective_dry_run:
@@ -139,6 +160,13 @@ def run_pipeline(
     manifest = pipeline.run(from_step=from_step, mdm_version=__version__)
 
     _print_summary(out, manifest, layout, effective_dry_run, quiet)
+
+
+def _yaml_path(config: Path, key: str) -> Path | None:
+    """Read an optional path key from the pipeline YAML (not a PipelineConfig field)."""
+    raw = yaml.safe_load(config.read_text()) or {}
+    value = raw.get(key) if isinstance(raw, dict) else None
+    return Path(value) if value else None
 
 
 def _print_summary(

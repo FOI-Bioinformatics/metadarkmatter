@@ -11,6 +11,9 @@ Provides subcommands for each stage of the ANI-weighted placement pipeline:
 
 from __future__ import annotations
 
+import os
+from collections.abc import Callable
+
 import typer
 from rich import print as rprint
 from rich.console import Console
@@ -39,6 +42,7 @@ def version_callback(value: bool) -> None:
 
 @app.callback()
 def main(
+    ctx: typer.Context,
     version: bool = typer.Option(
         None,
         "--version",
@@ -88,10 +92,28 @@ def main(
     and detect novel bacterial taxa using whole-genome competitive read recruitment.
     """
     setup_logging(log_level, log_format, log_file)
-    if dry_run:
-        set_dry_run(True)
-    if debug:
-        set_debug(True)
+    # The flags are env-backed so child processes inherit them. Restore the
+    # previous values when the command finishes so an in-process invocation
+    # (tests, library use of the Typer app) does not leak dry-run/debug into
+    # later commands.
+    for enabled, env_var, setter in (
+        (dry_run, "MDM_DRY_RUN", set_dry_run),
+        (debug, "MDM_DEBUG", set_debug),
+    ):
+        if enabled:
+            previous = os.environ.get(env_var)
+            setter(True)
+            ctx.call_on_close(_env_restorer(env_var, previous))
+
+
+def _env_restorer(env_var: str, previous: str | None) -> Callable[[], None]:
+    def _restore() -> None:
+        if previous is None:
+            os.environ.pop(env_var, None)
+        else:
+            os.environ[env_var] = previous
+
+    return _restore
 
 
 # Import subcommands

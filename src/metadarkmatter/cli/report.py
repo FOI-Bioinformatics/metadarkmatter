@@ -210,6 +210,14 @@ def generate_report(
 
     out.print("\n[bold blue]Metadarkmatter Report Generator[/bold blue]\n")
 
+    # Validate before the generation try/except, which would otherwise swallow
+    # the exit and print an empty "Error generating report:".
+    if report_mode not in ("offline", "cdn"):
+        console.print(
+            f"[red]Invalid --report-mode '{report_mode}'. Use 'offline' or 'cdn'.[/red]"
+        )
+        raise typer.Exit(code=2)
+
     # Import report modules
     try:
         from metadarkmatter.visualization.plots.base import PlotConfig, ThresholdConfig
@@ -334,13 +342,6 @@ def generate_report(
         task = progress.add_task(description="Building visualizations...", total=None)
 
         try:
-            if report_mode not in ("offline", "cdn"):
-                console.print(
-                    f"[red]Invalid --report-mode '{report_mode}'. "
-                    "Use 'offline' or 'cdn'.[/red]"
-                )
-                raise typer.Exit(code=2)
-
             config = ReportConfig(
                 sample_name=sample_name,
                 title=title,

@@ -22,6 +22,7 @@ from rich.progress import (
 )
 
 from metadarkmatter.cli.utils import QuietConsole, spinner_progress
+from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.external import ToolExecutionError
 from metadarkmatter.external.blast import BlastN, MakeBlastDb
 
@@ -56,6 +57,67 @@ def _check_blastn_available() -> tuple[bool, str]:
     if BlastN.check_available():
         return True, ""
     return False, "blastn (BLAST+)"
+
+
+# makeblastdb -parse_seqids rejects local IDs longer than this.
+_MAX_PARSE_SEQID_LEN = 50
+
+# Default seed word size per BLAST task when --word-size is not given.
+# blastn keeps the sensitive word size 7; dc-megablast only accepts 11 or 12.
+_TASK_DEFAULT_WORD_SIZE = {
+    "blastn": 7,
+    "blastn-short": 7,
+    "dc-megablast": 11,
+    "megablast": 28,
+}
+
+
+def blast_db_exists(prefix: Path) -> bool:
+    """True when a finished BLAST nucleotide database exists at ``prefix``.
+
+    Accepts a single-volume DB (``<prefix>.nhr``), a multi-volume alias
+    (``<prefix>.nal``) or a first volume (``<prefix>.00.nhr``). Suffixes are
+    appended to the full prefix string so dotted prefixes such as
+    ``db/pangenome.v2`` are not truncated by ``Path.with_suffix``.
+    """
+    return any(
+        Path(f"{prefix}{suffix}").is_file() for suffix in (".nhr", ".nal", ".00.nhr")
+    )
+
+
+def _fasta_ids_fit_parse_seqids(fasta: Path) -> bool:
+    """True when every FASTA ID is short enough for ``makeblastdb -parse_seqids``.
+
+    Standardized ``{accession}|{contig_id}`` headers built from assembler
+    contig names (e.g. SPAdes ``NODE_..._length_..._cov_...``) easily exceed
+    the 50-character local-ID limit, which makes makeblastdb fail outright.
+    """
+    opener = gzip.open if str(fasta).endswith(".gz") else open
+    try:
+        with opener(fasta, "rt") as fh:
+            for line in fh:
+                if line.startswith(">"):
+                    parts = line[1:].split(maxsplit=1)
+                    if parts and len(parts[0]) > _MAX_PARSE_SEQID_LEN:
+                        return False
+    except OSError:
+        return True
+    return True
+
+
+def _sniff_sequence_suffix(path: Path) -> str:
+    """Return ``.fastq`` or ``.fasta`` from the first record marker of a file."""
+    opener = gzip.open if str(path).endswith((".gz", ".gzip")) else open
+    try:
+        with opener(path, "rt") as fh:
+            for line in fh:
+                stripped = line.strip()
+                if stripped:
+                    return ".fastq" if stripped.startswith("@") else ".fasta"
+    except (OSError, EOFError):
+        pass
+    inner = Path(Path(path).stem).suffix.lower()
+    return ".fastq" if inner in (".fastq", ".fq") else ".fasta"
 
 
 def _concatenate_genomes(
@@ -148,19 +210,21 @@ def make_database(
 
     out.print("\n[bold blue]Metadarkmatter BLAST Database Builder[/bold blue]\n")
 
-    # Check tool availability
+    dry_run = dry_run or is_dry_run()
+
+    # Check tool availability (a dry run only prints the plan)
     tool_ok, missing = _check_makeblastdb_available()
-    if not tool_ok:
+    if not tool_ok and not dry_run:
         console.print(f"[red]Error: Required tool not found: {missing}[/red]")
         console.print("\n[dim]Install with: conda install -c bioconda blast[/dim]")
         raise typer.Exit(code=1) from None
 
     # Setup output directory
-    output.parent.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        output.parent.mkdir(parents=True, exist_ok=True)
 
     # Check skip-if-exists
-    db_files = [output.with_suffix(s) for s in [".nhr", ".nin", ".nsq"]]
-    if skip_if_exists and all(f.exists() for f in db_files):
+    if skip_if_exists and blast_db_exists(output):
         out.print(f"[yellow]Skipping: BLAST database already exists at {output}[/yellow]")
         raise typer.Exit(code=0)
 
@@ -210,6 +274,10 @@ def make_database(
     builder = MakeBlastDb()
 
     if dry_run:
+        if not tool_ok:
+            console.print(f"[yellow]Note: {missing} not found; required for a real run.[/yellow]")
+            console.print("\n[green]Dry run complete. No files were created.[/green]")
+            raise typer.Exit(code=0)
         result = builder.run(
             input_fasta=input_fasta,
             output_db=output,
@@ -222,13 +290,20 @@ def make_database(
         console.print("\n[green]Dry run complete. No files were created.[/green]")
         raise typer.Exit(code=0)
 
+    parse_seqids = _fasta_ids_fit_parse_seqids(input_fasta)
+    if not parse_seqids:
+        out.print(
+            f"  [yellow]Note: some sequence IDs exceed {_MAX_PARSE_SEQID_LEN} characters; "
+            "building without -parse_seqids (sseqids in alignments are unchanged).[/yellow]"
+        )
+
     with spinner_progress("Building BLAST database...", console, quiet):
         try:
             result = builder.run_or_raise(
                 input_fasta=input_fasta,
                 output_db=output,
                 dbtype="nucl",
-                parse_seqids=True,
+                parse_seqids=parse_seqids,
                 title=title,
             )
         except ToolExecutionError as e:
@@ -245,8 +320,8 @@ def make_database(
     # Summary
     out.print("\n[bold green]BLAST database ready![/bold green]")
     out.print("\n[bold]Output files:[/bold]")
-    for suffix in [".nhr", ".nin", ".nsq"]:
-        db_file = output.with_suffix(suffix)
+    for suffix in [".nhr", ".nin", ".nsq", ".nal"]:
+        db_file = Path(f"{output}{suffix}")
         if db_file.exists():
             size_mb = db_file.stat().st_size / (1024 * 1024)
             out.print(f"  {db_file} ({size_mb:.1f} MB)")
@@ -277,10 +352,13 @@ def align_reads(
         "--output", "-o",
         help="Output file for BLAST results (TSV, optionally .gz)",
     ),
-    word_size: int = typer.Option(
-        7,
+    word_size: int | None = typer.Option(
+        None,
         "--word-size", "-w",
-        help="Word size for seeds (smaller = more sensitive, default 7)",
+        help=(
+            "Word size for seeds (smaller = more sensitive). Default depends on "
+            "--task: 7 for blastn, 11 for dc-megablast, 28 for megablast."
+        ),
         min=4,
         max=28,
     ),
@@ -314,10 +392,13 @@ def align_reads(
         help="Number of threads",
         min=1,
     ),
-    compress: bool = typer.Option(
-        True,
+    compress: bool | None = typer.Option(
+        None,
         "--compress/--no-compress",
-        help="Compress output with gzip (default: auto based on .gz extension)",
+        help=(
+            "Compress output with gzip (default: auto, compress only when --output "
+            "ends in .gz; --compress appends .gz)"
+        ),
     ),
     skip_if_exists: bool = typer.Option(
         False,
@@ -373,30 +454,35 @@ def align_reads(
 
     out.print("\n[bold blue]Metadarkmatter BLAST Alignment[/bold blue]\n")
 
+    dry_run = dry_run or is_dry_run()
+
     # Check tool availability
     tool_ok, missing = _check_blastn_available()
-    if not tool_ok:
+    if not tool_ok and not dry_run:
         console.print(f"[red]Error: Required tool not found: {missing}[/red]")
         console.print("\n[dim]Install with: conda install -c bioconda blast[/dim]")
         raise typer.Exit(code=1) from None
 
-    # Validate database exists
-    db_files = [database.with_suffix(s) for s in [".nhr", ".nin", ".nsq"]]
-    if not all(f.exists() for f in db_files):
-        # Try without suffix (user may have provided full path)
-        db_check = Path(str(database) + ".nhr")
-        if not db_check.exists():
+    # Validate database exists (a dry run may plan against a DB built earlier
+    # in the same pipeline, so only warn there)
+    if not blast_db_exists(database):
+        if not dry_run:
             console.print(f"[red]Error: BLAST database not found at {database}[/red]")
             console.print(
                 "[dim]Run 'metadarkmatter blast makedb' first to create the database[/dim]"
             )
             raise typer.Exit(code=1) from None
+        console.print(f"[yellow]Note: BLAST database not found at {database}[/yellow]")
+
+    if word_size is None:
+        word_size = _TASK_DEFAULT_WORD_SIZE.get(task, 7)
 
     # Setup output
-    output.parent.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        output.parent.mkdir(parents=True, exist_ok=True)
 
-    # Determine if output should be compressed
-    should_compress = compress or output.suffix == ".gz"
+    # Compression follows the output extension unless --compress is explicit.
+    should_compress = bool(compress) or output.suffix == ".gz"
     if should_compress and output.suffix != ".gz":
         output = Path(str(output) + ".gz")
 
@@ -411,6 +497,7 @@ def align_reads(
     out.print(f"  Database: {database}")
 
     out.print("\n[bold]Parameters:[/bold]")
+    out.print(f"  Task:         {task}")
     out.print(f"  Word size:    {word_size}")
     out.print(f"  E-value:      {evalue}")
     out.print(f"  Max targets:  {max_targets}")
@@ -437,13 +524,16 @@ def align_reads(
             with contextlib.suppress(OSError):
                 temp_query.unlink()  # Best effort cleanup
 
-    if query_is_gzipped:
+    if query_is_gzipped and not dry_run:
+        import os
         import shutil
         import tempfile
 
         out.print("  [dim]Decompressing query file...[/dim]")
-        # Create temp file for decompressed query
-        _, temp_query_path = tempfile.mkstemp(suffix=".fastq")
+        # Keep the real format in the temp suffix: BlastN converts FASTQ to
+        # FASTA based on it, and treating FASTA as FASTQ drops records.
+        fd, temp_query_path = tempfile.mkstemp(suffix=_sniff_sequence_suffix(query))
+        os.close(fd)
         temp_query = Path(temp_query_path)
         try:
             with gzip.open(query, "rb") as f_in, temp_query.open("wb") as f_out:
@@ -461,6 +551,10 @@ def align_reads(
     if dry_run:
         # Clean up temp query if created
         _cleanup_temp_query()
+        if not tool_ok:
+            console.print(f"[yellow]Note: {missing} not found; required for a real run.[/yellow]")
+            console.print("\n[green]Dry run complete. No files were created.[/green]")
+            raise typer.Exit(code=0)
         result = blastn.run(
             query=query,  # Show original query in dry run
             database=database,
@@ -559,7 +653,7 @@ def align_reads(
 
     out.print(
         f"\n[dim]Next step: metadarkmatter score classify "
-        f"--blast {final_output} --ani <ani_matrix.csv> "
+        f"--alignment {final_output} --ani <ani_matrix.csv> "
         f"--output classifications.csv[/dim]"
     )
     out.print()
