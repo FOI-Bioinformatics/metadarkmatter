@@ -5,7 +5,7 @@ Complete technical reference for the metadarkmatter package.
 ## Table of Contents
 
 - [CLI Workflows](#cli-workflows)
-  - [Standard Nucleotide Workflow](#standard-nucleotide-workflow)
+  - [Command Summary](#command-summary)
   - [Protein-Level Workflow](#protein-level-workflow)
 - [Command Reference](#command-reference)
 - [Core Algorithm](#core-algorithm)
@@ -35,8 +35,8 @@ For complete step-by-step workflows, see the
 |------|----------------|--------------|
 | 1. Download genomes | `download genomes list` + `fetch` | Same |
 | 2. Extract reads | `kraken2 classify` + `extract` | Same |
-| 3. Build database | `blast makedb` | `blastx makedb` |
-| 4. Align reads | `blast align` | `blastx align` |
+| 3. Build database | `blast makedb` or `mmseqs2 makedb` | `blastx makedb` |
+| 4. Align reads | `blast align` or `mmseqs2 search` | `blastx align` |
 | 5. Compute matrix | `ani compute` | `ani compute` + `aai compute` |
 | 6. Classify | `score classify` | `score classify --alignment-mode protein` |
 | 7. Report | `report generate` | Same |
@@ -58,12 +58,14 @@ For complete step-by-step workflows, see the
 | `download genomes fetch` | Download genomes from NCBI (use `--include-protein` for AAI) |
 | `proteins predict` | Predict proteins with Prodigal (use `--missing-only` for gaps) |
 | `kraken2 classify` | Run Kraken2 classification |
-| `kraken2 extract` | Extract reads for target taxid (compressed output) |
+| `kraken2 extract` | Extract reads for target taxid (gzip output by default) |
 | `blast makedb` | Build BLAST nucleotide database |
 | `blast align` | BLASTN competitive alignment (accepts .gz query) |
+| `mmseqs2 makedb` | Build MMseqs2 nucleotide database |
+| `mmseqs2 search` | MMseqs2 search with BLAST-compatible output (single- or paired-end) |
 | `blastx makedb` | Build Diamond protein database |
 | `blastx align` | BLASTX alignment (DNA query vs protein database) |
-| `ani compute` | Compute ANI matrix (auto-detects skani/fastANI) |
+| `ani compute` | Compute ANI matrix (auto prefers skani, falls back to fastANI) |
 | `ani validate` | Validate ANI matrix coverage against BLAST results |
 | `aai compute` | Compute AAI matrix using Diamond BLASTP |
 | `aai validate` | Validate AAI matrix coverage against ANI matrix |
@@ -71,12 +73,25 @@ For complete step-by-step workflows, see the
 | `score classify` | ANI-weighted classification (supports `--alignment-mode protein`) |
 | `score batch` | Batch process multiple samples |
 | `score extract-novel` | Extract candidate novel species/genera |
+| `score export-config` | Write an editable YAML configuration |
+| `score sensitivity` | Sweep hard thresholds on a saved classification file |
+| `score evaluate` | Accuracy, per-category precision/recall, ECE against a truth column |
 | `util generate-mapping` | Generate contig-to-genome ID mapping from FASTA directory |
 | `util validate-mapping` | Validate ID mapping file (optionally against BLAST results) |
+| `util generate-metadata` | Build genome_metadata.tsv from a genome directory |
+| `util select-representatives` | Assign species representatives in metadata |
+| `tree build` | Build a Newick tree (nj, upgma, mashtree) |
+| `validate ani/blast/classifications/fasta/fastq` | Input/output format checks |
 | `visualize recruitment` | Recruitment plots |
 | `visualize summary` | Summary charts |
 | `report generate` | Single-sample HTML report |
 | `report multi` | Multi-sample comparison |
+| `report summarize` | Summarize novel diversity into putative taxon clusters |
+| `report vendor-d3` / `vendor-cdn-sri` | Cache D3 locally / compute SRI hashes for CDN tags |
+| `run pipeline` | Run the full pipeline end to end |
+| `doctor` | Report environment, dependencies and tool versions |
+
+Option-level details for every command are in [CLI_REFERENCE.md](CLI_REFERENCE.md).
 
 ---
 
@@ -84,11 +99,11 @@ For complete step-by-step workflows, see the
 
 **ANI-Weighted Placement Uncertainty:**
 
-1. For each read, find top BLAST hit (max bitscore)
+1. For each read, find top BLAST hit (max coverage-weighted bitscore; linear weighting by default)
 2. Find ambiguous hits (within 95% of top bitscore)
 3. Calculate **Novelty Index**: `N = 100 - TopHitIdentity`
-4. Calculate **Placement Uncertainty**: `U = 100 - max(ANI between competing genomes)`
-5. Classify based on thresholds (mode-dependent, literature-backed)
+4. Calculate **Placement Uncertainty**: `U = 100 - ANI(best genome, second-best genome)` with the default `--uncertainty-mode second`; `--uncertainty-mode max` uses `U = 100 - max(ANI between the best genome and competing genomes)`
+5. Classify: the primary `taxonomic_call` is the Bayesian MAP category over (N, U) with a discrete refinement step; the mode-dependent hard thresholds below are reported as `legacy_call`
 
 **For comprehensive methods documentation with all calculations at scientific standard, see [METHODS.md](METHODS.md).**
 
@@ -96,16 +111,21 @@ For complete step-by-step workflows, see the
 
 ### Nucleotide Mode Thresholds
 
-Default mode for BLASTN alignment:
+Default mode for BLASTN/MMseqs2 alignment. These are the hard thresholds applied in order to produce `legacy_call` (`core/classification/thresholds.py`):
 
 | Category | Novelty (N) | Uncertainty (U) | Interpretation |
 |----------|-------------|-----------------|----------------|
+| Ambiguous | any | identity gap < 2% with >1 ambiguous hit | Near-tied hits to different genomes |
+| Conserved Region | any | U >= 5% and hits span genera | Conserved gene across genera (<95% ANI) |
+| Ambiguous | any | U >= 5% (within genus) | High placement ambiguity |
+| Species Boundary | any | 1.5% <= U < 5% | Species boundary zone (95-98.5% ANI) |
 | Known Species | N < 4% | U < 1.5% | >96% identity, confident placement |
+| Ambiguous | N >= 4% | single hit, inferred U >= 10% | Single-hit read, placement not measurable |
 | **Novel Species** | 4% <= N < 20% | U < 1.5% | 80-96% identity, potential new species |
 | **Novel Genus** | 20% <= N <= 25% | U < 1.5% | 75-80% identity, potential new genus |
-| Ambiguous | any | 1.5% <= U < 5% | Species boundary zone (95-98.5% ANI) |
-| Conserved Region | any | U >= 5% | Conserved gene across genera (<95% ANI) |
 | Unclassified | N > 25% or edge | U < 1.5% | Requires manual review |
+
+**Relation to `taxonomic_call`:** the primary call is the Bayesian MAP category (Gaussian likelihoods centred on these regions), so its decision boundaries do not coincide exactly with the table. With default parameters at U = 0, the measured transitions are approximately N = 6.2 (Known -> Novel Species), N = 18.6 (Novel Species -> Novel Genus) and N = 27.6 (Novel Genus -> Unclassified); at N = 1, Species Boundary becomes the MAP call from about U = 3.8 and Ambiguous from about U = 5.5. Single-hit reads use inferred uncertainty only in `legacy_call`. Stage 2 refinement relabels Ambiguous reads with cross-genus hits as Conserved Region and some Novel Genus reads as Ambiguous Within Genus.
 
 **Threshold basis:** 96% ANI = prokaryotic species boundary (Jain et al. 2018, Nature Communications). See [METHODS.md](METHODS.md) Section 2.4 for detailed justification.
 
@@ -118,9 +138,11 @@ For BLASTX alignment (`--alignment-mode protein`):
 | Known Species | N < 10% | U < 5% | >90% protein identity, confident placement |
 | **Novel Species** | 10% <= N < 25% | U < 5% | 75-90% identity, potential new species |
 | **Novel Genus** | 25% <= N <= 40% | U < 5% | 60-75% identity, potential new genus |
-| Ambiguous | any | 5% <= U < 10% | Species boundary zone |
-| Conserved Region | any | U >= 10% | Highly conserved protein region |
+| Species Boundary | any | 5% <= U < 10% | Species boundary zone |
+| Conserved Region / Ambiguous | any | U >= 10% | Conserved Region when hits span genera, otherwise Ambiguous |
 | Unclassified | N > 40% or edge | U < 5% | Requires manual review |
+
+As in nucleotide mode, these thresholds drive `legacy_call`; the same identity-gap and single-hit rules apply. In protein mode the fixed values above are used regardless of `--preset`, `--config` or `--adaptive-thresholds`. The Bayesian `taxonomic_call` novelty transitions at U = 0 are measured at about N = 11.3, 25.1 and 40.4.
 
 Protein thresholds are calibrated based on the observation that amino acid sequences diverge more slowly than nucleotide sequences.
 
@@ -144,7 +166,8 @@ metadarkmatter score classify --alignment results.tsv --ani ani.csv \
 metadarkmatter score classify --alignment results.tsv --ani ani.csv \
     --preset literature-strict --output classifications.csv
 
-# Available presets: gtdb-strict, gtdb-relaxed, conservative, literature-strict, coverage-strict, gtdb-coverage
+# Available presets: default, gtdb-strict, gtdb-relaxed, conservative, literature-strict, coverage-strict, adaptive
+# Explicitly passed flags override preset values.
 ```
 
 ### Alignment Quality Filters
@@ -163,15 +186,11 @@ The classification output includes additional metrics for quality assessment:
 
 | Metric | Description |
 |--------|-------------|
-| `confidence_score` | 0-100 score integrating margin from thresholds, placement certainty, and alignment quality. Higher values (80+) indicate classifications far from decision boundaries. |
+| `confidence_score` | 0-100, derived from posterior entropy: `(1 - posterior_entropy / log2(6)) * 100`. 10.0 for Off-target reads. |
 | `genus_uncertainty` | Based on minimum ANI to secondary genomes (low = same genus, high = multiple genera) |
 | `ambiguity_scope` | `unambiguous`, `within_species`, `within_genus`, or `across_genera` |
-| `num_competing_genera` | Count of secondary genomes from different genera |
 
-**Confidence Score Components:**
-- Margin from threshold boundaries (0-40 pts): Distance from classification cutoffs
-- Placement certainty (0-40 pts): Hit count and identity gap to secondary genomes
-- Alignment quality proxy (0-20 pts): Derived from top hit identity
+The older margin-based score (`calculate_confidence_score()` in `core/constants.py`: threshold margin, placement certainty, alignment quality) is no longer the `confidence_score` column; its sub-scores are available with `--include-legacy-scores`.
 
 ### Novel Taxon Naming
 
@@ -211,26 +230,38 @@ See `docs/WORKFLOW.md` for detailed guidance on database strategy.
 metadarkmatter/
 ├── src/metadarkmatter/
 │   ├── cli/              # CLI commands (typer)
-│   │   ├── main.py       # Entry point, app definition
-│   │   ├── score.py      # ANI-weighted classification (supports --alignment-mode)
+│   │   ├── main.py       # Entry point, app definition, global options
+│   │   ├── score.py      # classify, batch, extract-novel, export-config, sensitivity, evaluate
 │   │   ├── kraken2.py    # Kraken2 classify/extract
 │   │   ├── blast.py      # BLAST makedb/align
 │   │   ├── blastx.py     # Diamond BLASTX makedb/align (protein-level)
+│   │   ├── mmseqs2.py    # MMseqs2 makedb/search
 │   │   ├── ani.py        # ANI compute/validate
+│   │   ├── aai.py        # AAI compute/validate
 │   │   ├── map.py        # Bowtie2 mapping
+│   │   ├── proteins.py   # Prodigal protein prediction
 │   │   ├── download.py   # Genome acquisition (saves metadata)
 │   │   ├── visualize.py  # Recruitment/summary plots
-│   │   ├── report.py     # HTML reports (with species tab)
-│   │   ├── util.py       # Utility commands (generate-mapping, validate-mapping)
+│   │   ├── report.py     # HTML reports (generate, multi, summarize, vendor-*)
+│   │   ├── mapping.py    # 'util' commands (generate-mapping, validate-mapping, generate-metadata, select-representatives)
+│   │   ├── tree.py       # tree build
+│   │   ├── validate.py   # validate ani/blast/classifications/fasta/fastq
+│   │   ├── doctor.py     # Environment report
+│   │   ├── run.py        # run pipeline
 │   │   └── utils.py      # Shared utilities (progress, sample names)
 │   ├── core/             # Core algorithms
-│   │   ├── ani_placement.py    # Main classifier (ANIMatrix, classifiers)
+│   │   ├── classification/     # ANIMatrix, classifiers, bayesian.py, thresholds.py, qc.py, adaptive.py, sensitivity.py, evaluation.py
+│   │   ├── ani_placement.py    # Backward-compatible re-exports of the classification package
 │   │   ├── ani_matrix_builder.py  # ANI matrix construction
+│   │   ├── aai_matrix_builder.py  # AAI matrix construction
 │   │   ├── parsers.py          # Streaming BLAST/ANI parsers
 │   │   ├── recruitment.py      # BAM recruitment data extraction
 │   │   ├── genome_utils.py     # Genome concatenation, header rewriting
 │   │   ├── id_mapping.py       # Contig-to-genome ID mapping for external results
 │   │   ├── metadata.py         # Species/genus metadata handling
+│   │   ├── novel_diversity/    # Novel read clustering
+│   │   ├── phylogeny/          # Tree building and novel cluster placement
+│   │   ├── pipeline/           # 'run pipeline' orchestrator
 │   │   ├── constants.py        # Centralized nucleotide constants and thresholds
 │   │   ├── protein_constants.py  # Protein-specific thresholds for BLASTX
 │   │   ├── exceptions.py       # Custom exception classes
@@ -239,34 +270,27 @@ metadarkmatter/
 │   │   ├── base.py       # ExternalTool base class, path validation
 │   │   ├── blast.py      # BLAST+ (makeblastdb, blastn)
 │   │   ├── diamond.py    # Diamond (makedb, blastp, blastx)
+│   │   ├── mmseqs2.py    # MMseqs2
 │   │   ├── bowtie2.py    # Bowtie2 aligner
 │   │   ├── kraken.py     # Kraken2 classifier
 │   │   ├── fastani.py    # FastANI wrapper
 │   │   ├── skani.py      # skani wrapper
+│   │   ├── prodigal.py   # Prodigal wrapper
+│   │   ├── mashtree.py   # Mashtree wrapper
 │   │   ├── samtools.py   # Samtools wrapper
 │   │   └── ncbi_datasets.py  # NCBI datasets CLI
 │   ├── models/           # Pydantic data models
 │   │   ├── blast.py      # BlastHit, BlastResult
 │   │   ├── classification.py   # ReadClassification, TaxonomicSummary
 │   │   ├── config.py     # ScoringConfig
+│   │   ├── pipeline_config.py  # 'run pipeline' config
 │   │   └── genomes.py    # AccessionList, GTDBGenome
 │   ├── clients/          # API clients
 │   │   └── gtdb.py       # GTDB API client (with retry logic)
-│   ├── visualization/    # Plotly charts and reports
-│   │   ├── plots/        # Chart components
-│   │   │   ├── base.py   # BasePlot class
-│   │   │   ├── distributions.py    # Histograms
-│   │   │   ├── scatter_2d.py       # Scatter plots
-│   │   │   ├── classification_charts.py  # Donut/bar charts
-│   │   │   └── multi_sample.py     # Multi-sample comparisons
-│   │   ├── recruitment_plots.py    # Recruitment visualizations
-│   │   └── report/       # HTML report generation
-│   │       ├── generator.py      # Single-sample reports
-│   │       ├── multi_generator.py # Multi-sample reports
-│   │       ├── styles.py         # CSS themes
-│   │       └── templates.py      # HTML templates
-│   ├── io/               # I/O utilities (placeholder)
-│   └── utils/            # General utilities (placeholder)
+│   └── visualization/    # Plotly charts and reports
+│       ├── plots/        # Chart components
+│       ├── recruitment_plots.py    # Recruitment visualizations
+│       └── report/       # HTML report generation (generator.py facade + sections/ mixins)
 ├── tests/                # pytest test suite
 │   ├── unit/             # Unit tests
 │   ├── e2e/              # End-to-end tests
@@ -296,9 +320,9 @@ By default, coverage-weighted scoring prioritizes hits that cover more of the qu
 metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
     --coverage-weight-mode linear --output classifications.csv
 
-# Use a preset with coverage weighting
+# Use a preset with stronger (sigmoid) coverage weighting
 metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
-    --preset coverage-linear --output classifications.csv
+    --preset coverage-strict --output classifications.csv
 ```
 
 **Coverage Weighting Modes:**
@@ -322,21 +346,20 @@ Read length: 300bp
 Hit A: 98% identity, 50bp aligned, bitscore=200 (coverage=0.17)
 Hit B: 92% identity, 280bp aligned, bitscore=180 (coverage=0.93)
 
-With mode="none" (default): Hit A wins (bitscore 200 > 180)
-With mode="linear", strength=0.5:
-  - Hit A weighted: 200 × 0.58 = 116
-  - Hit B weighted: 180 × 0.97 = 174
-  Hit B wins (weighted 174 > 116)
+With mode="none": Hit A wins (bitscore 200 > 180)
+With mode="linear" (default), strength=0.5:
+  - Hit A weighted: 200 × 0.67 = 133
+  - Hit B weighted: 180 × 1.43 = 258
+  Hit B wins (weighted 258 > 133)
 ```
 
 **Coverage Weighting Presets:**
 
 | Preset | Mode | Strength | Description |
 |--------|------|----------|-------------|
-| `coverage-linear` | linear | 0.5 | Balanced coverage weighting |
-| `coverage-strict` | sigmoid | 0.7 | Enforces >60% coverage threshold |
-| `coverage-gentle` | log | 0.3 | Mild preference for higher coverage |
-| `gtdb-coverage` | linear | 0.5 | GTDB-style with 50% alignment fraction |
+| `coverage-strict` | sigmoid | 0.7 | Sharp preference for >60% coverage (also narrows the novel species range to N < 15%) |
+
+All other presets use the default linear mode with strength 0.5; other modes are selected with `--coverage-weight-mode`.
 
 **CLI Parameters:**
 
@@ -366,6 +389,7 @@ QC warnings are generated when:
 - Single-hit fraction above 80%
 - Mean identity below 80%
 - Ambiguous fraction above 50%
+- Low-confidence fraction above 30%
 
 ### Adaptive Thresholds
 
@@ -383,22 +407,18 @@ Requires: `pip install metadarkmatter[adaptive]` (installs scikit-learn).
 
 See [METHODS.md](METHODS.md) Section 9 for the mathematical details.
 
-### Bayesian Confidence
+### Bayesian Classification (always on)
 
-Add posterior probabilities to classification output, providing continuous confidence scores near threshold boundaries:
+`score classify` always computes posterior probabilities; the `--bayesian` flag is deprecated and only prints a warning. `taxonomic_call` is the maximum a posteriori (MAP) category from 2D Gaussian likelihoods over (novelty, uncertainty), followed by a discrete Stage 2 refinement (Conserved Region, Ambiguous Within Genus). The hard-threshold result is kept in `legacy_call`.
 
-```bash
-# Add Bayesian posterior columns
-metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
-    --bayesian --output classifications.csv
-```
+Posterior columns in the output:
+- `p_known_species`, `p_novel_species`, `p_novel_genus`, `p_species_boundary`, `p_ambiguous`, `p_unclassified` (sum to 1.0)
+- `posterior_entropy` (0 = confident, log2(6) = 2.585 = uniform across the six categories)
+- `confidence_score = (1 - posterior_entropy / log2(6)) * 100`
 
-This adds 6 columns to the output:
-- `p_known_species`, `p_novel_species`, `p_novel_genus`, `p_ambiguous` (sum to 1.0)
-- `bayesian_category` (MAP classification)
-- `posterior_entropy` (0 = confident, 2.0 = uniform across all categories)
+Parameters can be edited in a YAML file (`score export-config`, then `--config`). Calibration scripts exist for diagnostics, but fitted parameters reduced accuracy in the three-family validation; see [CALIBRATION_RESULTS.md](CALIBRATION_RESULTS.md).
 
-The HTML report will include a Bayesian Confidence tab with entropy distribution, posterior bar charts, and a confidence landscape plot.
+The HTML report shows Bayesian confidence panels (entropy distribution, posterior charts) in the Classification tab.
 
 See [METHODS.md](METHODS.md) Section 10 for the likelihood model and interpretation.
 
@@ -438,6 +458,7 @@ metadarkmatter score classify \
 - `in_family_hit_fraction`: Fraction of hits from in-family genomes
 - `external_best_genome`: Best-matching genome outside the family
 - `external_best_identity`: Percent identity of best external hit
+- `in_family_identity`, `in_family_novelty_index`: Identity and novelty of the best in-family hit
 
 Off-target reads carry `placement_uncertainty = null` (the matched genome is outside the ANI matrix so a uncertainty value would be misleading) and a fixed `confidence_score = 10.0` with `low_confidence = True`. Filter downstream on `taxonomic_call == "Off-target"` rather than on uncertainty.
 
@@ -451,7 +472,7 @@ from metadarkmatter.core.classification.sensitivity import run_sensitivity_analy
 results = run_sensitivity_analysis(classifications_df, config)
 ```
 
-Sweeps the novelty/uncertainty thresholds across a configurable range and reports how classification counts change at each point. This is available as a programmatic API, not a CLI command.
+Sweeps the novelty/uncertainty thresholds across a configurable range and reports how classification counts change at each point. The sweep re-applies the hard-threshold cascade (the rules behind `legacy_call`) to the saved metrics, keeping the other settings of the base config (`--config`).
 
 ### Combined Advanced Options
 
@@ -460,7 +481,6 @@ All new features can be combined:
 ```bash
 metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
     --adaptive-thresholds \
-    --bayesian \
     --qc-output qc_metrics.json \
     --output classifications.csv \
     --summary summary.json \
@@ -469,15 +489,18 @@ metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv \
 
 ### Performance Modes
 
-Classification uses the VectorizedClassifier by default, which handles most dataset sizes efficiently. For very large or memory-constrained scenarios, streaming mode is available:
+Classification uses the VectorizedClassifier by default, which handles most dataset sizes efficiently. For large (more than about 5M alignments) or memory-constrained runs, streaming mode is available:
 
 ```bash
 # Default mode (handles most datasets efficiently)
 metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv
 
-# Streaming mode (100M+ reads, memory-constrained)
-metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv --streaming
+# Streaming mode (bounded memory)
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv \
+    --streaming --chunk-size 500000
 ```
+
+In streaming mode `--id-mapping`/`--genomes` are rejected with an error, `--metadata` still provides the representative mapping and family inference (but no species/genus/family columns), and each read's hits must be contiguous in the input.
 
 ### ANI Matrix Computation
 
@@ -498,8 +521,10 @@ metadarkmatter ani validate --ani ani_matrix.csv --blast sample.blast.tsv.gz
 ```
 
 Backend comparison:
-- **skani**: Faster, memory-efficient, good for large genome sets (preferred)
-- **fastANI**: Original tool, well-validated, widely used in publications
+- **skani**: Faster, memory-efficient, good for large genome sets (chosen first by `--backend auto`)
+- **fastANI**: Original tool, well-validated, widely used in publications (`--fastani-batches N` runs N parallel batches)
+
+`--metadata genome_metadata.tsv --representatives-only` restricts the matrix to species representatives with either backend. The classifier expects values on a 0-100 scale (0-1 matrices are rejected), mirrors pairs present in only one direction, and uses 70% ANI for missing pairs.
 
 ### Novel Species Extraction
 
@@ -577,8 +602,8 @@ metadarkmatter tracks species-level information throughout the pipeline.
 
 | File | Created By | Contents |
 |------|------------|----------|
-| `genome_metadata.tsv` | `download genomes list` | accession, species, genus, family, gtdb_taxonomy |
-| `contig_mapping.tsv` | `blast makedb` | contig_id, genome_accession, original_header |
+| `genome_metadata.tsv` | `download genomes list` (written next to `--output`) | accession, species, genus, family, representative, gtdb_taxonomy |
+| `{db_prefix}_contig_mapping.tsv` | `blast makedb` | contig_id, genome_accession, original_header |
 
 #### Standardized FASTA Headers
 
@@ -601,7 +626,7 @@ metadarkmatter score classify \
   --output classifications.csv \
   --summary summary.json
 
-# Output CSV includes species and genus columns
+# Output CSV includes species, genus and family columns (not in --streaming mode)
 # Summary JSON includes species_hit_counts
 ```
 
@@ -615,10 +640,7 @@ metadarkmatter report generate \
   --output report.html
 ```
 
-The report includes a "Species Breakdown" tab with:
-- Species read count bar chart (top 20)
-- Species composition pie chart (top 10)
-- Unique species count vs reference species count
+With metadata, the report adds a top-species table to the Summary tab and a species read-count bar chart to the Reference tab.
 
 #### Python API for Metadata
 
@@ -694,7 +716,6 @@ Centralized constants are defined in `core/constants.py` (nucleotide) and `core/
 # Nucleotide thresholds (default mode)
 from metadarkmatter.core.constants import (
     UNKNOWN_GENOME,           # Default placeholder for unknown genomes
-    BLAST_OUTFMT_12COL,       # Standard BLAST output format string
     ANI_SPECIES_BOUNDARY_LOW, # 95% ANI threshold
     CATEGORY_NOVEL_SPECIES,   # Classification category strings
     NOVELTY_KNOWN_MAX,        # 4% novelty threshold
@@ -711,7 +732,6 @@ from metadarkmatter.core.protein_constants import (
     PROTEIN_NOVELTY_NOVEL_GENUS_MAX,     # 40% novelty threshold
     PROTEIN_UNCERTAINTY_CONFIDENT_MAX,   # 5% uncertainty threshold
     PROTEIN_UNCERTAINTY_CONSERVED_MIN,   # 10% uncertainty threshold
-    calculate_protein_confidence_score,  # Protein-specific confidence
 )
 ```
 
@@ -722,16 +742,6 @@ CLI commands use specific exception handlers:
 - `FileNotFoundError`: Missing input files
 - `PermissionError`: File access issues
 - `MemoryError`: Suggests using `--streaming` mode
-
-#### Type Hints
-
-Complex data structures use type aliases defined in `core/ani_placement.py`:
-
-```python
-HitData: TypeAlias = tuple[str, str, float, float, str]  # BLAST hit tuple
-ReadChunk: TypeAlias = tuple[str, list[HitData]]         # Read with hits
-ClassificationDict: TypeAlias = dict[str, Any]           # Classification result
-```
 
 ### Dependency Injection for Testing
 
@@ -744,5 +754,7 @@ from metadarkmatter.external.base import ExternalTool
 def mock_resolver(name: str) -> str | None:
     return f"/usr/bin/{name}"
 
-ExternalTool._executable_resolver = mock_resolver
+ExternalTool.set_executable_resolver(mock_resolver)
+# ... run tests ...
+ExternalTool.reset_executable_resolver()
 ```

@@ -15,7 +15,9 @@ Before starting, ensure you have:
 
 External tools:
 
-    conda install -c bioconda kraken2 krakentools blast skani
+    conda install -c bioconda kraken2 krakentools blast skani fastani
+
+Run `metadarkmatter doctor` to check which tools and versions are found.
 
 Optional:
 
@@ -195,7 +197,7 @@ metadarkmatter blast makedb --genomes gtdb_genomes_reps/ --output gtdb_blast_db/
 
 For family DB analysis, build ANI matrix only for family genomes:
 ```bash
-fastANI --ql family_genomes.txt --rl family_genomes.txt -o family_ani.txt
+metadarkmatter ani compute --genomes family_genomes/ --output family_ani_matrix.csv --threads 16
 ```
 
 For GTDB validation, ANI matrix is typically not needed - you're checking for presence/absence of good matches, not nuanced placement uncertainty.
@@ -240,13 +242,16 @@ metadarkmatter score classify \
   --output classifications.csv
 ```
 
-**Key differences from nucleotide mode:**
+**Key differences from nucleotide mode** (hard thresholds used for `legacy_call`; the Bayesian `taxonomic_call` boundaries are close to, but not identical with, these values - see [REFERENCE.md](REFERENCE.md#core-algorithm)):
 
 | Threshold | Nucleotide | Protein |
 |-----------|-----------|---------|
 | Known Species | N < 4% | N < 10% |
 | Novel Species | 4-20% | 10-25% |
 | Novel Genus | 20-25% | 25-40% |
+| Confident placement | U < 1.5% | U < 5% |
+
+In protein mode these fixed values are used even if `--preset`, `--config` or `--adaptive-thresholds` set other novelty thresholds.
 
 **Best for:**
 - Genus-level novelty detection
@@ -301,6 +306,7 @@ metadarkmatter download genomes fetch \
 
 **Expected output:**
 - `genomes.tsv` - List of genome accessions
+- `genome_metadata.tsv` - Written next to `genomes.tsv`; species/genus/family/representative per accession (used by `score classify --metadata` and `report generate --metadata`)
 - `reference_genomes/` - Directory with genome FASTA files
 
 ---
@@ -308,6 +314,12 @@ metadarkmatter download genomes fetch \
 ## Step 2: Build ANI Matrix
 
 Compute pairwise ANI values between all reference genomes:
+
+```bash
+metadarkmatter ani compute --genomes reference_genomes/ --output ani_matrix.csv --threads 16
+```
+
+`--backend auto` (default) uses skani when available, otherwise fastANI. Alternatively, run fastANI yourself and convert its output:
 
 ```bash
 # Create genome list
@@ -346,7 +358,7 @@ matrix.to_csv('ani_matrix.csv')
 ```
 
 **Expected output:**
-- `ani_matrix.csv` - Symmetric ANI matrix
+- `ani_matrix.csv` - Symmetric ANI matrix (values on a 0-100 scale; 0-1 scaled matrices are rejected by `score classify`)
 
 ---
 
@@ -380,17 +392,20 @@ metadarkmatter kraken2 extract \
   --kraken-output kraken_output/sample.kraken \
   --reads-1 sample_R1.fastq.gz \
   --reads-2 sample_R2.fastq.gz \
-  --taxid 262 \
+  --taxid 34064 \
   --output extraction/
 ```
 
 **Parameters:**
-- `--taxid`: NCBI TaxID for your family (find at taxonomy.ncbi.nlm.nih.gov)
+- `--taxid`: NCBI TaxID for your family (find at taxonomy.ncbi.nlm.nih.gov; 34064 = Francisellaceae)
 - `--include-children/--exact-match`: Include all child taxa (default) or exact match only
+- `--compress/--no-compress`: gzip the output (default: compress)
+
+The `.kreport` written by `kraken2 classify` must be in the same directory as the `.kraken` file.
 
 **Expected output:**
-- `extraction/sample_taxid262_R1.fastq` - Extracted forward reads
-- `extraction/sample_taxid262_R2.fastq` - Extracted reverse reads
+- `extraction/sample_taxid34064_R1.fastq.gz` - Extracted forward reads
+- `extraction/sample_taxid34064_R2.fastq.gz` - Extracted reverse reads
 
 ---
 
@@ -405,34 +420,32 @@ metadarkmatter blast makedb \
 ```
 
 **Expected output:**
-- `blastdb/pangenome.nhr`
-- `blastdb/pangenome.nin`
-- `blastdb/pangenome.nsq`
+- `blastdb/pangenome.nhr`, `blastdb/pangenome.nin`, `blastdb/pangenome.nsq` (plus further index files; large databases may be split into numbered volumes)
+- `blastdb/pangenome_contig_mapping.tsv` - contig-to-genome mapping
 
 ---
 
 ## Step 5: Run BLAST Alignment
 
-Competitive alignment with high-sensitivity parameters:
+Competitive alignment (BLAST takes single-end input; use the R1 file or `mmseqs2 search` for paired-end data):
 
 ```bash
 metadarkmatter blast align \
-  --query extraction/sample_family_R1.fastq \
+  --query extraction/sample_taxid34064_R1.fastq.gz \
   --database blastdb/pangenome \
   --output sample.blast.tsv.gz \
-  --word-size 7 \
-  --evalue 1e-3 \
-  --max-targets 100 \
   --threads 16
 ```
 
-**Parameters for divergent sequence detection:**
-- `--word-size 7`: Smaller seeds for sensitive detection (default: 7)
-- `--evalue 1e-3`: Relaxed threshold for remote homology
-- `--max-targets 100`: Capture multiple hits per read
+**Defaults relevant to divergent sequence detection:**
+- `--task blastn` with `--word-size` 7 (the word-size default follows the task: 11 for `dc-megablast`, 28 for `megablast`)
+- `--evalue 1e-5`
+- `--max-targets 500`: Capture many competing hits per read
+
+For closely related references, `--task dc-megablast` is considerably faster with similar sensitivity in the 80-100% identity range.
 
 **Expected output:**
-- `sample.blast.tsv.gz` - Compressed BLAST results
+- `sample.blast.tsv.gz` - BLAST results; gzip-compressed because the name ends in `.gz` (13 columns including `qlen`)
 
 **Runtime estimate:** 3-6 hours for 10M reads
 
@@ -453,10 +466,12 @@ metadarkmatter score classify \
 
 **Processing modes:**
 
-| Dataset Size | Flag | RAM Usage |
+| Dataset Size | Flag | Memory |
 |--------------|------|-----------|
-| Up to 100M alignments | (default) | 4-16 GB |
-| 100M+ | `--streaming` | 8-16 GB |
+| Up to ~5M alignments | (default, in-memory) | Grows with alignment count; the pre-run estimate is about 1.5x the uncompressed alignment size |
+| More than ~5M, or limited RAM | `--streaming --chunk-size 500000` | Bounded by chunk size |
+
+`--streaming` requires each read's hits to be contiguous in the file (as BLAST/MMseqs2 write them) and does not accept `--id-mapping`/`--genomes`.
 
 **Expected output:**
 - `classifications.csv` - Per-read classifications
@@ -488,10 +503,10 @@ metadarkmatter report multi \
 ```
 
 **Expected output:**
-- `report.html` - Interactive HTML report with:
+- `report.html` - Self-contained interactive HTML report (Plotly inlined by default; `--report-mode cdn` for a smaller file that needs network access) with:
   - Classification distribution
   - Novelty vs uncertainty scatter plot
-  - Top genome matches
+  - Novel diversity clusters and phylogenetic context (with `--ani`)
   - ANI heatmap
 
 ---
@@ -505,7 +520,13 @@ metadarkmatter report multi \
 | Known Species | < 4% | < 1.5% | Matches reference genome |
 | Novel Species | 4-20% | < 1.5% | New species in known genus |
 | Novel Genus | 20-25% | < 1.5% | New genus in family |
-| Conserved Region | any | > 5% | Ambiguous (rRNA, etc.) |
+| Species Boundary | any | 1.5-5% | Hits to closely related species |
+| Ambiguous / Ambiguous Within Genus | any | >= 5% within genus, or near-tied hits | Placement not resolved |
+| Conserved Region | any | >= 5% across genera | Conserved gene (rRNA, etc.) |
+| Unclassified | > 25% or edge cases | | Requires manual review |
+| Off-target | | | Better hit outside the target family (family validation) |
+
+The ranges are the nucleotide-mode hard thresholds that define `legacy_call`. The primary `taxonomic_call` is the Bayesian MAP category; its boundaries are close to but not identical with these values (e.g. at U = 0 the Known/Novel Species transition is near N = 6.2 and Novel Species/Novel Genus near N = 18.6). See [REFERENCE.md](REFERENCE.md#nucleotide-mode-thresholds).
 
 ### Key Metrics
 
@@ -516,11 +537,11 @@ metadarkmatter report multi \
 
 ### Report Sections
 
-1. **Overview**: Summary statistics and classification pie chart
-2. **Distributions**: Novelty and uncertainty histograms
-3. **Scatter Plot**: Novelty vs uncertainty with classification regions
-4. **Genomes**: Top matched reference genomes
-5. **ANI Matrix**: Genome-genome similarity heatmap
+1. **Summary**: Metric cards and key findings
+2. **Classification**: Category charts, novelty/uncertainty distributions and scatter, confidence panels
+3. **Novel Diversity**: Novel clusters and phylogenetic context (shown only when novel reads are present)
+4. **Reference**: ANI/AAI heatmaps, recruitment, species breakdown (with `--metadata`)
+5. **Data**: Interactive classification table
 
 ---
 
@@ -541,12 +562,12 @@ for sample in sample_A sample_B sample_C; do
   metadarkmatter kraken2 extract \
     --kraken-output kraken_output/${sample}/${sample}.kraken \
     --reads-1 data/${sample}_R1.fastq.gz \
-    --taxid 262 \
+    --taxid 34064 \
     --output extraction/${sample}/
 
   # BLAST alignment
   metadarkmatter blast align \
-    --query extraction/${sample}/${sample}_taxid262_R1.fastq \
+    --query extraction/${sample}/${sample}_taxid34064_R1.fastq.gz \
     --database blastdb/pangenome \
     --output results/${sample}.blast.tsv.gz
 done
@@ -650,7 +671,7 @@ This format is produced by `blastn -outfmt 6`. For MMseqs2, you must explicitly 
 
 ### Important Notes
 
-- **ID mapping is not supported with `--streaming` mode.** The streaming mode prints a warning that ID transformation will not be applied. Use the default mode when importing external results.
+- **ID mapping is not supported with `--streaming` mode.** Combining `--streaming` with `--id-mapping` or `--genomes` stops with an error. Use the default mode when importing external results.
 - **Genome accessions must match the ANI matrix.** The accessions extracted from filenames (e.g., `GCF_000195955.2` from `GCF_000195955.2_ASM584v2_genomic.fna`) must match the row/column labels in your ANI matrix.
 - **Use `--dry-run` to check coverage** before running classification to verify that alignment genomes match the ANI matrix.
 
@@ -696,7 +717,7 @@ BLAST tabular format is straightforward:
 
     blastn -query reads.fasta -db reference_db \
       -outfmt "6 qseqid sseqid pident length mismatch gapopen qstart qend sstart send evalue bitscore qlen" \
-      -max_target_seqs 100 -num_threads 16 \
+      -max_target_seqs 500 -num_threads 16 \
       -out results.tsv
 
 The 13th column (qlen) is optional but enables coverage weighting.
@@ -724,9 +745,12 @@ columns metadarkmatter's built-in `mmseqs2 search` uses internally.
 ### Paired-End Reads with External MMseqs2
 
 For paired-end data, concatenate reads before searching (standard MMseqs2
-approach):
+approach). Mates usually share an ID, so give them distinct `/1` and `/2`
+suffixes first; otherwise the classifier treats both mates as one read
+(the built-in `mmseqs2 search --query-1/--query-2` does this automatically):
 
-    cat reads_R1.fastq reads_R2.fastq > reads_combined.fastq
+    awk 'NR%4==1{$1=$1"/1"}1' reads_R1.fastq >  reads_combined.fastq
+    awk 'NR%4==1{$1=$1"/2"}1' reads_R2.fastq >> reads_combined.fastq
     mmseqs easy-search reads_combined.fastq target_db results.tsv tmp/ \
       --format-mode 0 \
       --format-output "query,target,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits,qlen" \
@@ -762,7 +786,7 @@ metadarkmatter score classify \
     --genomes genomes/ \
     --output classifications.csv
 
-# 3. Generate report (includes Family Validation tab)
+# 3. Generate report (Off-target reads are counted in the summary)
 metadarkmatter report generate \
     --classifications classifications.csv \
     --metadata genome_metadata.tsv \
