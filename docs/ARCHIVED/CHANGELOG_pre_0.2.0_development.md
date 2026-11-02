@@ -1,6 +1,10 @@
-# Changelog
+# Development log before the v0.2.0 release (archived)
 
-All notable changes to metadarkmatter are documented in this file.
+> **Archived.** This file is the development log kept before the v0.2.0
+> release. Its version labels do not match the released versions: the
+> `[0.2.0] - 2026-02-10` entry below describes development work, while the
+> tagged v0.2.0 release is dated 2026-05-25. The maintained changelog is
+> [CHANGELOG.md](../../CHANGELOG.md) at the repository root.
 
 ## [Unreleased]
 

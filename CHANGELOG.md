@@ -41,8 +41,66 @@ Production-readiness and UX hardening pass.
 - Coverage gate is now enforced in CI (`--cov-fail-under=78`).
 - Removed redundant inline `try/except` blocks in `score classify` / `aai
   validate` so typed errors flow to the centralized handler.
+- Behaviour changes from the 2026-11 pipeline audit (PR #13):
+  - `blast align`, `mmseqs2 search` and `blastx align` choose compression from
+    the output extension (`.gz` is gzipped, `.tsv` stays plain); `--compress`
+    forces gzip. Previously output was always gzipped.
+  - `mmseqs2 search --query-1/--query-2` gives mates distinct `/1` and `/2`
+    IDs, so the two mates are classified as separate reads instead of being
+    pooled under one shared ID.
+  - `blast align --word-size` defaults per `--task` (blastn 7, dc-megablast
+    11, megablast 28).
+  - External tools no longer have a default one-hour timeout, and a timeout is
+    now reported as a tool error.
+  - An ANI matrix on a 0-1 scale is rejected; a pair given in only one
+    direction is mirrored. ANI values are stored as float64.
+  - `score classify --streaming` refuses `--id-mapping`/`--genomes` (the
+    mapping used to be ignored without warning), and stops with an error when a
+    read's hits are not contiguous in the file.
+  - `mdm run pipeline`: values from a `--config` YAML are no longer overridden
+    by CLI defaults; `--from STEP` re-runs that step and all later ones; new
+    `--extracted-reads-2`; the run manifest records start and finish times.
 
 ### Fixed
+
+- Fixes from the 2026-11 pipeline audit (PR #13), checked against a real
+  Francisellaceae BLAST/MMseqs2 run:
+  - MMseqs2/DIAMOND reverse-strand hits (`qstart > qend`) had negative
+    coverage, so the correct hit was down-weighted or filtered out. Reads from
+    reference genomes were called Novel Species (689 of about 3,000 in the test
+    run) and single-end MMseqs2 input lost reads. Coordinates are now
+    normalized.
+  - With tied hits, the "second" competing genome (default
+    `uncertainty_mode`) came from an unstable sort, so
+    `placement_uncertainty` depended on batch size and streaming disagreed
+    with in-memory mode.
+  - Streaming: crashes on integer-looking bitscores, numeric read IDs and `#`
+    headers; Parquet schema changing between batches; misaligned CSV columns
+    for batches containing only Off-target reads.
+  - `--adaptive-thresholds` dropped the user's configuration, and uncomputed
+    ANI pairs pulled the detected boundary down to 80%. `score sensitivity`
+    crashed on `score classify` output. The QC low-confidence fraction
+    compared the 0-100 confidence score against 0.5.
+  - `report generate` crashed on Off-target rows and on empty CSVs. Reports
+    were not byte-identical across processes. Metadata names were inserted
+    into the HTML unescaped. Novel clustering dropped reads before adjacent
+    novelty bands were merged.
+  - `mdm run pipeline` could not finish from raw reads: extracted-read
+    filenames did not match what `kraken2 extract` writes, kraken2 output was
+    passed as a file instead of a directory, `--metadata` was missing on first
+    runs, and MMseqs2 single-end input failed. `scripts/run_pipeline.sh`
+    failed at the extract step because no `.kreport` was written.
+  - `ani compute --representatives-only` was ignored by the fastANI backend.
+  - `--preset` silently dropped explicitly passed flags. The global
+    `--dry-run` was ignored by `score classify` and `blast makedb/align`.
+  - `blast align`: gzipped FASTA queries were parsed as FASTQ, dropping every
+    other read; multi-volume and dotted-prefix databases were rejected.
+  - MMseqs2 translated search (`--search-type 2`) built an amino-acid query
+    database and found nothing.
+  - ID mapping now handles NCBI-style `ref|ACC|` seqids and numeric contig
+    IDs. Genome concatenation handles files without a trailing newline. GTDB
+    placeholder taxa such as `f__CAG-138` are accepted.
+  - `anyio` and `certifi` bumped in `uv.lock` for published advisories.
 
 - Streaming classification (`score classify --streaming` / `stream_to_file`)
   silently bypassed the alignment-quality filters (`min_alignment_length`,
