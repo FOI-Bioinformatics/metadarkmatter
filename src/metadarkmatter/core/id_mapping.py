@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gzip
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -17,6 +18,18 @@ import polars as pl
 from metadarkmatter.core.genome_utils import extract_accession_from_filename
 
 logger = logging.getLogger(__name__)
+
+# NCBI FASTA-style seqids as reported by BLAST+ databases built with
+# -parse_seqids, e.g. "ref|NC_006570.2|" or "lcl|contig_1". Shared by the
+# scalar and vectorized paths (Rust regex syntax is compatible).
+_NCBI_SEQID_REGEX = r"^(?:ref|gb|emb|dbj|lcl|tpg|tpe|tpd)\|(?P<id>[^|]+)\|?$"
+_NCBI_SEQID_RE = re.compile(_NCBI_SEQID_REGEX)
+
+
+def _strip_ncbi_seqid_prefix(seqid: str) -> str:
+    """Return the bare accession from an NCBI-style seqid, else ``seqid``."""
+    m = _NCBI_SEQID_RE.match(seqid)
+    return m.group("id") if m else seqid
 
 
 @dataclass
@@ -159,7 +172,10 @@ class ContigIdMapping:
         Returns:
             ContigIdMapping instance
         """
-        df = pl.read_csv(path, separator="\t")
+        # Read every column as string: numeric-looking contig IDs would
+        # otherwise become integers (losing leading zeros and failing joins
+        # against the string sseqid column).
+        df = pl.read_csv(path, separator="\t", infer_schema=False)
 
         # Validate columns
         required = {"original_contig_id", "genome_accession"}
@@ -208,13 +224,15 @@ class ContigIdMapping:
             Standardized ID (e.g., GCF_000195955.2|NZ_CP007557.1)
             or original ID if not found in mapping
         """
-        # Already in standardized format
-        if "|" in original_id:
+        lookup_id = _strip_ncbi_seqid_prefix(original_id)
+
+        # Already in standardized format (accession|contig)
+        if lookup_id == original_id and "|" in original_id:
             return original_id
 
-        accession = self.contig_to_accession.get(original_id)
+        accession = self.contig_to_accession.get(lookup_id)
         if accession:
-            return f"{accession}|{original_id}"
+            return f"{accession}|{lookup_id}"
 
         return original_id
 
@@ -250,19 +268,25 @@ class ContigIdMapping:
             }
         )
 
-        # Join and transform
+        # BLAST+ with -parse_seqids reports NCBI-style IDs such as
+        # "ref|NC_006570.2|"; strip that prefix for the lookup. Without this,
+        # every such ID was treated as already standardized and the genome
+        # name became "ref".
         result = (
-            df.join(mapping_df, left_on=col, right_on="_original_id", how="left")
+            df.with_columns(
+                pl.col(col)
+                .cast(pl.Utf8)
+                .str.replace(_NCBI_SEQID_REGEX, "${id}")
+                .alias("_lookup_id")
+            )
+            .join(mapping_df, left_on="_lookup_id", right_on="_original_id", how="left")
             .with_columns(
-                pl.when(
-                    pl.col("_accession").is_not_null()
-                    & ~pl.col(col).str.contains(r"\|", literal=False)
-                )
-                .then(pl.col("_accession") + "|" + pl.col(col))
+                pl.when(pl.col("_accession").is_not_null())
+                .then(pl.col("_accession") + "|" + pl.col("_lookup_id"))
                 .otherwise(pl.col(col))
                 .alias(col)
             )
-            .drop("_accession")
+            .drop(["_accession", "_lookup_id"])
         )
 
         return result

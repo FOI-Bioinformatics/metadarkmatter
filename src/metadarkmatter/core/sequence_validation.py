@@ -89,6 +89,16 @@ def validate_fasta(
             if not line:
                 continue
             if line.startswith(">"):
+                # Stop *before* consuming header N+1, otherwise it is counted
+                # as a sampled record and reported as having no sequence.
+                if max_records is not None and result.record_count >= max_records:
+                    if current_header is not None and not current_has_sequence:
+                        result.issues.append(
+                            f"Line {lineno - 1}: header '{current_header[:40]}' "
+                            "has no sequence body"
+                        )
+                    current_header = None
+                    break
                 if current_header is not None and not current_has_sequence:
                     result.issues.append(
                         f"Line {lineno - 1}: header '{current_header[:40]}' "
@@ -102,8 +112,6 @@ def validate_fasta(
                 current_has_sequence = False
                 in_record = True
                 result.record_count += 1
-                if max_records is not None and result.record_count > max_records:
-                    break
             else:
                 if not in_record:
                     result.issues.append(

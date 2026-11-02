@@ -12,7 +12,7 @@ import logging
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 import polars as pl
@@ -192,7 +192,10 @@ class VectorizedClassifier:
         genomes = np.array(self.ani_matrix._genomes)
         genome1_arr = genomes[idx1]
         genome2_arr = genomes[idx2]
-        ani_arr = self.ani_matrix._ani_array[idx1, idx2].copy()
+        # Float64 so uncertainty columns have a stable dtype (a float32
+        # lookup made placement_uncertainty Float32 only in batches with
+        # competing hits, which broke incremental Parquet writes).
+        ani_arr = self.ani_matrix._ani_array[idx1, idx2].astype(np.float64)
 
         # Replace missing ANI values (0.0) with default for distant organisms
         ani_arr[ani_arr == 0.0] = self.ani_matrix._default_ani
@@ -297,14 +300,31 @@ class VectorizedClassifier:
         """
         cfg = self.config
 
+        # Normalize query coordinates: MMseqs2 reports minus-strand hits
+        # with qstart > qend. Every downstream coverage expression uses
+        # (qend - qstart + 1), which would otherwise be negative and
+        # down-weight (or filter out) the true best hit of reverse reads.
+        if "qstart" in df.columns and "qend" in df.columns:
+            df = df.with_columns(
+                pl.min_horizontal("qstart", "qend").alias("qstart"),
+                pl.max_horizontal("qstart", "qend").alias("qend"),
+            )
+
         if cfg.min_alignment_length > 0:
             df = df.filter(pl.col("length") >= cfg.min_alignment_length)
 
-        # Note: alignment fraction filter requires read length which isn't
-        # in standard BLAST output. Use qend - qstart + 1 as proxy.
+        # Alignment fraction = aligned query span / read length. Use qlen
+        # when the 13/14-column format provides it; only fall back to the
+        # qend proxy for legacy 12-column input (where the result depends on
+        # where the alignment sits on the read).
         if cfg.min_alignment_fraction > 0:
+            read_len = (
+                pl.coalesce(pl.col("qlen"), pl.col("qend"))
+                if "qlen" in df.columns
+                else pl.col("qend")
+            )
             df = df.with_columns([
-                ((pl.col("qend") - pl.col("qstart") + 1) / pl.col("qend")).alias("_approx_af")
+                ((pl.col("qend") - pl.col("qstart") + 1) / read_len).alias("_approx_af")
             ]).filter(
                 pl.col("_approx_af") >= cfg.min_alignment_fraction
             ).drop("_approx_af")
@@ -351,6 +371,54 @@ class VectorizedClassifier:
         return df
 
     def classify_file(
+        self,
+        blast_input: Path | pl.DataFrame,
+        id_mapping: ContigIdMapping | None = None,
+        compute_qc: bool = False,
+    ) -> pl.DataFrame | tuple[pl.DataFrame, QCMetrics]:
+        """Classify BLAST hits; see ``_classify_file_impl``.
+
+        The result is conformed to a fixed output schema (column set, order
+        and dtypes) so every code path -- including the early returns for
+        empty or all-Off-target inputs -- yields identical columns. This is
+        what keeps streaming batches aligned under one CSV header / Parquet
+        schema.
+        """
+        out = self._classify_file_impl(blast_input, id_mapping, compute_qc)
+        if isinstance(out, tuple):
+            return self._conform_output(out[0]), out[1]
+        return self._conform_output(out)
+
+    _FAMILY_OUTPUT_SCHEMA: ClassVar[dict[str, Any]] = {
+        "family_bitscore_ratio": pl.Float64,
+        "family_identity_gap": pl.Float64,
+        "in_family_hit_fraction": pl.Float64,
+        "external_best_genome": pl.Utf8,
+        "external_best_identity": pl.Float64,
+        "in_family_identity": pl.Float64,
+        "in_family_novelty_index": pl.Float64,
+    }
+
+    def _output_schema(self) -> dict[str, Any]:
+        schema = dict(self._empty_dataframe().schema)
+        if self.config.target_family is not None:
+            schema.update(self._FAMILY_OUTPUT_SCHEMA)
+        return schema
+
+    def _conform_output(self, df: pl.DataFrame) -> pl.DataFrame:
+        schema = self._output_schema()
+        missing = [
+            pl.lit(None).cast(dtype).alias(name)
+            for name, dtype in schema.items()
+            if name not in df.columns
+        ]
+        if missing:
+            df = df.with_columns(missing)
+        return df.select(
+            [pl.col(name).cast(dtype) for name, dtype in schema.items()]
+        )
+
+    def _classify_file_impl(
         self,
         blast_input: Path | pl.DataFrame,
         id_mapping: ContigIdMapping | None = None,
@@ -429,8 +497,12 @@ class VectorizedClassifier:
             if not external_hits.is_empty():
                 external_best_per_read = (
                     external_hits
-                    .sort(["qseqid", "bitscore"], descending=[False, True])
-                    .group_by("qseqid")
+                    .sort(
+                        ["qseqid", "bitscore", "pident", "sseqid"],
+                        descending=[False, True, True, False],
+                        maintain_order=True,
+                    )
+                    .group_by("qseqid", maintain_order=True)
                     .agg([
                         pl.col("genome_name").first().alias("external_best_genome"),
                         pl.col("sseqid").first().alias("_ext_sseqid"),
@@ -500,6 +572,7 @@ class VectorizedClassifier:
                     pl.lit(None).cast(pl.Float64).alias("identity_gap"),
                     pl.lit(10.0).alias("confidence_score"),
                     pl.lit("Off-target").alias("taxonomic_call"),
+                    pl.lit("Off-target").alias("legacy_call"),
                     pl.lit("Off-target").alias("diversity_status"),
                     pl.lit(False).alias("is_novel"),
                     pl.lit(True).alias("low_confidence"),
@@ -524,7 +597,7 @@ class VectorizedClassifier:
                         pl.lit(None).cast(pl.Float64).alias("discovery_score"),
                     ])
 
-                off_target_df = off_target_reads.select(off_target_cols)
+                off_target_df = off_target_reads.select(off_target_cols).sort("read_id")
 
                 # Keep only in-family hits for non-off-target reads
                 df = df.filter(
@@ -647,8 +720,8 @@ class VectorizedClassifier:
                 .filter(pl.col("weighted_bitscore") == pl.col("weighted_bitscore").max())
                 .first()
                 .alias("best_alignment_length"),
-                # Approximate alignment fraction (qend proxy for read length)
-                ((pl.col("qend") - pl.col("qstart") + 1) / pl.col("qend"))
+                # Alignment fraction (qlen when available, else qend proxy)
+                ((pl.col("qend") - pl.col("qstart") + 1) / pl.col("read_length"))
                 .filter(pl.col("weighted_bitscore") == pl.col("weighted_bitscore").max())
                 .first()
                 .alias("alignment_fraction"),
@@ -727,8 +800,18 @@ class VectorizedClassifier:
             second_genome_ani_per_read = (
                 secondary_with_ani
                 .filter(pl.col("representative_genome") != pl.col("best_representative"))
-                .sort(["qseqid", "bitscore"], descending=[False, True])
-                .group_by("qseqid")
+                # Same total order as best-hit selection (weighted bitscore,
+                # then pident, then genome name). Sorting on raw bitscore
+                # alone left ties to polars' unstable sort, so the chosen
+                # "second" genome (and thus placement_uncertainty) depended
+                # on batch size / thread scheduling, and streaming and
+                # in-memory runs disagreed.
+                .sort(
+                    ["qseqid", "weighted_bitscore", "pident", "representative_genome"],
+                    descending=[False, True, True, False],
+                    maintain_order=True,
+                )
+                .group_by("qseqid", maintain_order=True)
                 .agg(pl.col("ani").first().fill_null(0.0).alias("second_genome_ani"))
             )
 
@@ -1136,15 +1219,16 @@ class VectorizedClassifier:
         from metadarkmatter.core.parsers import StreamingBlastParser
         parser = StreamingBlastParser(blast_path)
 
-        batches = pl.scan_csv(
-            blast_path,
-            separator="\t",
-            has_header=False,
-            new_columns=parser.column_names,
-        ).collect_batches(chunk_size=partition_size)
+        # Reuse the parser's explicit schema and comment handling; letting
+        # polars infer dtypes from the first rows crashed on integer-looking
+        # bitscores followed by decimals, numeric read IDs, or '#' headers.
+        batches = parser.parse_lazy().collect_batches(chunk_size=partition_size)
 
         # Track reads across partitions to handle boundary cases
         pending_reads: dict[str, list[Any]] = {}
+        # 64-bit hashes of every read id already emitted (~8 bytes/read),
+        # used to detect non-contiguous input without holding the ids.
+        emitted_hashes = np.empty(0, dtype=np.uint64)
 
         # Incremental writer: each partition is appended exactly once (parquet
         # row group / CSV append), keeping total write cost O(rows) instead of
@@ -1161,6 +1245,30 @@ class VectorizedClassifier:
 
                 # Get unique reads in this partition
                 partition_reads = set(partition_df["qseqid"].unique().to_list())
+
+                # Streaming requires each read's hits to be contiguous (as
+                # BLAST/MMseqs2 emit them). Detect violations instead of
+                # silently classifying a read twice from partial hit sets:
+                # (a) a read id appearing in more than one run within this
+                # partition, (b) a read already emitted from an earlier
+                # partition reappearing here.
+                qids = partition_df["qseqid"]
+                n_runs = int((qids != qids.shift(1)).fill_null(True).sum())
+                uniq = qids.unique(maintain_order=True)
+                uniq_hashes = uniq.hash(seed=0).to_numpy()
+                seen_mask = np.isin(uniq_hashes, emitted_hashes)
+                reappeared = uniq.filter(pl.Series(seen_mask)).to_list()
+                if n_runs != len(partition_reads) or reappeared:
+                    example = reappeared[0] if reappeared else None
+                    msg = (
+                        "Streaming mode requires alignment rows grouped by "
+                        "read (query) id, but hits for the same read are not "
+                        "contiguous"
+                        + (f" (e.g. {example!r})" if example else "")
+                        + ". Sort the file by the first column "
+                        "(e.g. `sort -k1,1 -s`) or run without --streaming."
+                    )
+                    raise ValueError(msg)
 
                 # Find reads that are complete (not the last read which may span partitions)
                 if partition_df.height > 0:
@@ -1184,6 +1292,12 @@ class VectorizedClassifier:
                             assert isinstance(result_df, pl.DataFrame)
                             total_reads += len(result_df)
                             writer.write(result_df)
+
+                    if complete_reads:
+                        done = pl.Series(sorted(complete_reads), dtype=pl.Utf8)
+                        emitted_hashes = np.union1d(
+                            emitted_hashes, done.hash(seed=0).to_numpy()
+                        )
 
                     # Save incomplete reads for next partition
                     incomplete_df = partition_df.filter(pl.col("qseqid") == last_read)

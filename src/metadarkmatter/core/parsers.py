@@ -285,6 +285,8 @@ class StreamingBlastParser:
                 .collect(engine="streaming")
             )
         """
+        # MMseqs2/DIAMOND report minus-strand hits with qstart > qend;
+        # normalize so every consumer can use (qend - qstart + 1) safely.
         return pl.scan_csv(
             self.blast_path,
             separator="\t",
@@ -293,6 +295,9 @@ class StreamingBlastParser:
             schema_overrides=self.schema,
             comment_prefix="#",
             ignore_errors=False,
+        ).with_columns(
+            pl.min_horizontal("qstart", "qend").alias("qstart"),
+            pl.max_horizontal("qstart", "qend").alias("qend"),
         )
 
     def parse_eager(self) -> pl.DataFrame:
@@ -331,17 +336,20 @@ class StreamingBlastParser:
         pending_hits: dict[str, list[dict[str, Any]]] = {}
 
         # Use Polars scan_csv with collect_batches for streaming
-        batches = pl.scan_csv(
-            self.blast_path,
-            separator="\t",
-            has_header=False,
-            new_columns=self.column_names,
-            comment_prefix="#",
-        ).collect_batches(chunk_size=self.chunk_size)
+        # parse_lazy() applies the explicit schema; letting polars infer
+        # dtypes failed when early bitscores were integer-looking ("241")
+        # and a later one had decimals ("45.4").
+        batches = self.parse_lazy().collect_batches(chunk_size=self.chunk_size)
 
         for chunk_df in batches:
             if chunk_df.is_empty():
                 continue
+
+            # The last read in FILE order may continue in the next chunk;
+            # capture it before sorting (after sorting, [-1] is merely the
+            # alphabetically last read, so a read spanning the boundary was
+            # yielded twice from partial hit sets).
+            file_last_read_id = chunk_df["qseqid"][-1]
 
             # Sort chunk by read_id and bitscore for consistent grouping
             chunk_df = chunk_df.sort(["qseqid", "bitscore"], descending=[False, True])
@@ -356,10 +364,9 @@ class StreamingBlastParser:
             # Get unique read_ids in this chunk to determine which are complete
             chunk_read_ids = chunk_df["qseqid"].unique().to_list()
 
-            # The last read_id in the chunk may span to the next chunk
-            # Sort to find the last one alphabetically (matches sort order)
+            # The last read_id in the chunk (file order) may span to the next chunk
             if chunk_read_ids:
-                current_last_read_id = chunk_df["qseqid"][-1]
+                current_last_read_id = file_last_read_id
 
                 # Yield all reads except the last one (which may be incomplete)
                 for read_id in list(pending_hits.keys()):
@@ -448,17 +455,16 @@ class StreamingBlastParser:
         pending_hits: dict[str, list[BlastHitFast]] = {}
 
         # Use Polars scan_csv with collect_batches for streaming
-        batches = pl.scan_csv(
-            self.blast_path,
-            separator="\t",
-            has_header=False,
-            new_columns=self.column_names,
-            comment_prefix="#",
-        ).collect_batches(chunk_size=self.chunk_size)
+        # parse_lazy() applies the explicit schema; letting polars infer
+        # dtypes failed when early bitscores were integer-looking ("241")
+        # and a later one had decimals ("45.4").
+        batches = self.parse_lazy().collect_batches(chunk_size=self.chunk_size)
 
         for chunk_df in batches:
             if chunk_df.is_empty():
                 continue
+
+            file_last_read_id = chunk_df["qseqid"][-1]  # before sorting
 
             # Vectorized genome extraction + sorting in Polars
             chunk_df = (
@@ -508,7 +514,7 @@ class StreamingBlastParser:
 
             # Yield complete reads (same boundary logic as iter_reads_chunked)
             if chunk_df.height > 0:
-                current_last_read_id = chunk_df["qseqid"][-1]
+                current_last_read_id = file_last_read_id
                 for read_id in list(pending_hits.keys()):
                     if read_id != current_last_read_id:
                         hits = pending_hits.pop(read_id)
@@ -783,13 +789,7 @@ def iter_blast_chunks(
     parser = StreamingBlastParser(blast_path, chunk_size=chunk_size)
 
     # Use Polars scan_csv with collect_batches for streaming
-    batches = pl.scan_csv(
-        blast_path,
-        separator="\t",
-        has_header=False,
-        new_columns=parser.column_names,
-        comment_prefix="#",
-    ).collect_batches(chunk_size=chunk_size)
+    batches = parser.parse_lazy().collect_batches(chunk_size=chunk_size)
 
     for chunk_df in batches:
         if chunk_df.is_empty():
@@ -830,6 +830,8 @@ def iter_blast_results(
     pending_hits: dict[str, list[BlastHitFast]] = {}
 
     for chunk_df in iter_blast_chunks(blast_path, chunk_size=chunk_size, id_mapping=id_mapping):
+        file_last_read_id = chunk_df["qseqid"][-1]  # before sorting
+
         # Vectorized genome extraction + sorting
         chunk_df = (
             chunk_df
@@ -876,7 +878,7 @@ def iter_blast_results(
 
         # Yield complete reads
         if chunk_df.height > 0:
-            current_last_read_id = chunk_df["qseqid"][-1]
+            current_last_read_id = file_last_read_id
             for read_id in list(pending_hits.keys()):
                 if read_id != current_last_read_id:
                     hits = pending_hits.pop(read_id)

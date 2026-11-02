@@ -136,7 +136,9 @@ class GTDBClient:
     """
 
     # Regex pattern for valid GTDB taxon format
-    TAXON_PATTERN = re.compile(r"^[dpcofgs]__[\w\s]+$")
+    # Allows "-" and "." for GTDB placeholder names such as f__CAG-138 or
+    # g__UBA1234.1-style labels.
+    TAXON_PATTERN = re.compile(r"^[dpcofgs]__[\w\s.\-]+$")
 
     def __init__(
         self,

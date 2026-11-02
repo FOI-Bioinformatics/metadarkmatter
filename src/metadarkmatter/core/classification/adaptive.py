@@ -29,6 +29,25 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _computed_pairwise_ani(ani_matrix: ANIMatrix, genomes: list[str]) -> list[float]:
+    """Upper-triangle ANI values for pairs that were actually computed.
+
+    ``ANIMatrix.get_ani`` substitutes the default ANI (70%) for uncomputed
+    pairs. fastANI/skani leave most distant pairs uncomputed, so including
+    them would feed many identical 70.0 values into the GMM, collapsing one
+    component and clamping the detected boundary to its lower bound.
+    """
+    arr = ani_matrix._ani_array
+    idx = ani_matrix._genome_to_idx
+    values: list[float] = []
+    for i, g1 in enumerate(genomes):
+        for g2 in genomes[i + 1:]:
+            raw = float(arr[idx[g1], idx[g2]])
+            if raw > 0.0:
+                values.append(raw)
+    return values
+
+
 @dataclass
 class AdaptiveThresholds:
     """Result of adaptive threshold detection."""
@@ -87,13 +106,7 @@ def detect_species_boundary(
         )
 
     # Extract upper-triangle ANI values (excluding diagonal)
-    ani_values = []
-    for i, g1 in enumerate(genomes):
-        for j in range(i + 1, len(genomes)):
-            g2 = genomes[j]
-            ani = ani_matrix.get_ani(g1, g2)
-            if ani > 0:
-                ani_values.append(ani)
+    ani_values = _computed_pairwise_ani(ani_matrix, genomes)
 
     if len(ani_values) < 3:
         logger.info(
@@ -270,13 +283,7 @@ def detect_genus_boundary(
         )
 
     # Extract upper-triangle ANI values (excluding diagonal)
-    ani_values = []
-    for i, g1 in enumerate(genomes):
-        for j in range(i + 1, len(genomes)):
-            g2 = genomes[j]
-            ani = ani_matrix.get_ani(g1, g2)
-            if ani > 0:
-                ani_values.append(ani)
+    ani_values = _computed_pairwise_ani(ani_matrix, genomes)
 
     if len(ani_values) < 10:
         logger.info(
@@ -436,20 +443,12 @@ def build_adaptive_config(
     """
     from metadarkmatter.models.config import ScoringConfig
 
-    return ScoringConfig(
-        bitscore_threshold_pct=base_config.bitscore_threshold_pct,
+    # Start from the full base config so user settings (alignment mode,
+    # target family, filters, Bayesian/YAML config, ...) are preserved;
+    # only the novelty boundary is replaced. model_validate re-runs checks.
+    data = base_config.model_dump()
+    data.update(
         novelty_known_max=adaptive.novelty_known_max,
         novelty_novel_species_min=adaptive.novelty_known_max,  # Continuous boundary
-        novelty_novel_species_max=base_config.novelty_novel_species_max,
-        novelty_novel_genus_min=base_config.novelty_novel_genus_min,
-        novelty_novel_genus_max=base_config.novelty_novel_genus_max,
-        uncertainty_known_max=base_config.uncertainty_known_max,
-        uncertainty_novel_species_max=base_config.uncertainty_novel_species_max,
-        uncertainty_novel_genus_max=base_config.uncertainty_novel_genus_max,
-        uncertainty_conserved_min=base_config.uncertainty_conserved_min,
-        uncertainty_mode=base_config.uncertainty_mode,
-        coverage_weight_mode=base_config.coverage_weight_mode,
-        coverage_weight_strength=base_config.coverage_weight_strength,
-        min_alignment_fraction=base_config.min_alignment_fraction,
-        single_hit_uncertainty_threshold=base_config.single_hit_uncertainty_threshold,
     )
+    return ScoringConfig.model_validate(data)

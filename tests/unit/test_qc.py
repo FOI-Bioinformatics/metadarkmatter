@@ -244,12 +244,26 @@ class TestPostQC:
         qc = QCMetrics()
         result_df = pl.DataFrame({
             "taxonomic_call": ["Known Species", "Known Species", "Known Species"],
-            "confidence_score": [0.9, 0.3, 0.2],
+            # confidence_score is on a 0-100 scale (classifier output)
+            "confidence_score": [90.0, 30.0, 20.0],
         })
 
         qc = compute_post_qc(qc, result_df)
 
         assert qc.low_confidence_fraction == pytest.approx(2 / 3, rel=0.01)
+
+    def test_low_confidence_fraction_uses_flag_column(self):
+        """The classifier's low_confidence flag takes precedence."""
+        qc = QCMetrics()
+        result_df = pl.DataFrame({
+            "taxonomic_call": ["Known Species"] * 4,
+            "confidence_score": [90.0, 45.0, 60.0, 99.0],
+            "low_confidence": [False, True, False, False],
+        })
+
+        qc = compute_post_qc(qc, result_df)
+
+        assert qc.low_confidence_fraction == pytest.approx(0.25)
 
     def test_high_ambiguous_warning(self):
         """Should warn when ambiguous fraction exceeds 50%."""
