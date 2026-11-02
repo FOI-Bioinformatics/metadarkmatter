@@ -59,7 +59,7 @@ class VectorizedClassifier:
 
     Example:
         ani_matrix = ANIMatrix.from_file(ani_path)
-        vectorized = VectorizedClassifier(ani_matrix, config)
+        vectorized = VectorizedClassifier(ani_matrix, config=config)
         df = vectorized.classify_file(blast_path)
     """
 
@@ -285,7 +285,7 @@ class VectorizedClassifier:
             avail_gb = available_memory / (1024**3)
             logger.warning(
                 "Estimated memory usage (%.1f GB) may exceed available memory "
-                "(%.1f GB). Consider using --parallel flag for chunked processing.",
+                "(%.1f GB). Consider --streaming (score classify) for bounded memory.",
                 est_gb,
                 avail_gb,
             )
@@ -1198,7 +1198,7 @@ class VectorizedClassifier:
             Total number of reads classified
 
         Example:
-            vectorized = VectorizedClassifier(ani_matrix, config)
+            vectorized = VectorizedClassifier(ani_matrix, config=config)
 
             def progress(rows, reads, elapsed):
                 print(f"Processed {rows:,} rows -> {reads:,} reads in {elapsed:.1f}s")
