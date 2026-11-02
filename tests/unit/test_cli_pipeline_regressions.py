@@ -403,7 +403,10 @@ def _blast_align_dry_run(tmp_path: Path, *extra: str) -> str:
             env={"COLUMNS": "400"},
         )
     assert result.exit_code == 0, result.output
-    return result.output
+    # Rich wraps the printed command at the console width (fixed at import
+    # time, and 80 columns under CI regardless of COLUMNS), so a flag and its
+    # value can land on different lines. Collapse whitespace before matching.
+    return " ".join(result.output.split())
 
 
 def test_blast_align_compress_follows_extension(tmp_path: Path):
