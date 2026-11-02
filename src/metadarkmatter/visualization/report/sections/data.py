@@ -30,6 +30,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _fmt2(value: object) -> str:
+    """Format a numeric cell with two decimals; null/non-numeric -> "-".
+
+    Off-target rows report ``placement_uncertainty=null``.
+    """
+    num = _safe_float(value)
+    return "-" if num is None else f"{num:.2f}"
+
+
 class DataMixin(_ReportBase):
     """Data report-section builders."""
 
@@ -183,9 +192,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 genus=html.escape(
                     genus[:20] if len(genus) > 20 else genus
                 ),
-                identity=row.get("top_hit_identity", 0),
-                novelty=row.get("novelty_index", 0),
-                uncertainty=row.get("placement_uncertainty", 0),
+                identity=_fmt2(row.get("top_hit_identity")),
+                novelty=_fmt2(row.get("novelty_index")),
+                uncertainty=_fmt2(row.get("placement_uncertainty")),
                 ambiguous_hits=ambiguous_hits,
                 identity_gap=identity_gap_str,
                 is_novel="Yes" if is_novel else "No",

@@ -391,6 +391,7 @@ body {
 .cat-grid-cell.novel-genus { border-left-color: var(--danger-color); }
 .cat-grid-cell.species-boundary { border-left-color: var(--info-color); }
 .cat-grid-cell.ambiguous { border-left-color: var(--info-color); }
+.cat-grid-cell.ambiguous-wg { border-left-color: #6b7280; }
 .cat-grid-cell.conserved { border-left-color: var(--info-color); }
 .cat-grid-cell.unclassified { border-left-color: var(--text-muted); }
 .cat-grid-cell.off-target { border-left-color: var(--offtarget-color); }
@@ -2224,6 +2225,7 @@ body {
 .cat-grid-cell.novel-genus { border-left-color: var(--danger-color); }
 .cat-grid-cell.species-boundary { border-left-color: var(--info-color); }
 .cat-grid-cell.ambiguous { border-left-color: var(--info-color); }
+.cat-grid-cell.ambiguous-wg { border-left-color: #6b7280; }
 .cat-grid-cell.conserved { border-left-color: var(--info-color); }
 .cat-grid-cell.unclassified { border-left-color: var(--text-muted); }
 .cat-grid-cell.off-target { border-left-color: var(--offtarget-color); }

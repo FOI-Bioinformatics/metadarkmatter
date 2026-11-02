@@ -393,7 +393,7 @@ class ReferenceMixin(_ReportBase):
                 pl.col("top_hit_identity").mean().alias("mean_identity"),
                 pl.col("best_match_genome").n_unique().alias("genome_count"),
             ])
-            .sort("count", descending=True)
+            .sort(["count", "species"], descending=[True, False], nulls_last=True)
             .head(20)
         )
 

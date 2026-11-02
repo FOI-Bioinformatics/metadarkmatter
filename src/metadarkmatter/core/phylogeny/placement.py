@@ -82,9 +82,10 @@ def _estimate_branch_length(novelty: float, classification: str) -> float:
     Returns:
         Estimated branch length for tree insertion.
     """
-    # Base branch length scales with novelty
-    # Novelty of 5% -> ~0.05, Novelty of 25% -> ~0.25
-    base_length = novelty / 100.0
+    # Branch lengths are in percent-divergence units, matching the
+    # reference tree built by ``ani_to_newick`` (distance = 100 - ANI).
+    # Novelty of 5% -> 5.0, Novelty of 25% -> 25.0
+    base_length = float(novelty)
 
     # Novel genus gets additional length to reflect greater divergence
     if classification == "novel_genus":

@@ -249,7 +249,7 @@ class RecruitmentPlotGenerator:
             genome_counts = (
                 self.data.group_by("genome_name")
                 .len()
-                .sort("len", descending=True)
+                .sort(["len", "genome_name"], descending=[True, False])
                 .head(5)
             )
             genomes = genome_counts["genome_name"].to_list()

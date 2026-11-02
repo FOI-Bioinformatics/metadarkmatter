@@ -320,7 +320,7 @@ def select_relevant_references(
             selected.add(cluster.nearest_genome)
 
     # Priority 2: Add genomes with high ANI to the nearest genomes
-    nearest_genomes = list(selected)
+    nearest_genomes = sorted(selected)
     for nearest in nearest_genomes:
         # Find genomes similar to this nearest reference
         similar = []
@@ -332,7 +332,7 @@ def select_relevant_references(
                 similar.append((genome, ani))
 
         # Sort by ANI and add top candidates
-        similar.sort(key=lambda x: x[1], reverse=True)
+        similar.sort(key=lambda x: (-x[1], x[0]))
         for genome, _ in similar[:5]:  # Add up to 5 per nearest
             selected.add(genome)
             if len(selected) >= max_refs:
