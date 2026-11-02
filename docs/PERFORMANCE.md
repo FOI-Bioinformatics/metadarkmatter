@@ -14,34 +14,35 @@ metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --ou
 
 | Metric | Value |
 |--------|-------|
-| Best for | Up to ~100M alignments |
-| RAM usage | 4-16 GB (scales with data) |
+| Best for | Up to ~5M alignments, or more when RAM allows |
+| RAM usage | Scales with data; pre-run estimate about 1.5x the uncompressed alignment size |
 | Speed | Automatic multi-core parallelization |
 
-Loads all data into memory, performs vectorized classification in Polars' Rust backend.
+Loads all data into memory, performs vectorized classification in Polars' Rust backend. Before loading, the classifier estimates memory as about 1.5x the uncompressed file size (about 15x a gzipped file) and logs a warning if this may exceed available memory.
 
 ### Streaming Mode
 
 ```bash
-metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv --streaming
+metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani.csv --output out.csv \
+    --streaming --chunk-size 500000
 ```
 
 | Metric | Value |
 |--------|-------|
-| Best for | 100M+ alignments or memory-constrained systems |
-| RAM usage | 8-16 GB (constant) |
+| Best for | >5M alignments or memory-constrained systems |
+| RAM usage | Bounded by `--chunk-size` |
 | Speed | Comparable to default for large files |
 
-Processes data in 5M alignment chunks, writing results incrementally. Memory usage remains constant regardless of file size.
+Processes data in batches of `--chunk-size` rows (default 1,000,000), writing results incrementally, so memory use does not grow with file size. Restrictions: each read's hits must be contiguous in the input (BLAST and MMseqs2 output satisfies this; otherwise the run stops with an error), `--id-mapping`/`--genomes` are rejected, and with `--metadata` the species/genus/family columns are omitted (representative mapping and family inference still apply). Classifications are expected to match the in-memory path (checked by `tests/e2e/test_mode_equivalence.py`).
 
 ### When to Use Streaming
 
 ```
 Dataset size?
     |
-    +--< 100M alignments --> Default (loads all into memory)
+    +--< ~5M alignments --> Default (loads all into memory)
     |
-    +-->= 100M alignments or limited RAM --> --streaming
+    +-->= ~5M alignments or limited RAM --> --streaming
 ```
 
 ## Output Format Selection
@@ -100,7 +101,7 @@ metadarkmatter score classify --output results.parquet --format parquet
 
 3. **Reduce BLAST hits per read:**
    ```bash
-   metadarkmatter blast align --max-targets 50 ...  # Instead of 100
+   metadarkmatter blast align --max-targets 100 ...  # Instead of the default 500
    ```
 
 ### Memory Usage by Component
@@ -144,11 +145,14 @@ The batch command loads the ANI matrix once and reuses it for all samples.
 
 ### BLAST Alignment Parameters
 
-| Parameter | Sensitive | Balanced | Fast |
+| Parameter | Sensitive (default) | Balanced | Fast |
 |-----------|-----------|----------|------|
-| word_size | 7 | 11 | 16 |
-| evalue | 1e-3 | 1e-5 | 1e-10 |
-| max_targets | 100 | 50 | 20 |
+| task | blastn | dc-megablast | megablast |
+| word_size (task default) | 7 | 11 | 28 |
+| evalue | 1e-5 | 1e-5 | 1e-10 |
+| max_targets | 500 | 100 | 50 |
+
+`--word-size` defaults to the value for the chosen `--task`; pass it explicitly to override. For closely related references, `--task dc-megablast` has been about 10x faster than `blastn` with similar sensitivity in the 80-100% identity range.
 
 ### Parallel BLAST
 
@@ -162,12 +166,16 @@ parallel metadarkmatter blast align --query {} --database db --output {}.blast.t
 cat reads_part_*.blast.tsv > combined.blast.tsv
 ```
 
+Concatenating per-part files keeps each read's hits contiguous, so the result can still be classified with `--streaming`.
+
+External tools run without a default timeout, so long BLAST/MMseqs2/ANI runs are not cut off.
+
 ## Tips for Large Datasets
 
 1. **Use compressed files:** BLAST output compresses 5-10x
 2. **Use Parquet output:** 10x smaller, 10x faster I/O
 3. **Use MMseqs2:** 5-100x faster than BLAST for >100K reads
-4. **Use streaming mode:** Constant memory for very large files
+4. **Use streaming mode:** Bounded memory for very large files
 5. **Batch process:** Use `score batch` for multiple samples
 
 ## Monitoring Progress

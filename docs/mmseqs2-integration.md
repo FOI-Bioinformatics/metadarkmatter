@@ -69,6 +69,14 @@ metadarkmatter mmseqs2 search \
     --output sample.mmseqs2.tsv.gz \
     --threads 16
 
+# Paired-end search
+metadarkmatter mmseqs2 search \
+    --query-1 extraction/sample_taxid34064_R1.fastq.gz \
+    --query-2 extraction/sample_taxid34064_R2.fastq.gz \
+    --database mmseqs_db/pangenome \
+    --output sample.mmseqs2.tsv.gz \
+    --threads 16
+
 # High-sensitivity search
 metadarkmatter mmseqs2 search \
     --query extracted_reads.fasta \
@@ -78,6 +86,10 @@ metadarkmatter mmseqs2 search \
     --evalue 1e-5 \
     --threads 16
 ```
+
+Use `--query` for single-end input or `--query-1`/`--query-2` for paired-end input. Paired files are concatenated; each mate ID receives a `/1` or `/2` suffix (unless it already ends in that suffix), so the two mates are classified as separate reads. Gzip compression is detected per input file from its content.
+
+Output is gzip-compressed when `--output` ends in `.gz`; `--compress` forces compression and appends `.gz`.
 
 ### 3. Classify Results (Same as BLAST)
 
@@ -106,18 +118,18 @@ metadarkmatter score classify \
 ### Other Parameters
 
 ```bash
---evalue 1e-3          # Default, matches BLAST defaults
---max-seqs 500         # Default, matches BLAST max-target-seqs
+--evalue 1e-3          # Default (blast align defaults to 1e-5)
+--max-seqs 500         # Default, matches blast align --max-targets
 --min-identity 75.0    # Optional, filter by percent identity
 --threads 16           # Adjust based on available cores
 ```
 
 ## Output Format
 
-MMseqs2 produces BLAST-compatible tabular output with these columns:
+MMseqs2 produces BLAST-compatible tabular output with these 13 columns:
 
 ```
-query, target, pident, alnlen, mismatch, gapopen, qstart, qend, tstart, tend, evalue, bits
+query, target, pident, alnlen, mismatch, gapopen, qstart, qend, tstart, tend, evalue, bits, qlen
 ```
 
 **Column Mapping to BLAST**:
@@ -126,8 +138,9 @@ query, target, pident, alnlen, mismatch, gapopen, qstart, qend, tstart, tend, ev
 - `pident` → `pident` (percent identity)
 - `alnlen` → `length` (alignment length)
 - `bits` → `bitscore`
+- `qlen` → `qlen` (read length, used for coverage weighting)
 
-This format is compatible with existing parsers and classifiers without modification.
+This format is compatible with existing parsers and classifiers without modification. MMseqs2 reports minus-strand hits with `qstart > qend`; these coordinates are normalised when the file is parsed.
 
 ## Performance Comparison
 
@@ -173,26 +186,26 @@ metadarkmatter mmseqs2 search \
     --tmp-dir /scratch/tmp/  # Use fast local storage
 ```
 
-### Protein-Level Search (Future)
+### Protein-Level Search (Experimental)
 
 For highly divergent taxa (genus-level novelty), protein-level search may be more sensitive:
 
 ```bash
-# Create protein database
+# Create protein database (--dbtype: 0 = auto, 1 = amino acid, 2 = nucleotide)
 metadarkmatter mmseqs2 makedb \
     --genomes proteins.faa \
     --output mmseqs_protein_db \
-    --dbtype 0  # 0 = protein
+    --dbtype 1
 
-# Translated search (BLASTX equivalent)
+# Translated search (BLASTX equivalent); the query database is built as nucleotide
 metadarkmatter mmseqs2 search \
     --query reads.fastq \
     --database mmseqs_protein_db \
     --output results.tsv \
-    --search-type 2  # 2 = translated search
+    --search-type 2  # 2 = translated, 3 = nucleotide (default)
 ```
 
-*Note: Protein-level classification not yet validated for metadarkmatter.*
+*Note: Protein-level classification with MMseqs2 output has not been validated for metadarkmatter; Diamond (`blastx align`) is the tested protein route.*
 
 ## Troubleshooting
 
@@ -235,7 +248,7 @@ MMseqs2 integration uses the `--format-output` parameter to produce BLAST-compat
 
 ```bash
 --format-mode 0 \
---format-output "query,target,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits"
+--format-output "query,target,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits,qlen"
 ```
 
 This ensures seamless integration with:
@@ -246,10 +259,10 @@ This ensures seamless integration with:
 ### Performance Optimization
 
 MMseqs2 performance optimizations:
-- Uses `easy-search` for simplicity (automatic cleanup)
+- Runs `createdb` -> `search` -> `convertalis` as separate steps; `--query-db` lets a single-end query database be reused across searches
 - Temp directory auto-created if not specified
-- Progress indicators disabled for large-scale runs
-- Output compression supported (gzip)
+- Output compression follows the output extension (gzip)
+- No default timeout is applied to the MMseqs2 steps
 
 ## References
 
@@ -264,4 +277,4 @@ For issues specific to MMseqs2 integration:
 2. Validate MMseqs2 installation: `mmseqs version`
 3. Test with small dataset first
 4. Compare results with BLAST on same data
-5. Report issues at: https://github.com/anthropics/metadarkmatter/issues
+5. Report issues at: https://github.com/FOI-Bioinformatics/metadarkmatter/issues
