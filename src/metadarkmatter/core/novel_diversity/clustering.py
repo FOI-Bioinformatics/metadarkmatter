@@ -221,13 +221,17 @@ class NovelDiversityAnalyzer:
 
         merged: list[dict[str, Any]] = []
         current = rows_sorted[0].copy()
+        # Highest band absorbed into ``current``. Adjacency is judged against
+        # it (not the reported lower-edge band) so chains of consecutive bands
+        # merge transitively.
+        last_band = current["novelty_band"]
 
         for nxt in rows_sorted[1:]:
             same_group = (
                 nxt["representative_genome"] == current["representative_genome"]
                 and nxt["taxonomic_call"] == current["taxonomic_call"]
             )
-            adjacent_band = (nxt["novelty_band"] - current["novelty_band"]) <= band_size
+            adjacent_band = (nxt["novelty_band"] - last_band) <= band_size
             # Overlapping or near-overlapping novelty ranges
             ranges_close = (
                 current["novelty_max"] >= nxt["novelty_min"] - self._merge_band_tolerance
@@ -252,6 +256,7 @@ class NovelDiversityAnalyzer:
 
                 # Update novelty_band to the band of the lower edge
                 current["novelty_band"] = min(current["novelty_band"], nxt["novelty_band"])
+                last_band = max(last_band, nxt["novelty_band"])
 
                 # Merge optional fields
                 if "mean_discovery" in current and current["mean_discovery"] is not None:
@@ -276,6 +281,7 @@ class NovelDiversityAnalyzer:
             else:
                 merged.append(current)
                 current = nxt.copy()
+                last_band = current["novelty_band"]
 
         merged.append(current)
         return merged
@@ -296,8 +302,8 @@ class NovelDiversityAnalyzer:
             2. Compute novelty band for each read
             3. Map genomes to neighborhood representatives (ANI-aware)
             4. Group by (representative_genome, novelty_band, taxonomic_call)
-            5. Filter by minimum cluster size
-            6. Merge adjacent bands with overlapping novelty ranges
+            5. Merge adjacent bands with overlapping novelty ranges
+            6. Filter by minimum cluster size
             7. Generate cluster IDs and suggested names
             8. Assign confidence ratings (Bayesian-informed when available)
             9. Infer phylogenetic context
@@ -394,24 +400,20 @@ class NovelDiversityAnalyzer:
             .agg(agg_exprs)
         )
 
-        # Step 5: Filter by minimum cluster size
-        grouped = grouped.filter(pl.col("read_count") >= self._min_cluster_size)
+        # Step 5: Merge adjacent bands first, so that sub-threshold groups in
+        # neighbouring bands can combine into a cluster that passes the
+        # minimum size (filtering first would silently drop those reads).
+        rows = self._merge_adjacent_bands(grouped.to_dicts())
 
-        if len(grouped) == 0:
+        # Step 6: Filter by minimum cluster size
+        rows = [r for r in rows if r["read_count"] >= self._min_cluster_size]
+
+        if not rows:
             logger.info(
                 f"No clusters with >= {self._min_cluster_size} reads found"
             )
             self._clusters = []
             return self._clusters
-
-        # Convert to list of dicts for band merging
-        rows = grouped.to_dicts()
-
-        # Step 6: Merge adjacent bands
-        rows = self._merge_adjacent_bands(rows)
-
-        # Re-filter after merging (shouldn't shrink, but be safe)
-        rows = [r for r in rows if r["read_count"] >= self._min_cluster_size]
 
         # Sort by read count descending, with deterministic tiebreakers
         # (representative genome, then call) so sequential cluster IDs are

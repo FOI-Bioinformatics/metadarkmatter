@@ -24,6 +24,20 @@ if TYPE_CHECKING:
     import polars as pl
 
 
+def _categories_present(data: pl.DataFrame) -> list[tuple[str, str]]:
+    """Return (category, color) for every taxonomic_call present in ``data``.
+
+    Known categories follow the ``TAXONOMY_COLORS`` order; any other
+    category (e.g. Off-target) follows, sorted by name, in a fallback color.
+    """
+    if "taxonomic_call" not in data.columns or data.is_empty():
+        return []
+    present = {str(c) for c in data["taxonomic_call"].drop_nulls().unique().to_list()}
+    ordered = [c for c in TAXONOMY_COLORS if c in present]
+    ordered += sorted(present - set(TAXONOMY_COLORS))
+    return [(c, TAXONOMY_COLORS.get(c, "#808080")) for c in ordered]
+
+
 class NoveltyUncertaintyScatter(BasePlot):
     """
     2D scatter plot showing novelty vs uncertainty with points
@@ -77,8 +91,12 @@ class NoveltyUncertaintyScatter(BasePlot):
         """Create 2D scatter with classification regions."""
         import polars as pl
 
-        # Subsample if needed for performance
-        plot_data = subsample_dataframe(self.data, self.max_points)
+        # Subsample if needed for performance. Off-target rows carry
+        # placement_uncertainty=null and cannot be placed on this plot.
+        plot_data = subsample_dataframe(
+            self.data.drop_nulls(subset=["novelty_index", "placement_uncertainty"]),
+            self.max_points,
+        )
 
         fig = go.Figure()
 
@@ -91,12 +109,7 @@ class NoveltyUncertaintyScatter(BasePlot):
         use_toggle = self.enable_single_hit_toggle and has_ambiguous_hits_col
 
         # Add scatter traces for each classification category
-        categories = [
-            ("Known Species", TAXONOMY_COLORS["Known Species"]),
-            ("Novel Species", TAXONOMY_COLORS["Novel Species"]),
-            ("Novel Genus", TAXONOMY_COLORS["Novel Genus"]),
-            ("Conserved Region", TAXONOMY_COLORS["Conserved Region"]),
-        ]
+        categories = _categories_present(plot_data)
 
         # Track trace names for toggle functionality
         trace_names = []
@@ -239,8 +252,8 @@ class NoveltyUncertaintyScatter(BasePlot):
         )
 
         # Set axis ranges
-        max_novelty = max(30.0, cast(float, plot_data["novelty_index"].max()) * 1.1)
-        max_uncertainty = max(20.0, cast(float, plot_data["placement_uncertainty"].max()) * 1.1)
+        max_novelty = max(30.0, cast(float, plot_data["novelty_index"].max() or 0.0) * 1.1)
+        max_uncertainty = max(20.0, cast(float, plot_data["placement_uncertainty"].max() or 0.0) * 1.1)
 
         fig.update_xaxes(range=[0, max_novelty])
         fig.update_yaxes(range=[0, max_uncertainty])
@@ -366,12 +379,7 @@ class ConfidenceNoveltyScatter(BasePlot):
         use_toggle = self.enable_single_hit_toggle and has_ambiguous_hits_col
 
         # Add scatter traces for each classification category
-        categories = [
-            ("Known Species", TAXONOMY_COLORS["Known Species"]),
-            ("Novel Species", TAXONOMY_COLORS["Novel Species"]),
-            ("Novel Genus", TAXONOMY_COLORS["Novel Genus"]),
-            ("Conserved Region", TAXONOMY_COLORS["Conserved Region"]),
-        ]
+        categories = _categories_present(plot_data)
 
         # Track trace names for toggle functionality
         trace_names = []
@@ -527,7 +535,7 @@ class ConfidenceNoveltyScatter(BasePlot):
         )
 
         # Set axis ranges
-        max_novelty = max(30.0, cast(float, plot_data["novelty_index"].max()) * 1.1)
+        max_novelty = max(30.0, cast(float, plot_data["novelty_index"].max() or 0.0) * 1.1)
 
         fig.update_xaxes(range=[0, max_novelty])
         fig.update_yaxes(range=[0, 105])

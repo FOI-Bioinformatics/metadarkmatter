@@ -164,8 +164,17 @@ def _build_similarity_heatmap(
     # Extract genome names and matrix data
     matrix_cols = matrix.columns
     if "genome" in matrix_cols:
-        genome_accessions = matrix["genome"].to_list()
-        z_data = matrix.drop("genome").to_numpy()
+        genome_accessions = [str(g) for g in matrix["genome"].to_list()]
+        value_cols = [c for c in matrix_cols if c != "genome"]
+        if set(value_cols) == set(genome_accessions) and len(value_cols) == len(
+            genome_accessions
+        ):
+            # Index by label, not position: order columns to match the row
+            # labels so z[i][j] is ANI(row_i, row_j) regardless of the
+            # matrix's row order.
+            z_data = matrix.select(genome_accessions).to_numpy()
+        else:
+            z_data = matrix.drop("genome").to_numpy()
     else:
         genome_accessions = list(matrix_cols)
         z_data = matrix.to_numpy()

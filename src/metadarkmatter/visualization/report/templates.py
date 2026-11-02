@@ -592,9 +592,9 @@ TABLE_ROW_TEMPLATE: str = '''<tr class="data-row" data-class="{classification}">
     <td data-col="1">{best_match}</td>
     <td data-col="2" style="display:none;">{species}</td>
     <td data-col="3" style="display:none;">{genus}</td>
-    <td data-col="4">{identity:.2f}</td>
-    <td data-col="5">{novelty:.2f}</td>
-    <td data-col="6">{uncertainty:.2f}</td>
+    <td data-col="4">{identity}</td>
+    <td data-col="5">{novelty}</td>
+    <td data-col="6">{uncertainty}</td>
     <td data-col="7" style="display:none;">{ambiguous_hits}</td>
     <td data-col="8" style="display:none;">{identity_gap}</td>
     <td data-col="9" style="display:none;">{is_novel}</td>
@@ -1616,7 +1616,7 @@ PHYLOTREE_JS_TEMPLATE: str = '''
 
     // Check if D3.js loaded (vendored copy or CDN may be unavailable)
     if (typeof d3 === 'undefined') {{
-        var container = document.getElementById('phylogeny-tree');
+        var container = document.getElementById('phylogeny-container');
         if (container) {{
             container.innerHTML = '<p style="color:#666;padding:2em;">Phylogenetic tree requires D3.js. Run \\'metadarkmatter report vendor-d3\\' to embed D3 locally, or check your internet connection.</p>';
         }}
@@ -1809,12 +1809,22 @@ PHYLOTREE_JS_TEMPLATE: str = '''
                ' ' + d.target.y + ',' + d.target.x;
     }}
 
+    // Escape untrusted text (genome labels come from metadata species names)
+    function escapeHtml(value) {{
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }}
+
     // Tooltip display
     function showTooltip(event, d) {{
         if (!tooltip) return;
         var name = d.data.name || 'Internal node';
         var label = genomeLabels[name] || name;
-        var content = '<strong>' + label + '</strong>';
+        var content = '<strong>' + escapeHtml(label) + '</strong>';
         if (d.data.readCount) {{
             content += '<br>Reads: ' + d.data.readCount;
         }}
@@ -1825,7 +1835,7 @@ PHYLOTREE_JS_TEMPLATE: str = '''
             content += '<br>Confidence: ' + d.data.confidence.toFixed(0);
         }}
         if (d.data.nodeType && d.data.nodeType !== 'reference') {{
-            content += '<br>Type: ' + d.data.nodeType.replace(/_/g, ' ');
+            content += '<br>Type: ' + escapeHtml(d.data.nodeType.replace(/_/g, ' '));
         }}
         if (d.data._children) {{
             content += '<br><em>' + countDescendants(d.data) + ' nodes collapsed</em>';

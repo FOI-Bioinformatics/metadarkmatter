@@ -8,6 +8,7 @@ and cluster quality scatter plots.
 
 from __future__ import annotations
 
+import html
 import logging
 from typing import TYPE_CHECKING
 
@@ -287,6 +288,11 @@ PHYLOGENETIC_HEATMAP_INTRO_TEMPLATE: str = '''
 # Builder Functions
 # =============================================================================
 
+def _esc(value: object) -> str:
+    """HTML-escape a value (metadata species/genus names are untrusted)."""
+    return html.escape(str(value))
+
+
 def build_novel_summary_html(summary: NovelDiversitySummary) -> str:
     """
     Build the summary metrics HTML section.
@@ -326,8 +332,8 @@ def _build_neighborhood_panel(cluster: NovelCluster) -> str:
     genera_rows_parts: list[str] = []
     for gd in nbr.nearest_genera:
         genera_rows_parts.append(
-            f"<tr><td>{gd.genus}</td>"
-            f"<td><code>{gd.representative_genome}</code></td>"
+            f"<tr><td>{_esc(gd.genus)}</td>"
+            f"<td><code>{_esc(gd.representative_genome)}</code></td>"
             f"<td>{gd.estimated_ani:.1f}%</td>"
             f"<td>{gd.num_genomes_in_genus}</td></tr>"
         )
@@ -344,7 +350,7 @@ def _build_neighborhood_panel(cluster: NovelCluster) -> str:
     )
 
     return NEIGHBORHOOD_PANEL_TEMPLATE.format(
-        cluster_id=cluster.cluster_id,
+        cluster_id=_esc(cluster.cluster_id),
         genera_rows=genera_rows,
         isolation_score=f"{nbr.isolation_score:.1f}%",
         neighborhood_density=nbr.neighborhood_density,
@@ -400,19 +406,19 @@ def build_cluster_table_html(clusters: list[NovelCluster]) -> str:
             support_class = ""
 
         row = NOVEL_CLUSTER_ROW_TEMPLATE.format(
-            cluster_id=cluster.cluster_id,
-            taxonomic_call=cluster.taxonomic_call,
+            cluster_id=_esc(cluster.cluster_id),
+            taxonomic_call=_esc(cluster.taxonomic_call),
             type_class=type_class,
             read_count=cluster.read_count,
-            closest_taxon=cluster.closest_known_taxon,
-            full_taxonomy=full_taxonomy,
-            phylogenetic_context=cluster.phylogenetic_context,
+            closest_taxon=_esc(cluster.closest_known_taxon),
+            full_taxonomy=_esc(full_taxonomy),
+            phylogenetic_context=_esc(cluster.phylogenetic_context),
             estimated_ani=cluster.estimated_ani,
             mean_uncertainty=cluster.mean_placement_uncertainty,
-            confidence=cluster.confidence,
-            confidence_class=confidence_class,
-            suggested_name=cluster.suggested_name,
-            neighborhood_context=neighborhood_context,
+            confidence=_esc(cluster.confidence),
+            confidence_class=_esc(confidence_class),
+            suggested_name=_esc(cluster.suggested_name),
+            neighborhood_context=_esc(neighborhood_context),
             placement_support=placement_support,
             support_class=support_class,
         )
@@ -444,11 +450,11 @@ def build_phylogenetic_context_html(clusters: list[NovelCluster]) -> str:
         type_class = "type-species" if cluster.taxonomic_call == "Novel Species" else "type-genus"
 
         item = NOVEL_PHYLO_ITEM_TEMPLATE.format(
-            cluster_id=cluster.cluster_id,
-            suggested_name=cluster.suggested_name,
-            phylogenetic_context=cluster.phylogenetic_context,
+            cluster_id=_esc(cluster.cluster_id),
+            suggested_name=_esc(cluster.suggested_name),
+            phylogenetic_context=_esc(cluster.phylogenetic_context),
             estimated_ani=cluster.estimated_ani,
-            closest_taxon=cluster.closest_known_taxon,
+            closest_taxon=_esc(cluster.closest_known_taxon),
             type_class=type_class,
         )
         items.append(item)

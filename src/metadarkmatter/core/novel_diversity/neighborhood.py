@@ -92,7 +92,7 @@ class PhylogeneticNeighborhoodAnalyzer:
 
         # Step 1 -- estimate ANI from cluster to every reference genome
         estimated: dict[str, float] = {}
-        for genome in self._ani_matrix.genomes:
+        for genome in sorted(self._ani_matrix.genomes):
             if genome == nearest_genome:
                 estimated[genome] = nearest_ani
             else:
@@ -106,13 +106,14 @@ class PhylogeneticNeighborhoodAnalyzer:
 
         # Step 2 -- group by genus and take the best ANI per genus
         genus_genomes: dict[str, list[str]] = {}
-        for genome in self._ani_matrix.genomes:
+        for genome in sorted(self._ani_matrix.genomes):
             genus = genus_map.get(genome, "Unknown")
             genus_genomes.setdefault(genus, []).append(genome)
 
         genus_distances: list[GenusDistance] = []
-        for genus, members in genus_genomes.items():
-            best_genome = max(members, key=lambda g: estimated[g])
+        for genus, members in sorted(genus_genomes.items()):
+            # Total-order tiebreak: highest ANI, then lexicographically smallest.
+            best_genome = min(members, key=lambda g: (-estimated[g], g))
             best_ani = estimated[best_genome]
             genus_distances.append(
                 GenusDistance(
@@ -123,7 +124,7 @@ class PhylogeneticNeighborhoodAnalyzer:
                 )
             )
 
-        genus_distances.sort(key=lambda gd: gd.estimated_ani, reverse=True)
+        genus_distances.sort(key=lambda gd: (-gd.estimated_ani, gd.genus))
         nearest_genera = genus_distances[:_MAX_NEAREST_GENERA]
 
         # Step 3 -- isolation score

@@ -7,6 +7,7 @@ enabling cross-sample analysis of microbial diversity patterns.
 
 from __future__ import annotations
 
+import html
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -322,7 +323,7 @@ class MultiSampleReportGenerator:
             plotly_cdn_script = ""
 
         return MULTI_REPORT_TEMPLATE.format(
-            title=self.config.title,
+            title=html.escape(self.config.title),
             num_samples=len(self.sample_data),
             total_reads=format_count(total_reads),
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -338,7 +339,7 @@ class MultiSampleReportGenerator:
         rows = []
         for name, summary in self.summaries.items():
             rows.append(SAMPLE_ROW_TEMPLATE.format(
-                name=name,
+                name=html.escape(str(name)),
                 total=format_count(summary["total_reads"]),
                 known=format_count(summary["known_species"]),
                 novel_sp=format_count(summary["novel_species"]),

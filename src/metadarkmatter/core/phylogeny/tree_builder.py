@@ -30,6 +30,20 @@ class TreeMethod(StrEnum):
     MASHTREE = "mashtree"
 
 
+def _align_rows_to_columns(ani_matrix: pd.DataFrame) -> pd.DataFrame:
+    """Reorder rows to match column order (label-based, not positional).
+
+    When the row index carries the same genome labels as the columns, the
+    matrix is re-indexed as ``ani.loc[cols, cols]`` so a different row order
+    cannot silently pair the wrong distances with the wrong names. Matrices
+    without a matching row index are returned unchanged.
+    """
+    cols = list(ani_matrix.columns)
+    if set(ani_matrix.index) == set(cols) and len(ani_matrix.index) == len(cols):
+        return ani_matrix.loc[cols, cols]
+    return ani_matrix
+
+
 def _to_lower_triangular(matrix: pd.DataFrame) -> list[list[float]]:
     """Convert symmetric matrix to lower triangular list format for BioPython.
 
@@ -79,6 +93,8 @@ def ani_to_newick(ani_matrix: pd.DataFrame) -> str | None:
                 f"Too few genomes for phylogenetic tree (need >= 3). Got {len(ani_matrix)}."
             )
         return None
+
+    ani_matrix = _align_rows_to_columns(ani_matrix)
 
     # Convert ANI (similarity) to distance: distance = 100 - ANI
     distance_matrix = 100 - ani_matrix
@@ -145,6 +161,7 @@ def ani_to_upgma(ani_matrix: pd.DataFrame) -> str | None:
             )
         return None
 
+    ani_matrix = _align_rows_to_columns(ani_matrix)
     distance_matrix = 100 - ani_matrix
     distance_matrix = distance_matrix.clip(lower=0, upper=50)
 

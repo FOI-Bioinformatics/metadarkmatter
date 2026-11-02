@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import html
 import logging
 from typing import TYPE_CHECKING
 
@@ -334,6 +335,7 @@ class SummaryMixin(_ReportBase):
             ("Novel Genus", s.novel_genus, "novel-genus"),
             ("Species Boundary", s.species_boundary, "species-boundary"),
             ("Ambiguous", s.ambiguous, "ambiguous"),
+            ("Ambiguous Within Genus", s.ambiguous_within_genus, "ambiguous-wg"),
             ("Conserved", s.conserved_regions, "conserved"),
             ("Unclassified", s.unclassified, "unclassified"),
         ]
@@ -383,7 +385,7 @@ class SummaryMixin(_ReportBase):
         species_counts = (
             base_df.group_by("species")
             .len()
-            .sort("len", descending=True)
+            .sort(["len", "species"], descending=[True, False], nulls_last=True)
             .head(8)
         )
 
@@ -393,7 +395,7 @@ class SummaryMixin(_ReportBase):
         rows = []
         for row in species_counts.iter_rows(named=True):
             rows.append(TOP_SPECIES_ROW_TEMPLATE.format(
-                species=row["species"],
+                species=html.escape(str(row["species"])),
                 count=f'{row["len"]:,}',
                 pct=row["len"] / total * 100,
             ))
@@ -422,7 +424,7 @@ class SummaryMixin(_ReportBase):
             species_counts = (
                 enriched_df.group_by("species")
                 .len()
-                .sort("len", descending=True)
+                .sort(["len", "species"], descending=[True, False], nulls_last=True)
             )
             if len(species_counts) > 0:
                 top_sp = species_counts["species"][0]
@@ -431,7 +433,7 @@ class SummaryMixin(_ReportBase):
                 cards.append(OVERVIEW_FINDING_CARD_TEMPLATE.format(
                     card_class="species",
                     icon="S",
-                    headline=f"Dominant species: {top_sp}",
+                    headline=f"Dominant species: {html.escape(str(top_sp))}",
                     detail=f"{top_pct:.0f}% of reads ({top_count:,})",
                     link="",
                 ))

@@ -47,6 +47,52 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Numeric classification columns. When every value in such a column is
+# null (empty CSV, or all-Off-target output where placement_uncertainty and
+# the posteriors are null) polars infers String, which breaks numeric
+# comparisons/aggregations downstream.
+_NUMERIC_COLUMNS: frozenset[str] = frozenset({
+    "top_hit_identity",
+    "novelty_index",
+    "placement_uncertainty",
+    "genus_uncertainty",
+    "num_ambiguous_hits",
+    "second_hit_identity",
+    "identity_gap",
+    "confidence_score",
+    "posterior_entropy",
+    "inferred_uncertainty",
+    "alignment_quality",
+    "identity_confidence",
+    "placement_confidence",
+    "discovery_score",
+    "family_bitscore_ratio",
+    "family_identity_gap",
+    "in_family_hit_fraction",
+    "external_best_identity",
+    "in_family_identity",
+    "in_family_novelty_index",
+})
+_BOOLEAN_COLUMNS: frozenset[str] = frozenset({"is_novel", "low_confidence"})
+
+
+def _coerce_classification_dtypes(df: pl.DataFrame) -> pl.DataFrame:
+    """Cast String-typed numeric/boolean columns to proper dtypes (strict=False)."""
+    exprs: list[pl.Expr] = []
+    for name, dtype in df.schema.items():
+        if dtype not in (pl.String, pl.Null):
+            continue
+        if name in _NUMERIC_COLUMNS or name.startswith("p_"):
+            exprs.append(pl.col(name).cast(pl.Float64, strict=False))
+        elif name in _BOOLEAN_COLUMNS:
+            exprs.append(
+                pl.col(name).cast(pl.String).str.to_lowercase().replace_strict(
+                    {"true": True, "false": False}, default=None,
+                    return_dtype=pl.Boolean,
+                )
+            )
+    return df.with_columns(exprs) if exprs else df
+
 # Version for report footer
 try:
     from metadarkmatter import __version__
@@ -102,7 +148,7 @@ class ReportGenerator(
             aai_matrix: Optional AAI matrix for genus-level heatmap
             genome_metadata: Optional genome metadata for species-level aggregation
         """
-        self.df = classifications
+        self.df = _coerce_classification_dtypes(classifications)
         self.config = config or ReportConfig()
         self.recruitment_data = recruitment_data
         self.ani_matrix = ani_matrix

@@ -20,6 +20,12 @@ if TYPE_CHECKING:
     import polars as pl
 
 
+def _non_null_values(data: pl.DataFrame, column: str) -> list[float]:
+    """Return non-null values of ``column`` (e.g. Off-target rows carry
+    ``placement_uncertainty=null``, which would break min()/max())."""
+    return [v for v in data[column].to_list() if v is not None]
+
+
 class NoveltyHistogram(BasePlot):
     """
     Histogram showing distribution of novelty index values.
@@ -62,7 +68,7 @@ class NoveltyHistogram(BasePlot):
 
     def create_figure(self) -> go.Figure:
         """Create novelty index histogram with classification thresholds."""
-        novelty_values = self.data["novelty_index"].to_list()
+        novelty_values = _non_null_values(self.data, "novelty_index")
 
         fig = go.Figure()
 
@@ -128,7 +134,7 @@ class NoveltyHistogram(BasePlot):
             **self.config.to_layout_dict(self.title),
         )
 
-        fig.update_xaxes(range=[0, max(30, max(novelty_values) * 1.1)])
+        fig.update_xaxes(range=[0, max(30, max(novelty_values, default=0.0) * 1.1)])
 
         return self._apply_config(fig)
 
@@ -174,7 +180,7 @@ class UncertaintyHistogram(BasePlot):
 
     def create_figure(self) -> go.Figure:
         """Create placement uncertainty histogram with thresholds."""
-        uncertainty_values = self.data["placement_uncertainty"].to_list()
+        uncertainty_values = _non_null_values(self.data, "placement_uncertainty")
 
         fig = go.Figure()
 
@@ -235,7 +241,7 @@ class UncertaintyHistogram(BasePlot):
             **self.config.to_layout_dict(self.title),
         )
 
-        fig.update_xaxes(range=[0, max(20, max(uncertainty_values) * 1.1)])
+        fig.update_xaxes(range=[0, max(20, max(uncertainty_values, default=0.0) * 1.1)])
 
         return self._apply_config(fig)
 
@@ -276,7 +282,7 @@ class IdentityHistogram(BasePlot):
 
     def create_figure(self) -> go.Figure:
         """Create identity histogram with classification regions."""
-        identity_values = self.data["top_hit_identity"].to_list()
+        identity_values = _non_null_values(self.data, "top_hit_identity")
 
         fig = go.Figure()
 
@@ -331,7 +337,7 @@ class IdentityHistogram(BasePlot):
             **self.config.to_layout_dict(self.title),
         )
 
-        fig.update_xaxes(range=[min(70, min(identity_values) - 5), 100])
+        fig.update_xaxes(range=[min(70, min(identity_values, default=100.0) - 5), 100])
 
         return self._apply_config(fig)
 
@@ -370,8 +376,8 @@ class CombinedDistributionPlot(BasePlot):
         """Create combined novelty and uncertainty histograms."""
         from plotly.subplots import make_subplots
 
-        novelty_values = self.data["novelty_index"].to_list()
-        uncertainty_values = self.data["placement_uncertainty"].to_list()
+        novelty_values = _non_null_values(self.data, "novelty_index")
+        uncertainty_values = _non_null_values(self.data, "placement_uncertainty")
 
         fig = make_subplots(
             rows=1,
