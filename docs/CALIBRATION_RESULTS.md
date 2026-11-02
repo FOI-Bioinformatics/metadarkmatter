@@ -76,7 +76,8 @@ Three pieces of evidence point to the same explanation:
 
 ## Decisions
 
-1. **Raise ``--min-samples``.** The current default of 100 admits
+1. **Raise ``--min-samples``.** The default at the time (100; since
+   raised to 5000, see the v2 follow-up below) admits
    fits on cohorts where overfitting dominates. Raise to 5000 or
    higher; under-supported categories should fall through to
    hand-tuned defaults.

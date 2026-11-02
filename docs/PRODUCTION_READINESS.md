@@ -21,7 +21,7 @@ calibration validation experiment.
 | Documentation | 6 | 9 | STATISTICAL_ASSUMPTIONS, CALIBRATION, CALIBRATION_RESULTS, EXTERNAL_TOOLS, Containerfile recipe, PRODUCTION_READINESS (this doc). |
 | Reproducibility | 4 | 9 | `uv.lock`, Containerfile, `METADARKMATTER_SEED`, byte-equal determinism integration test, `run_pipeline.sh`, pandas dep gap closed. |
 | CI/CD | 2 | 7 | GitHub Actions with `uv sync --frozen` + ruff + mypy + pytest. No release automation (out of scope for internal use). |
-| Robustness / error handling | 6 | 9 | XSS escape, NaN guards, subprocess timeouts, BAM corruption tolerated, duplicate contig IDs raise, FASTA/FASTQ validators. |
+| Robustness / error handling | 6 | 9 | XSS escape, NaN guards, subprocess timeouts (opt-in since PR #13; no default timeout), BAM corruption tolerated, duplicate contig IDs raise, FASTA/FASTQ validators. |
 | Performance | 7 | 8 | Streaming with configurable chunk size, fastANI batching, GTDB caching, dc-megablast option. No CI benchmark suite. |
 | Security | 7 | 9 | SRI for CDN, no `shell=True`, YAML safe_load, path validation, XSS escapes. |
 
@@ -129,7 +129,7 @@ Everything else under `strict = true` is enforced. The enforced set
 
 ## What's still open
 
-Three follow-up items, all bounded:
+Follow-up items, all bounded:
 
 1. **Recalibrate against per-read labels on a larger corpus.** The
    ``--label-mode per_read`` machinery is in place but has only been
@@ -147,6 +147,25 @@ Three follow-up items, all bounded:
    ``core/classification/bayesian.py`` is documented as a potential
    extension; whether to implement depends on whether per-read
    labelling changes the picture.
+
+4. **Reconcile the Bayesian call with the documented thresholds.**
+   A post-PR #13 re-check (2026-11) found that the MAP boundaries of
+   the default Gaussians differ from the hard thresholds (Known ->
+   Novel Species at N ~ 6.2% instead of 4%; Species Boundary from U
+   ~ 3.8% instead of 1.5% at N = 1%), and that `taxonomic_call` does
+   not use the inferred uncertainty of single-hit reads, so
+   `single_hit_uncertainty_threshold` affects only `legacy_call`.
+   This is documented in `docs/METHODS.md` section 2.5; whether to
+   change the parameterisation is a scientific decision that needs a
+   validation run, not a documentation fix.
+
+5. **Smaller classifier issues found in the same re-check**
+   (documented, not changed): `score classify --aai` loads the AAI
+   matrix but the CLI classifier does not use it; `ambiguity_scope`
+   is labelled `across_genera` when a competing genome contributes
+   more than one hit in the bitscore window;
+   `ScoringConfig.confidence_threshold` (used by the
+   `literature-strict` preset) has no effect on the output.
 
 Out of scope by user direction:
 

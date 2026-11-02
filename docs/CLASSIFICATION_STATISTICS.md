@@ -6,6 +6,8 @@ This document describes the statistical metrics and classification thresholds us
 
 **For step-by-step algorithm explanation with ANI/AAI matrix usage, see [ALGORITHM_DETAILED.md](ALGORITHM_DETAILED.md).**
 
+**Scope of the thresholds.** The thresholds in this document define the hard-threshold cascade that is reported as `legacy_call`. The primary `taxonomic_call` is the maximum a posteriori category of a six-category Bayesian model whose Gaussians are derived from these thresholds; its decision boundaries are close to, but not the same as, the thresholds (for example Known -> Novel Species at N ~ 6.2% rather than 4%, and no use of the inferred uncertainty for single-hit reads). See [METHODS.md](METHODS.md) sections 2.5 and 10.
+
 ## Core Metrics
 
 ### Novelty Index (N)
@@ -16,7 +18,7 @@ This document describes the statistical metrics and classification thresholds us
 N = 100 - pident
 ```
 
-Where `pident` is the percent identity of the best BLAST hit (highest bitscore).
+Where `pident` is the percent identity of the best hit (highest coverage-weighted bitscore; ties broken by higher `pident`, then accession).
 
 | Novelty Index | BLAST Identity | Interpretation |
 |---------------|----------------|----------------|
@@ -30,13 +32,16 @@ Where `pident` is the percent identity of the best BLAST hit (highest bitscore).
 **Definition:** Measures placement ambiguity when a read matches multiple genomes with similar scores.
 
 ```
-U = 100 - max(ANI(G_top, G_i)) for all G_i in ambiguous hit set
+U = 100 - ANI(G_top, G_2)                                   (default, --uncertainty-mode second)
+U = 100 - max(ANI(G_top, G_i)) for all G_i in the set      (--uncertainty-mode max)
 ```
 
 Where:
-- `G_top` = genome with highest bitscore hit
-- Ambiguous hit set = genomes with bitscore >= 95% of top bitscore
+- `G_top` = genome of the best hit
+- Ambiguous hit set = hits with coverage-weighted bitscore >= 95% of the top weighted bitscore; genomes are collapsed to their species representatives
+- `G_2` = the highest-ranked competing representative (same ordering as best-hit selection)
 - ANI = Average Nucleotide Identity between genome pairs
+- U = 0 when there is no competing representative (single-hit reads)
 
 | Uncertainty | ANI Between Competitors | Interpretation |
 |-------------|------------------------|----------------|
@@ -52,15 +57,17 @@ The two metrics create a 2D classification space:
 Uncertainty (U)
      ^
      |
- 5%+ |  [Conserved Region]   [Conserved Region]   [Conserved Region]
+ 5%+ |  [Ambiguous, or Conserved Region when hits span genera]
      |
-1.5-5|  [Ambiguous]          [Ambiguous]          [Ambiguous]
+1.5-5|  [Species Boundary]   [Species Boundary]   [Species Boundary]
      |
- <1.5%|  [Known Species]      [Novel Species]      [Novel Genus]
+ <1.5%|  [Known Species]      [Novel Species]      [Novel Genus]      [Unclassified]
      |
-     +------------------------------------------------------> Novelty (N)
+     +------------------------------------------------------------------> Novelty (N)
          0%    4%           20%           25%
 ```
+
+This is the layout of `legacy_call`. In addition, reads with an identity gap < 2% and more than one competing hit, and single-hit reads with N >= 7%, are Ambiguous in `legacy_call` regardless of their position in the diagram.
 
 ## Classification Categories
 
@@ -79,15 +86,24 @@ Uncertainty (U)
 - **Meaning:** High divergence (75-80% identity) with confident placement
 - **Biological interpretation:** Potential novel genus - substantial divergence suggesting higher taxonomic novelty
 
-### Ambiguous
+### Species Boundary
 - **Criteria:** 1.5% <= U < 5% (regardless of N)
 - **Meaning:** Read matches multiple genomes that share 95-98.5% ANI (species boundary zone)
 - **Biological interpretation:** Cannot confidently assign to a single species; may be shared gene or recent divergence
 
+### Ambiguous
+- **Criteria:** U >= 5% with competitors in the same genus; or identity gap < 2% with more than one competing hit; or (legacy only) a single hit with N >= 7%
+- **Meaning:** Read matches multiple genomes that share <95% ANI, or competing hits cannot be separated by identity
+- **Biological interpretation:** Placement cannot be resolved from the available references
+
 ### Conserved Region
-- **Criteria:** U >= 5% (regardless of N)
-- **Meaning:** Read matches multiple genomes that share <95% ANI (different species)
+- **Criteria:** U >= 5% AND the competing hits span genera (`ambiguity_scope = across_genera`)
+- **Meaning:** Read matches genomes from different genera with similar scores
 - **Biological interpretation:** Likely a conserved gene (16S rRNA, housekeeping genes) present across distantly related genomes
+
+### Ambiguous Within Genus
+- **Criteria:** (Bayesian `taxonomic_call` only) MAP category Novel Genus with genus uncertainty >= 10% and at least one competing genome
+- **Meaning:** Genus-level divergence, but the competing hits are to species with low mutual ANI
 
 ### Unclassified
 - **Criteria:** Does not fit any above category
@@ -96,18 +112,24 @@ Uncertainty (U)
 
 ## Decision Tree
 
+Legacy cascade (`legacy_call`), rules in evaluation order:
+
 ```
 START: Read with BLAST hits
          |
          v
-    Calculate N and U
+    Calculate N, U, identity gap
          |
          v
-   Is U >= 5%? ----YES----> CONSERVED REGION
+   Identity gap < 2% and > 1 hit? --YES--> AMBIGUOUS
          |
         NO
          v
-   Is 1.5% <= U < 5%? --YES--> AMBIGUOUS
+   Is U >= 5%? ----YES----> CONSERVED REGION (hits span genera) or AMBIGUOUS
+         |
+        NO
+         v
+   Is 1.5% <= U < 5%? --YES--> SPECIES BOUNDARY
          |
         NO (U < 1.5%)
          v
@@ -115,11 +137,15 @@ START: Read with BLAST hits
          |
         NO
          v
+   Single hit and N >= 7%? --YES--> AMBIGUOUS
+         |
+        NO
+         v
    Is 4% <= N < 20%? --YES--> NOVEL SPECIES
          |
         NO
          v
-   Is 20% <= N <= 25%? --YES--> NOVEL GENUS
+   Is 20% <= N <= 25% (and genus uncertainty < 10%)? --YES--> NOVEL GENUS
          |
         NO
          v
@@ -160,7 +186,7 @@ metadarkmatter's methods are designed to align with the Genome Taxonomy Database
 |--------|------|----------------|---------------|
 | Species boundary | 95% ANI | 96% pident (N < 4%) | **Aligned** |
 | Method | Genome-to-genome (FastANI) | Read-to-genome (BLAST pident) | Different scope |
-| Alignment fraction | Requires AF >= 50% | Configurable (default 0%) | **Optional filter** |
+| Alignment fraction | Requires AF >= 50% | Configurable (default 30%) | **Optional filter** |
 | Rank normalization | RED (phylogenetic) | ANI-based clustering | Similar concept |
 | Higher ranks | Phylogenetic trees | ANI-based genus clustering | Simplified approach |
 
@@ -188,13 +214,17 @@ metadarkmatter score classify --alignment results.tsv --ani ani.csv \
     --preset gtdb-strict --output classifications.csv
 ```
 
-| Preset | Species Boundary | Alignment Fraction | Use Case |
-|--------|------------------|-------------------|----------|
-| `gtdb-strict` | 95% ANI | >= 50% | Publication-quality, GTDB-compatible |
-| `gtdb-relaxed` | 97% ANI | >= 30% | Exploratory, allows close relatives |
-| `conservative` | 96% ANI | None | Balanced, stricter uncertainty |
-| `literature-strict` | 96% ANI | >= 50% | Literature-backed, high confidence required |
-| `default` | 95% ANI | None | Standard metadarkmatter defaults |
+| Preset | Known Species (N <) | Novel Species N range | Novel Genus N range | Alignment Fraction | Other |
+|--------|------|------|------|------|------|
+| `default` | 4% (96% identity) | 4-20% | 20-25% | >= 30% | Package defaults |
+| `gtdb-strict` | 5% (95%) | 5-15% | 15-22% | >= 50% | min length 100 bp |
+| `gtdb-relaxed` | 3% (97%) | 3-15% | 15-25% | >= 30% | min length 50 bp |
+| `conservative` | 4% (96%) | 4-15% | 15-25% | >= 30% | min length 100 bp |
+| `literature-strict` | 4% (96%) | 4-15% | 15-22% | >= 50% | `confidence_threshold = 60` |
+| `coverage-strict` | 4% (96%) | 4-15% | 15-25% | >= 30% | sigmoid coverage weighting, strength 0.7 |
+| `adaptive` | 4% (96%) | 4-20% | 20-25% | >= 30% | intended for use with `--adaptive-thresholds` |
+
+Presets change the thresholds and therefore both `legacy_call` and the Bayesian Gaussian parameters. Uncertainty thresholds are the defaults (1.5% / 5%) in every preset. Presets do not apply in protein mode, which uses fixed protein thresholds (`--alignment-mode protein`). Flags passed explicitly on the command line take precedence over the preset.
 
 ### Literature-Strict Preset
 
@@ -208,8 +238,9 @@ metadarkmatter score classify --alignment results.tsv --ani ani.csv \
 **Key parameters:**
 - **96% ANI species boundary** (4% novelty): Stricter than GTDB's 95%
 - **1.5% uncertainty threshold**: Requires 98.5% ANI between competing genomes
-- **60% confidence threshold**: Higher confidence required for classification
+- **60% confidence threshold**: `ScoringConfig.confidence_threshold`; this field is currently not used by the CLI classifier (`low_confidence` is based on posterior entropy), so it has no effect on the output
 - **50% alignment fraction**: GTDB-compatible alignment quality requirement
+- **15% novelty max for novel species** (85% identity)
 - **22% novelty max for genus**: ~78% identity, more conservative genus boundary
 
 **Literature basis:**
@@ -221,38 +252,22 @@ metadarkmatter score classify --alignment results.tsv --ani ani.csv \
 
 ### Confidence Score (0-100)
 
-The confidence score integrates multiple quality factors to quantify classification reliability without changing the classification category itself.
+`confidence_score` is derived from the posterior entropy H of the Bayesian model:
 
 ```
-confidence_score = margin_score + placement_certainty + alignment_quality
+confidence_score = (1 - H / log2(6)) * 100
 ```
 
-**Components:**
+H = 0 (all posterior mass on one category) gives 100; a uniform posterior over the six categories (H = log2(6) ~ 2.585) gives 0. Reads with H > 1.5 (confidence_score below ~42) are flagged `low_confidence`. Off-target reads have a fixed confidence_score of 10.0.
 
-1. **Margin from threshold boundaries (0-40 pts)**: The further a classification falls from decision thresholds, the more confident the call.
-   - Known Species: Distance from 4% novelty boundary
-   - Novel Species: Minimum distance from both 5% and 20% novelty boundaries
-   - Novel Genus: Minimum distance from both 20% and 25% boundaries
-   - Ambiguous/Unclassified: Base score of 10 pts
+The score measures how clearly one category dominates the posterior, not the probability that the call is correct; the posteriors are not calibrated against labelled data ([STATISTICAL_ASSUMPTIONS.md](STATISTICAL_ASSUMPTIONS.md), sections 4 and 10). A read deep inside the Ambiguous Gaussian can have confidence_score = 100 while its taxonomic placement is unresolved.
 
-2. **Placement certainty (0-40 pts)**: Based on hit count and identity gap to secondary genomes
-   - Hit count: 1 hit = 20 pts, 2-3 hits = 15 pts, 4-5 hits = 10 pts, 6-10 hits = 5 pts
-   - Identity gap: >= 5% = 20 pts, >= 2% = 15 pts, >= 1% = 10 pts, >= 0.5% = 5 pts
+**Example values** (default configuration, recomputed with the current code):
+- N = 1.5%, U = 0.8%, 3 hits, identity gap 2.5%: Known Species, confidence_score 76.3
+- N = 8.8%, U = 1.2%, 4 hits, identity gap 3.0%: Novel Species, confidence_score 49.3
+- N = 3.8%, U = 1.4%, identity gap 5%: Known Species, confidence_score 57.0 (near the Known/Species Boundary/Novel Species overlap)
 
-3. **Alignment quality proxy (0-20 pts)**: Derived from top hit identity
-   - Scaled linearly from 70% (0 pts) to 95%+ (20 pts)
-
-| Score Range | Interpretation | Action |
-|-------------|----------------|--------|
-| 80-100 | High confidence | Suitable for publication |
-| 60-79 | Moderate confidence | Review recommended |
-| 40-59 | Low confidence | Manual verification needed |
-| < 40 | Very low confidence | Treat with caution |
-
-**Example confidence scenarios:**
-- Read at 98% identity, single hit, 2% novelty margin: ~90 (high)
-- Read at 88% identity, 3 hits, 5% from boundaries: ~75 (moderate)
-- Read at 95.1% identity, 5 hits, 0.1% from boundary: ~35 (low, borderline)
+An earlier multi-factor score (margin from thresholds + hit count/identity gap + identity) is still defined in `core/constants.py` (`calculate_confidence_score`) but is not used to produce output ([METHODS.md](METHODS.md) section 3.1).
 
 ### Phylogenetic Context Metrics
 
@@ -266,48 +281,63 @@ confidence_score = margin_score + placement_certainty + alignment_quality
 - `within_genus`: All secondary hits share >= 80% ANI with best hit
 - `across_genera`: Hits span multiple genera
 
-**Number of competing genera**: Count of secondary genomes from different genera
+**Number of competing genera**: Count of secondary genomes from different genera (computed internally; not written to the output file)
+
+**Known issue:** `ambiguity_scope` compares hit counts with the number of distinct secondary representatives, so a competing genome with two hits in the bitscore window is labelled `across_genera` even at high ANI ([METHODS.md](METHODS.md) section 2.2).
 
 ### Example Output with New Metrics
 
+Selected columns (the full output also contains `second_hit_identity`, `identity_gap`, `diversity_status`, `low_confidence`, the six posterior columns, `posterior_entropy`, `inferred_uncertainty` and `uncertainty_type`); values recomputed with the default configuration:
+
 ```
 read_id,best_match_genome,top_hit_identity,novelty_index,placement_uncertainty,
-genus_uncertainty,ambiguity_scope,num_ambiguous_hits,num_competing_genera,
-confidence_score,taxonomic_call,is_novel
+genus_uncertainty,ambiguity_scope,num_ambiguous_hits,
+confidence_score,taxonomic_call,legacy_call,is_novel
 
-read001,GCF_000195955.2,98.5,1.5,0.8,0.8,within_species,3,0,87.2,Known Species,false
-read002,GCF_000008985.1,91.2,8.8,1.2,15.5,within_genus,4,0,72.1,Novel Species,true
-read003,GCF_000123456.1,99.1,0.9,17.7,28.3,across_genera,6,2,45.8,Conserved Region,false
+read001,GCF_000195955.2,98.5,1.5,0.8,0.8,within_species,3,76.3,Known Species,Known Species,false
+read002,GCF_000008985.1,91.2,8.8,1.2,15.5,within_genus,4,49.3,Novel Species,Novel Species,true
+read003,GCF_000123456.1,99.1,0.9,22.3,28.3,across_genera,6,100.0,Conserved Region,Ambiguous,false
 ```
 
+(read001 and read002 assume identity gaps of 2.5% and 3.0%; read003 has an identity gap of 0.2%, which makes `legacy_call` Ambiguous before the Conserved Region rule is reached.)
+
 ## Worked Examples
+
+Calls were recomputed with the default configuration (`taxonomic_call` from the Bayesian model, `legacy_call` from the cascade). "Second hit" is the best hit to a different genome, within 95% of the top bitscore.
 
 ### Example 1: Known Bacterium
 ```
 Read: ERR123456.1
 Best hit: GCF_000123456 at 97.5% identity
-Second hit: GCF_000789012 at 96.8% identity (bitscore within 95%)
+Second hit: GCF_000789012 at 95.3% identity (bitscore within 95%)
 ANI(GCF_000123456, GCF_000789012) = 99.2%
 
 N = 100 - 97.5 = 2.5% (< 4%)
 U = 100 - 99.2 = 0.8% (< 1.5%)
+Identity gap = 2.2%
 
-Classification: KNOWN SPECIES
-Interpretation: Matches E. coli strains K-12 and BL21
+taxonomic_call: KNOWN SPECIES (p_known = 0.863, confidence_score = 71.9)
+legacy_call:    KNOWN SPECIES
+Interpretation: Matches two strains of the same species
 ```
+
+With a second hit at 96.8% (gap 0.7%), `legacy_call` would be Ambiguous (identity-gap rule) while `taxonomic_call` stays Known Species.
 
 ### Example 2: Potential Novel Species
 ```
 Read: ERR789012.1
 Best hit: GCF_000234567 at 91.2% identity
-Second hit: GCF_000345678 at 90.5% identity
+Second hit: GCF_000345678 at 89.0% identity
 ANI(GCF_000234567, GCF_000345678) = 99.0%
 
 N = 100 - 91.2 = 8.8% (4-20%)
 U = 100 - 99.0 = 1.0% (< 1.5%)
+Identity gap = 2.2%
 
-Classification: NOVEL SPECIES
-Interpretation: Divergent from known Pseudomonas, but placement is confident
+taxonomic_call: NOVEL SPECIES (p_novel_species = 0.692, p_species_boundary = 0.213,
+                confidence_score = 51.3)
+legacy_call:    NOVEL SPECIES
+Interpretation: Divergent from the known references, but placement is confident
 ```
 
 ### Example 3: Conserved Gene
@@ -315,39 +345,53 @@ Interpretation: Divergent from known Pseudomonas, but placement is confident
 Read: ERR345678.1
 Best hit: GCF_000456789 at 99.1% identity
 Second hit: GCF_000567890 at 98.9% identity
-ANI(GCF_000456789, GCF_000567890) = 82.3%
+ANI(GCF_000456789, GCF_000567890) = 77.7%  (< 80%: different genera)
 
 N = 100 - 99.1 = 0.9% (< 4%)
-U = 100 - 82.3 = 17.7% (>= 5%)
+U = 100 - 77.7 = 22.3% (>= 5%)
+Identity gap = 0.2%
 
-Classification: CONSERVED REGION
+taxonomic_call: CONSERVED REGION (Stage 1 MAP Ambiguous, p_ambiguous = 1.00,
+                hits across genera)
+legacy_call:    AMBIGUOUS (identity-gap rule is evaluated first)
 Interpretation: Likely 16S rRNA or housekeeping gene shared across genera
 ```
 
-### Example 4: Ambiguous Placement
+If the competing genomes shared 80-95% ANI (same genus by the 80% convention), both calls would be Ambiguous rather than Conserved Region.
+
+### Example 4: Species Boundary
 ```
 Read: ERR456789.1
 Best hit: GCF_000678901 at 94.2% identity
-Second hit: GCF_000789012 at 93.8% identity
+Second hit: GCF_000789012 at 91.8% identity
 ANI(GCF_000678901, GCF_000789012) = 96.5%
 
 N = 100 - 94.2 = 5.8% (4-20%)
 U = 100 - 96.5 = 3.5% (1.5-5%)
+Identity gap = 2.4%
 
-Classification: AMBIGUOUS
-Interpretation: Competing genomes are at species boundary; cannot confidently place
+taxonomic_call: SPECIES BOUNDARY (p_species_boundary = 0.689, confidence_score = 46.5)
+legacy_call:    SPECIES BOUNDARY
+Interpretation: Competing genomes are at the species boundary; cannot confidently place
 ```
 
+With a second hit at 93.8% identity (gap 0.4%), `legacy_call` would be Ambiguous, `taxonomic_call` would remain Species Boundary, and posterior_entropy (1.51) would exceed 1.5, setting `low_confidence`.
+
 ## Summary Table
+
+Hard thresholds (`legacy_call`, nucleotide defaults):
 
 | Category | Novelty (N) | Uncertainty (U) | BLAST Identity | ANI Range |
 |----------|-------------|-----------------|----------------|-----------|
 | Known Species | < 4% | < 1.5% | > 96% | > 98.5% |
 | Novel Species | 4% to <20% | < 1.5% | 80-96% | > 98.5% |
 | Novel Genus | 20-25% | < 1.5% | 75-80% | > 98.5% |
-| Ambiguous | any | 1.5% to <5% | any | >95% to 98.5% |
-| Conserved Region | any | >= 5% | any | <= 95% |
+| Species Boundary | any | 1.5% to <5% | any | >95% to 98.5% |
+| Ambiguous | any | >= 5% (same genus) | any | <= 95% |
+| Conserved Region | any | >= 5% (across genera) | any | <= 95% |
 | Unclassified | > 25% or edge | < 1.5% | < 75% | > 98.5% |
+
+Additional legacy rules: identity gap < 2% with several hits -> Ambiguous; single hit with N >= 7% -> Ambiguous. The corresponding `taxonomic_call` boundaries are given in [METHODS.md](METHODS.md) section 2.5.
 
 ## References
 

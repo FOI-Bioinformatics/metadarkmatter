@@ -18,7 +18,7 @@ A labelled TSV with three columns:
 | Column | Type | Description |
 |--------|------|-------------|
 | ``novelty_index`` | float (0-100) | ``100 - top_hit_identity`` per read |
-| ``placement_uncertainty`` | float (0-100) | ``100 - max(ANI between competing genomes)`` |
+| ``placement_uncertainty`` | float (0-100) | as computed by ``score classify`` (default ``uncertainty_mode = "second"``: ``100 - ANI(best genome, second genome)``) |
 | ``true_category`` | string | one of the six Bayesian categories |
 
 Categories are: ``Known Species``, ``Novel Species``, ``Novel Genus``,
@@ -51,10 +51,19 @@ sampling noise.
 ```bash
 python scripts/calibrate_bayesian.py \
     --benchmark benchmarks/synthetic.tsv \
-    --output configs/bayesian_calibrated.yaml \
+    --output calibrated/bayesian_calibrated.yaml \
+    --label-mode per_genome \
     --min-samples 20 \
     --sigma-floor 0.5
 ```
+
+``--label-mode {per_genome, per_read}`` is required and declares how
+the benchmark was labelled; ``per_genome`` prints a warning because
+per-genome labels regressed accuracy on every corpus tested
+(``docs/CALIBRATION_RESULTS.md``). The script refuses to write inside
+``configs/`` unless ``--i-have-validated`` is passed, so fitted YAMLs
+are written elsewhere by default. ``--min-samples`` defaults to 5000;
+the synthetic smoke test above needs a lower value.
 
 The script prints a one-row-per-category summary table:
 
@@ -83,7 +92,7 @@ will continue to use the hand-tuned defaults at classification time.
 metadarkmatter score classify \
     --alignment sample.blast.tsv.gz \
     --ani ani_matrix.csv \
-    --config configs/bayesian_calibrated.yaml \
+    --config calibrated/bayesian_calibrated.yaml \
     --output classifications.csv
 ```
 
@@ -104,8 +113,8 @@ corpus:
 ```bash
 python scripts/calibrate_entropy.py \
     --benchmark benchmarks/synthetic.tsv \
-    --base-config configs/bayesian_calibrated.yaml \
-    --output configs/bayesian_calibrated.yaml \
+    --base-config calibrated/bayesian_calibrated.yaml \
+    --output calibrated/bayesian_calibrated.yaml \
     --bins 20
 ```
 
@@ -130,6 +139,11 @@ and either may be set without the other.
 - Only the means and standard deviations are fitted; the priors and
   the prior-modulation boosts are taken from ``BayesianConfig``
   defaults unless explicitly overridden in the base config.
+- ``calibrate_entropy.py`` recomputes posteriors from ``novelty_index``
+  and ``placement_uncertainty`` with the configured priors only; the
+  identity-gap and single-hit prior boosts are not applied, so the
+  entropies it fits on can differ slightly from those of
+  ``score classify`` for reads where a boost applies.
 - The diagonal-covariance Gaussian assumption is unchanged; categories
   flagged with high ``|r(N,U)|`` would benefit from a full-covariance
   treatment that is not currently implemented in the runtime

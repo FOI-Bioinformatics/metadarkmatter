@@ -8,11 +8,13 @@ Complete technical explanation of how metadarkmatter classifies reads using ANI-
 
 ## Overview
 
-The classification algorithm uses a two-metric decision tree:
+The classification algorithm is based on two metrics:
 1. **Novelty Index (N)**: Measures sequence divergence from closest reference
 2. **Placement Uncertainty (U)**: Measures ambiguity when multiple genomes compete
 
-Both metrics are calculated from BLAST alignment results combined with pre-computed ANI (or AAI) matrix lookups.
+Both metrics are calculated from BLAST/MMseqs2 alignment results combined with pre-computed ANI matrix lookups. The primary call (`taxonomic_call`) is the maximum a posteriori category of a six-category Bayesian model in (N, U) space, refined by a discrete second stage; the hard-threshold decision tree of Step 5 is reported alongside as `legacy_call`. The two do not have identical decision boundaries ([METHODS.md](METHODS.md) section 2.5).
+
+The description below follows the CLI classifier (`VectorizedClassifier`, `core/classification/classifiers/vectorized.py`).
 
 ---
 
@@ -23,16 +25,21 @@ Both metrics are calculated from BLAST alignment results combined with pre-compu
 For each read with BLAST hits:
 
 ```
-Input: BLAST tabular output with columns:
+Input: BLAST tabular output (outfmt 6) with columns:
   qseqid, sseqid, pident, length, mismatch, gapopen,
-  qstart, qend, sstart, send, evalue, bitscore
+  qstart, qend, sstart, send, evalue, bitscore [, qlen]
 
 Process:
-  1. Group all hits by read ID (qseqid)
-  2. For each read, collect all hits with their:
-     - Target genome (extracted from sseqid prefix)
+  1. Normalise reverse-strand coordinates (qstart > qend -> swap)
+  2. Filter hits: length >= 100 bp, alignment fraction
+     (qend - qstart + 1) / qlen >= 0.3 (qend used when qlen is absent)
+  3. Group all hits by read ID (qseqid)
+  4. For each read, collect all hits with their:
+     - Target genome (extracted from the sseqid prefix, {accession}|{contig})
+     - Species representative of that genome (from genome_metadata.tsv;
+       the genome itself when no representative column is present)
      - Percent identity (pident)
-     - Bitscore
+     - Bitscore and coverage-weighted bitscore
 ```
 
 ### Step 2: Identify Top Hit and Ambiguous Competitors
@@ -40,29 +47,31 @@ Process:
 For each read:
 
 ```python
-# Find top hit (highest bitscore)
-top_hit = max(hits, key=lambda h: h.bitscore)
+# Find top hit (highest coverage-weighted bitscore; ties: higher pident,
+# then genome accession ascending)
+top_hit = min(hits, key=lambda h: (-h.weighted_bitscore, -h.pident, h.genome))
 G_top = top_hit.genome
 pident_top = top_hit.pident
 
-# Define bitscore threshold (95% of top bitscore)
-threshold = 0.95 * top_hit.bitscore
+# Define bitscore threshold (95% of top weighted bitscore)
+threshold = 0.95 * top_hit.weighted_bitscore
 
 # Find ambiguous hits (competitive recruitment)
-ambiguous_hits = [h for h in hits if h.bitscore >= threshold]
-competing_genomes = {h.genome for h in ambiguous_hits}  # Unique genomes
+ambiguous_hits = [h for h in hits if h.weighted_bitscore >= threshold]
+num_ambiguous_hits = len(ambiguous_hits)          # hits, not genomes
+competing_reps = {rep(h.genome) for h in ambiguous_hits}
 ```
 
 **Key concept**: Ambiguous hits represent genomes that matched the read nearly as well as the top hit. If multiple genomes compete, we need to assess whether they're similar (same species) or divergent (conserved gene).
 
-#### Optional: Coverage-Weighted Hit Selection
+#### Coverage-Weighted Hit Selection (default: linear)
 
-When coverage weighting is enabled (`--coverage-weight-mode linear|log|sigmoid`), the top hit selection uses a weighted score instead of raw bitscore:
+Coverage weighting is enabled by default (`--coverage-weight-mode linear`, strength 0.5); `--coverage-weight-mode none` uses the raw bitscore. The weighted score is used both for top-hit selection and for the 95% window:
 
 ```python
 def calculate_weighted_score(hit, mode, strength):
     """Calculate coverage-weighted bitscore."""
-    coverage = (hit.qend - hit.qstart + 1) / hit.qlen
+    coverage = min(1.0, max(0.0, (hit.qend - hit.qstart + 1) / hit.qlen))  # qend if no qlen
     weight = calculate_coverage_weight(coverage, mode, strength)
     return hit.bitscore * weight
 
@@ -81,13 +90,11 @@ def calculate_coverage_weight(coverage, mode, strength):
 
     return min_weight + weight_range * normalized
 
-# With coverage weighting enabled:
-top_hit = max(hits, key=lambda h: calculate_weighted_score(h, mode, strength))
 ```
 
 **Effect:** Short high-identity hits (conserved domains) are penalized relative to longer alignments that span more of the read. This helps distinguish true species matches from conserved gene fragments.
 
-**When to use:** Enable coverage weighting when short conserved regions (e.g., 16S rRNA) are dominating classification despite lower overall alignment coverage.
+**When to change:** Use `none` to reproduce raw-bitscore behaviour, or `sigmoid` (as in the `coverage-strict` preset) when short conserved regions dominate despite low alignment coverage.
 
 ### Step 3: Calculate Novelty Index (N)
 
@@ -106,94 +113,107 @@ N = 100 - pident_top
 This is where the ANI (or AAI) matrix is used:
 
 ```python
-# Remove top genome from competing set
-secondary_genomes = competing_genomes - {G_top}
+# Remove the top genome's representative from the competing set
+secondary = competing_reps - {rep(G_top)}
 
-if len(secondary_genomes) == 0:
-    # Only one genome matched - no uncertainty
+if num_ambiguous_hits <= 1 or len(secondary) == 0:
+    # Only one genome (representative) matched - no measurable uncertainty
     U = 0.0
-else:
-    # Look up ANI between top genome and each competitor
-    ani_values = []
-    for G_i in secondary_genomes:
-        ani = ANI_matrix.lookup(G_top, G_i)  # Query pre-computed matrix
-        ani_values.append(ani)
-
-    # Placement uncertainty = 100 - highest ANI to any competitor
-    max_ani = max(ani_values)
-    U = 100 - max_ani
+elif uncertainty_mode == "second":            # default
+    # ANI to the best-ranked secondary representative, using the same
+    # order as top-hit selection (weighted bitscore, pident, accession)
+    G_2 = first(sorted(secondary_hits, key=lambda h: (-h.weighted_bitscore, -h.pident, rep(h.genome))))
+    U = 100 - ANI_matrix.lookup(rep(G_top), rep(G_2))
+else:                                         # uncertainty_mode == "max"
+    U = 100 - max(ANI_matrix.lookup(rep(G_top), G_i) for G_i in secondary)
 ```
 
 **Key concept**: If the top genome and competitors share high ANI (>98.5%), they're the same species and placement is confident. If they share low ANI (<95%), they're different species and the read matches a conserved region.
 
 **ANI matrix lookup:**
-- Matrix is symmetric: ANI(A, B) = ANI(B, A)
+- Values must be on a 0-100 scale; a 0-1 scaled matrix is rejected
+- Pairs supplied in only one direction are mirrored; asymmetric pairs are reported (`--strict-ani` turns this into an error)
 - Self-ANI is always 100%
-- Missing pairs default to 0% (different species assumed)
+- Pairs present in the matrix but not computed by the ANI tool (stored as 0) are looked up as 70% (U = 30%)
+- A competing genome absent from the matrix gives U = 100%
 
-### Step 5: Apply Decision Tree
+### Step 5: Classify
 
-Classification uses a hierarchical decision tree where uncertainty takes priority:
+**Primary call (`taxonomic_call`).** The pair (N, U) is scored under six 2D Gaussians (Known Species, Novel Species, Novel Genus, Species Boundary, Ambiguous, Unclassified) whose means and widths are derived from the thresholds below. The Ambiguous prior is multiplied by 2.0 when the identity gap is < 2% with multiple hits, and by 1.5 for single-hit reads with N >= 4%. The MAP category is then refined: Ambiguous with hits across genera becomes Conserved Region; Novel Genus with genus uncertainty >= 10% and at least one secondary genome becomes Ambiguous Within Genus. `confidence_score = (1 - H / log2(6)) * 100`, where H is the posterior entropy. Full details: [METHODS.md](METHODS.md) section 10.
+
+**Legacy call (`legacy_call`).** The hard-threshold cascade, in rule order (nucleotide defaults):
 
 ```
 START
   |
   v
-Is U >= 5%?  # Competitors are different species (ANI < 95%)
+identity_gap < 2% and more than one ambiguous hit?
   |
-  YES → CONSERVED REGION (conserved gene across taxa)
+  YES -> AMBIGUOUS
   |
   NO
   v
-Is 1.5% <= U < 5%?  # Competitors in species boundary zone (95-98.5% ANI)
+U >= 5%?  # Competitors are different species (ANI <= 95%)
   |
-  YES → AMBIGUOUS (species boundary, unclear placement)
+  YES -> CONSERVED REGION if hits span genera, otherwise AMBIGUOUS
+  |
+  NO
+  v
+1.5% <= U < 5%?  # Competitors in species boundary zone (95-98.5% ANI)
+  |
+  YES -> SPECIES BOUNDARY
   |
   NO (U < 1.5%)  # Competitors are same species (ANI > 98.5%) OR no competitors
   v
-Is N < 4%?  # High identity (>96%)
+N < 4%?  # High identity (>96%)
   |
-  YES → KNOWN SPECIES
-  |
-  NO
-  v
-Is 4% <= N < 20%?  # Moderate divergence (80-96% identity)
-  |
-  YES → NOVEL SPECIES (confident, divergent from references)
+  YES -> KNOWN SPECIES
   |
   NO
   v
-Is 20% <= N <= 25%?  # High divergence (75-80% identity)
+Single ambiguous hit and inferred uncertainty >= 10% (i.e. N >= 7%)?
   |
-  YES → NOVEL GENUS (confident, genus-level novelty)
+  YES -> AMBIGUOUS
+  |
+  NO
+  v
+4% <= N < 20%?  # Moderate divergence (80-96% identity)
+  |
+  YES -> NOVEL SPECIES
+  |
+  NO
+  v
+20% <= N <= 25% and (genus uncertainty < 10% or no secondary genomes)?
+  |
+  YES -> NOVEL GENUS
   |
   NO
   v
 UNCLASSIFIED (N > 25% or edge case)
 ```
 
-**Python-like pseudocode:**
+**Python-like pseudocode (legacy cascade):**
 
 ```python
-def classify_read(N, U):
-    # Priority 1: Check uncertainty (conserved regions)
-    if U >= 5.0:
-        return "Conserved Region"
-
-    # Priority 2: Check species boundary zone
-    if 1.5 <= U < 5.0:
+def legacy_call(N, U, num_hits, identity_gap, scope, genus_U, n_secondary):
+    if identity_gap is not None and num_hits > 1 and identity_gap < 2.0:
         return "Ambiguous"
-
-    # Priority 3: Confident placement (U < 1.5%), check novelty
+    if U >= 5.0:
+        return "Conserved Region" if scope == "across_genera" else "Ambiguous"
+    if U >= 1.5:
+        return "Species Boundary"
     if N < 4.0:
         return "Known Species"
-    elif 4.0 <= N < 20.0:
+    if num_hits <= 1 and inferred_uncertainty(N) >= 10.0:   # N >= 7
+        return "Ambiguous"
+    if 4.0 <= N < 20.0:
         return "Novel Species"
-    elif 20.0 <= N <= 25.0:
+    if 20.0 <= N <= 25.0 and (genus_U < 10.0 or n_secondary == 0):
         return "Novel Genus"
-    else:
-        return "Unclassified"
+    return "Unclassified"
 ```
+
+**Where the two calls differ.** With the default parameters the Bayesian boundaries at U = 0 lie at N ~ 6.2% (Known -> Novel Species), ~18.6% (Novel Species -> Novel Genus) and ~27.6% (Novel Genus -> Unclassified), rather than 4/20/25%. The Bayesian model does not use the inferred uncertainty of single-hit reads (it sees U = 0), so single-hit reads with N >= 7% are Novel Species / Novel Genus in `taxonomic_call` but Ambiguous in `legacy_call`. The prior boosts do not reproduce the identity-gap rule: a multi-hit read with a gap < 2% at low U keeps its Known/Novel MAP call. See [METHODS.md](METHODS.md) section 2.5.
 
 ---
 
@@ -211,75 +231,46 @@ metadarkmatter score classify \
 ```
 
 **Algorithm:**
-- ANI matrix computed with skani or fastANI (nucleotide genome-to-genome)
-- U = 100 - max(ANI between competing genomes)
+- ANI matrix computed with fastANI or skani (nucleotide genome-to-genome)
+- U = 100 - ANI(top genome, second genome) by default (`--uncertainty-mode second`); `--uncertainty-mode max` uses the maximum ANI to any competing genome
 - Thresholds calibrated to nucleotide divergence rates
 
 ### Protein Mode
 
-**Uses:** BLASTX alignment + AAI matrix (optionally with ANI as fallback)
+**Uses:** BLASTX alignment + ANI matrix (an AAI matrix can be supplied but is not used by `score classify`; see below)
 
 ```bash
 metadarkmatter score classify \
     --alignment sample.blastx.tsv.gz \
     --ani ani_matrix.csv \
-    --aai aai_matrix.csv \
     --alignment-mode protein \
     --output classifications.csv
 ```
 
 **Algorithm:**
-- AAI matrix computed with Diamond BLASTP (protein-to-protein)
-- **If AAI available**: U = 100 - max(AAI between competing genomes)
-- **If AAI missing for a pair, fallback to ANI**: U = 100 - max(ANI for that pair)
-- Thresholds adjusted for slower protein divergence:
+- N = 100 - protein identity of the best BLASTX hit
+- U is computed from the ANI matrix exactly as in nucleotide mode
+- Thresholds adjusted for slower protein divergence (fixed constants from `core/protein_constants.py`; custom, YAML and adaptive thresholds are ignored in protein mode):
   - Known Species: N < 10%, U < 5% (vs 4%/1.5% for nucleotide)
   - Novel Species: 10% <= N < 25%, U < 5%
   - Novel Genus: 25% <= N <= 40%, U < 5%
+  - Conserved Region / Ambiguous: U >= 10%
 
-**Why use AAI?**
+**Why use protein mode?**
 - Proteins evolve more slowly than nucleotides
 - For genus-level novelty, nucleotide alignment may degrade while protein alignment remains
-- AAI provides more accurate similarity estimates for divergent taxa
 
-### Dual Matrix Strategy
+### AAI Matrix
 
-When both `--ani` and `--aai` are provided:
+`score classify --aai aai_matrix.csv` loads the AAI matrix and passes it to the CLI classifier, which builds an AAI lookup table but does not currently use it: placement uncertainty and all classification rules use the ANI matrix only, in both modes.
 
-```python
-def calculate_uncertainty(G_top, secondary_genomes, ani_matrix, aai_matrix, mode):
-    uncertainties = []
-
-    for G_i in secondary_genomes:
-        if mode == "protein" and aai_matrix.has_pair(G_top, G_i):
-            # Protein mode: prefer AAI if available
-            similarity = aai_matrix.lookup(G_top, G_i)
-        elif ani_matrix.has_pair(G_top, G_i):
-            # Fallback to ANI
-            similarity = ani_matrix.lookup(G_top, G_i)
-        else:
-            # No data: assume different species
-            similarity = 0.0
-
-        uncertainties.append(100 - similarity)
-
-    return min(uncertainties) if uncertainties else 0.0
-```
-
-**Decision logic:**
-1. **Protein mode** (`--alignment-mode protein`):
-   - Try AAI matrix first
-   - Fallback to ANI if AAI missing
-   - Use protein thresholds
-
-2. **Nucleotide mode** (default):
-   - Use ANI matrix only
-   - Ignore AAI even if provided
-   - Use nucleotide thresholds
+AAI is used by the programmatic `ANIWeightedClassifier` (`core/classification/classifiers/base.py`) when `use_aai_for_genus` is true: for reads with N in the novel-genus range (20-25% nucleotide) and U below the confident-placement maximum, the maximum AAI from the top genome to the other hit genomes overrides the Bayesian call (AAI > 65% -> Novel Species; 58-65% -> Ambiguous Within Genus; < 58% -> Novel Genus; Riesco & Trujillo 2024). This is not reachable from `score classify`.
 
 ---
 
 ## Example Walkthrough
+
+The values below were computed with the default configuration (`BayesianClassifier(ScoringConfig()).classify_primary()` and `apply_legacy_thresholds()`). All hits are assumed to cover the full read, so coverage weighting scales every bitscore by the same factor and the 95% window can be read off the raw bitscores.
 
 ### Example 1: Known Species
 
@@ -287,7 +278,7 @@ def calculate_uncertainty(G_top, secondary_genomes, ani_matrix, aai_matrix, mode
 ```
 read_001 hits:
   GCF_000195955.1 (98.5% identity, bitscore 450)
-  GCF_000242755.1 (97.2% identity, bitscore 435)  # 435/450 = 0.967 (>95%)
+  GCF_000242755.1 (96.2% identity, bitscore 435)  # 435/450 = 0.967 (>95%)
 ```
 
 **Calculation:**
@@ -297,8 +288,9 @@ G_top = "GCF_000195955.1"
 pident_top = 98.5
 
 # Step 2: Ambiguous hits (bitscore >= 0.95 * 450 = 427.5)
-competing_genomes = {"GCF_000195955.1", "GCF_000242755.1"}
+num_ambiguous_hits = 2
 secondary = {"GCF_000242755.1"}
+identity_gap = 98.5 - 96.2 = 2.3%
 
 # Step 3: Novelty
 N = 100 - 98.5 = 1.5%
@@ -308,10 +300,12 @@ ANI(GCF_000195955.1, GCF_000242755.1) = 98.7%  # Look up in matrix
 U = 100 - 98.7 = 1.3%
 
 # Step 5: Classify
-U < 1.5% and N < 4% → KNOWN SPECIES
+taxonomic_call: Known Species (p_known = 0.879, p_novel_species = 0.076,
+                H = 0.69, confidence_score = 73.5)
+legacy_call:    U < 1.5% and N < 4% -> Known Species
 ```
 
-**Interpretation:** Both genomes are the same species (98.7% ANI). Read matches with high identity.
+**Interpretation:** Both genomes are the same species (98.7% ANI). Read matches with high identity. If the second hit had 97.2% identity (gap 1.3%), `legacy_call` would be Ambiguous (identity-gap rule), whereas `taxonomic_call` would remain Known Species (confidence_score 71.0).
 
 ### Example 2: Novel Species
 
@@ -319,20 +313,23 @@ U < 1.5% and N < 4% → KNOWN SPECIES
 ```
 read_002 hits:
   GCF_000195955.1 (89.5% identity, bitscore 380)
-  GCF_000242755.1 (88.1% identity, bitscore 365)  # 365/380 = 0.961 (>95%)
+  GCF_000242755.1 (87.1% identity, bitscore 365)  # 365/380 = 0.961 (>95%)
 ```
 
 **Calculation:**
 ```python
 N = 100 - 89.5 = 10.5%
+identity_gap = 2.4%
 ANI(GCF_000195955.1, GCF_000242755.1) = 98.7%
 U = 100 - 98.7 = 1.3%
 
 # Classify
-U < 1.5% and 4% <= N < 20% → NOVEL SPECIES
+taxonomic_call: Novel Species (p_novel_species = 0.666, p_species_boundary = 0.277,
+                H = 1.17, confidence_score = 54.9)
+legacy_call:    U < 1.5% and 4% <= N < 20% -> Novel Species
 ```
 
-**Interpretation:** Competing genomes are same species, but read shows significant divergence (89.5%). Likely a novel species in this genus.
+**Interpretation:** Competing genomes are same species, but read shows significant divergence (89.5%). Likely a novel species in this genus. The posterior assigns about a quarter of the mass to Species Boundary because U = 1.3% is close to the Species Boundary Gaussian.
 
 ### Example 3: Conserved Region
 
@@ -346,16 +343,20 @@ read_003 hits:
 **Calculation:**
 ```python
 N = 100 - 95.0 = 5.0%
-ANI(GCF_000195955.1, GCF_003456789.1) = 78.3%  # Different genera
+identity_gap = 0.5%
+ANI(GCF_000195955.1, GCF_003456789.1) = 78.3%  # < 80%: ambiguity_scope = across_genera
 U = 100 - 78.3 = 21.7%
 
 # Classify
-U >= 5% → CONSERVED REGION
+taxonomic_call: Stage 1 MAP Ambiguous (p_ambiguous = 1.00)
+                + across_genera -> Conserved Region (confidence_score = 100.0)
+legacy_call:    identity gap < 2% with 2 hits -> Ambiguous (rule evaluated
+                before the Conserved Region rule)
 ```
 
-**Interpretation:** Read matches genomes from different genera with similar scores. This is a conserved gene (e.g., 16S rRNA, housekeeping gene).
+**Interpretation:** Read matches genomes from different genera with similar scores. This is a conserved gene (e.g., 16S rRNA, housekeeping gene). With an identity gap of 2% or more, `legacy_call` would also be Conserved Region.
 
-### Example 4: Novel Genus
+### Example 4: Novel Genus (single hit)
 
 **Input:**
 ```
@@ -367,14 +368,16 @@ read_004 hits:
 **Calculation:**
 ```python
 N = 100 - 78.0 = 22.0%
-secondary_genomes = {} (empty)
+num_ambiguous_hits = 1
 U = 0.0  # No competition
+inferred_uncertainty = 23.0 + (22.0 - 20.0) * 1.5 = 26.0%
 
 # Classify
-U < 1.5% and 20% <= N <= 25% → NOVEL GENUS
+taxonomic_call: Novel Genus (p_novel_genus = 0.869, H = 0.77, confidence_score = 70.1)
+legacy_call:    single hit with inferred uncertainty >= 10% -> Ambiguous
 ```
 
-**Interpretation:** Read shows genus-level divergence with confident placement to single genome lineage.
+**Interpretation:** Read shows genus-level divergence and only one reference genome lineage was hit. The two calls differ because the Bayesian model sees U = 0 and does not use the inferred uncertainty, whereas the legacy cascade treats single-hit reads with N >= 7% as Ambiguous ([METHODS.md](METHODS.md) section 2.5).
 
 ---
 
@@ -382,20 +385,23 @@ U < 1.5% and 20% <= N <= 25% → NOVEL GENUS
 
 ### Ambiguous Hit Threshold
 
-The 95% bitscore threshold for competitive recruitment:
+The 95% bitscore threshold (`--bitscore-threshold`) for competitive recruitment, applied to the coverage-weighted bitscore:
 - **Too strict (e.g., 99%)**: May miss biologically relevant competitors
 - **Too relaxed (e.g., 90%)**: May include spurious low-quality hits
-- **95% (default)**: Balances sensitivity and specificity based on empirical testing
+- **95% (default)**: A heuristic compromise between sensitivity and specificity; it has not been formally benchmarked
 
 ### Missing ANI Pairs
 
-If ANI(G_top, G_i) is not in the matrix:
 ```python
-# Conservative assumption: treat as different species
-default_ani = 0.0
-U = 100 - 0.0 = 100.0  # Maximum uncertainty
-→ Classified as "Conserved Region"
+# Pair in the matrix but not computed by fastANI/skani (stored as 0):
+ani = 70.0            # ANI_DEFAULT_UNRELATED
+U = 100 - 70.0 = 30.0
+
+# Competing genome absent from the ANI matrix:
+U = 100.0             # maximum uncertainty
 ```
+
+Either value is far above the 5% conserved-region threshold, so such reads are called Ambiguous or Conserved Region (depending on the scope and the MAP).
 
 **Best practice:** Validate ANI matrix covers all BLAST database genomes:
 ```bash
@@ -404,10 +410,11 @@ metadarkmatter ani validate --ani ani_matrix.csv --blast sample.blast.tsv.gz
 
 ### Edge Cases
 
-1. **No BLAST hits**: Read not classified (filtered out)
-2. **All hits below threshold**: Only top hit considered, U = 0
-3. **N > 25%**: Unclassified (very high divergence, manual review)
-4. **Negative bitscore**: Invalid hit, filtered out
+1. **No hits after filtering**: Read not classified (absent from output)
+2. **All other hits below threshold**: Only top hit considered, U = 0
+3. **N > 25%**: Unclassified in `legacy_call`; in `taxonomic_call` Novel Genus remains the MAP up to N ~ 27.6%
+4. **Reverse-strand hits** (`qstart > qend`): coordinates are normalised before coverage is computed
+5. **Off-target reads** (with `--target-family` or a metadata family): Off-target, U = null, confidence_score = 10.0
 
 ---
 
@@ -434,13 +441,15 @@ metadarkmatter ani validate --ani ani_matrix.csv --blast sample.blast.tsv.gz
 ## Implementation Notes
 
 The actual implementation is in:
-- `src/metadarkmatter/core/classification/classifiers/base.py`
-- `src/metadarkmatter/core/classification/metrics.py`
+- `src/metadarkmatter/core/classification/classifiers/vectorized.py` (`VectorizedClassifier`, used by `score classify`)
+- `src/metadarkmatter/core/classification/bayesian.py` (posteriors, Stage 2 refinement, entropy)
+- `src/metadarkmatter/core/classification/thresholds.py` (legacy cascade)
+- `src/metadarkmatter/core/classification/classifiers/base.py` (`ANIWeightedClassifier`, per-read programmatic API)
 
 Key optimization:
-- ANI matrix loaded once into memory (dict lookup: O(1))
-- BLAST results streamed (doesn't load entire file into RAM)
-- Parallel processing available for large datasets
+- ANI matrix loaded once into a float64 NumPy array; lookups are polars joins against a pre-built symmetric pair table
+- The default in-memory mode loads the whole alignment file; `--streaming --chunk-size N` processes reads in batches with bounded memory (a read's hits must be contiguous, as BLAST/MMseqs2 emit them)
+- All per-read operations are vectorized in polars (no Python loop over reads)
 
 ---
 

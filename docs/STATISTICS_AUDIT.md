@@ -6,11 +6,16 @@ pipeline, and the proposed read-simulation experiment. Pair this with
 assumptions and `docs/CALIBRATION_RESULTS.md` for the three-family
 empirical validation results.
 
+Line references and code descriptions below were re-checked against
+the code on 2026-11-02, after PR #13; changes made by that PR are
+summarised in "Changes after this audit" at the end. The audit's
+verdicts and experimental conclusions are unchanged.
+
 ## Summary
 
 | Area | Verdict |
 |---|---|
-| Bayesian 6-category math | Correct; log-space stable, priors normalised, boosts pre-normalisation |
+| Bayesian 6-category math | Correct; normalised 2-D Gaussian densities, priors validated, boosts pre-normalisation |
 | Vectorised N / U computation | Correct, including the polars 1.37+ `slice(1,1).first()` fix |
 | Legacy threshold cascade | Correct; thresholds sourced from literature |
 | Coverage weighting | Mathematically sound; "empirical strength" parameter is unvalidated |
@@ -27,17 +32,18 @@ below.
 
 ### Bayesian 6-category classifier
 
-Files: `src/metadarkmatter/core/classification/bayesian.py:314-643`,
-`src/metadarkmatter/models/config.py:20-97`.
+Files: `src/metadarkmatter/core/classification/bayesian.py:288-644`,
+`src/metadarkmatter/models/config.py:57-126`.
 
-- Per-category 2-D Gaussian likelihoods are computed in log-space
-  with pre-computed `log(2 * pi * sigma_n * sigma_u)` normalisation
-  constants; standardised `z_n`, `z_u` are exponentiated as
-  `exp(-0.5 * (z_n**2 + z_u**2))`. Numerically stable for the
-  observed parameter ranges.
+- Per-category 2-D Gaussian log-likelihoods are formed as
+  `-log(2 * pi * sigma_n * sigma_u) - 0.5 * (z_n**2 + z_u**2)` (the
+  normalisation constant is pre-computed) and exponentiated before
+  normalisation; there is no log-sum-exp step. If the weighted sum
+  underflows (< 1e-300) the read receives uniform posteriors. With the
+  default parameters and N, U in [0, 100] this guard is not reached.
 - Priors default to uniform (1/6) and are validated to sum to 1.0
-  (`config.py:90-97`).
-- Prior boost mechanics (`bayesian.py:616-624`) multiply
+  within 0.01 (`config.py:116-122`).
+- Prior boost mechanics (`bayesian.py:611-624`) multiply
   `identity_gap_boost = 2.0` and `single_hit_boost = 1.5` into the
   Ambiguous prior *before* the per-category posterior is renormalised
   by the sum. This is the documented intent.
@@ -50,17 +56,19 @@ Files: `src/metadarkmatter/core/classification/bayesian.py:314-643`,
 
 ### Vectorised classifier
 
-File: `src/metadarkmatter/core/classification/classifiers/vectorized.py:600-884`.
+File: `src/metadarkmatter/core/classification/classifiers/vectorized.py:421-1078`.
 
-- `novelty_index = 100 - top_hit_identity` (line 795). Correct.
+- `novelty_index = 100 - top_hit_identity` (line 896). Correct.
 - Second-best hit gap uses
   `pl.col(...).slice(1, 1).first()` (commit 8be19f4) after the
   polars 1.37+ regression that broke `.get(1)`. The replacement is
   null-safe and verified on both polars 1.36 and 1.40.
-- `placement_uncertainty = 100 - max_competing_ani` is correct;
+- `placement_uncertainty = 100 - ANI(best, second genome)` under the
+  default `uncertainty_mode = "second"` (`100 - max_competing_ani`
+  with `uncertainty_mode = "max"`) is correct;
   off-target reads receive a fixed `confidence_score = 10.0` and
   null uncertainty rather than the prior 0.0 (less misleading).
-- Coverage weighting (linear, log, sigmoid; `vectorized.py:578-596`)
+- Coverage weighting (linear, log, sigmoid; `vectorized.py:220-253`)
   is mathematically straightforward. The `strength = 0.5` default is
   marked "empirical" in `STATISTICAL_ASSUMPTIONS.md` section 6 with no
   cited validation. Treat as a tunable, not as physics.
@@ -74,15 +82,22 @@ Files: `src/metadarkmatter/core/classification/thresholds.py`,
 - Genus boundary ~80%: Konstantinidis & Tiedje 2005, Riesco & Trujillo 2024.
 - AAI genus 58-65%: Riesco & Trujillo 2024.
 - `apply_legacy_thresholds` is a pure rule application; thresholds are
-  validated for monotonic ordering in `config.py:244-256`.
+  validated for ordering in `config.py:511-560`.
+- The cascade is used for `legacy_call` and `score sensitivity` only;
+  the primary `taxonomic_call` is the Bayesian MAP, whose decision
+  boundaries do not coincide with these thresholds (see
+  `docs/METHODS.md` section 2.5).
 
 ### ANI matrix
 
 File: `src/metadarkmatter/core/classification/ani_matrix.py`.
 
 - Lookups are correct. Symmetric lookups assume the input nested
-  dict is symmetric; the underlying NumPy array stores only one
-  value per `(i, j)` cell as written.
+  dict is symmetric; the underlying NumPy array stores one value per
+  `(i, j)` cell as written. (At the time of the audit the vectorized
+  classifier read only the upper triangle, so a pair supplied only in
+  the lower triangle was replaced by the default ANI; since PR #13
+  one-directional pairs are mirrored.)
 - **Prior latent bug**: an asymmetric input dict would overwrite one
   direction silently, corrupting placement uncertainty for any reads
   whose competing genomes hit the asymmetric pair. **Fixed in this
@@ -109,7 +124,7 @@ Files: `scripts/calibrate_bayesian.py`, `scripts/calibrate_entropy.py`,
   `CALIBRATION_RESULTS.md` shows every fitted YAML regresses accuracy
   on every test corpus.
 - The synthetic benchmark generator
-  (`scripts/build_synthetic_benchmark.py:59-72`) samples from the
+  (`scripts/build_synthetic_benchmark.py:55-72`) samples from the
   hand-tuned defaults, which makes it useful for shape testing but
   **circular** for validating calibration.
 
@@ -151,8 +166,8 @@ novelty.
    operator must explicitly declare the source of the truth labels.
    `--i-have-validated` is required when `--output` writes inside
    `configs/`, refusing to silently install an unvalidated fitted
-   YAML as a package default. `per_genome` mode emits a stderr
-   warning pointing at `CALIBRATION_RESULTS.md`.
+   YAML as a package default. `per_genome` mode prints a warning
+   (to stdout) pointing at `CALIBRATION_RESULTS.md`.
 4. **`scripts/run_per_read_calibration.sh`** - end-to-end
    orchestrator that wires `build_corpus` -> `simulate.sh` ->
    reference BLAST DB -> classify -> `build_metrics_tsv --label-mode
@@ -195,3 +210,32 @@ investigations if the per-read fit also fails to clear the gate:
   the rate of overstated novelty.
 
 None of these should ship without a held-out validation family.
+
+## Changes after this audit (PR #13)
+
+PR #13 changed classifier behaviour in ways that bear on the findings
+above (see `CHANGELOG.md` for the full list):
+
+- **Reverse-strand coordinates.** Hits with `qstart > qend`
+  (MMseqs2/DIAMOND minus strand) are normalised at parse time and in
+  the vectorized filters. Previously the true best hit received a
+  negative coverage and was down-weighted or filtered.
+- **Second-genome tie-breaking.** The genome used for
+  `uncertainty_mode = "second"` is chosen with the same total order as
+  best-hit selection (weighted bitscore, `pident`, accession). The
+  earlier unstable sort made `placement_uncertainty` depend on batch
+  size.
+- **ANI matrix.** Stored as float64; one-directional pairs are
+  mirrored; 0-1 scaled matrices are rejected.
+- **Adaptive thresholds** ignore uncomputed ANI pairs and preserve the
+  base configuration.
+- **`min_alignment_fraction`** uses `qlen` when available.
+- **QC low-confidence fraction** uses the `low_confidence` flag (or
+  the 0-100 `confidence_score` scale) instead of comparing the
+  0-100 score with 0.5.
+
+A post-PR re-check also documented, without changing code or defaults,
+that the Bayesian MAP boundaries differ from the hard thresholds (e.g.
+Known -> Novel Species at N ~ 6.2% rather than 4%) and that the
+Bayesian call does not use the inferred uncertainty of single-hit reads
+(`docs/METHODS.md` section 2.5).
