@@ -95,23 +95,32 @@ Metadarkmatter addresses this by calculating two metrics for each read:
 | Metric | Definition | What It Tells You |
 |--------|------------|-------------------|
 | **Novelty Index** | 100 - percent identity to best match | How divergent the read is from known references |
-| **Placement Uncertainty** | 100 - max ANI between competing matches | Whether the read could belong to multiple taxa |
+| **Placement Uncertainty** | 100 - ANI between the best genome and the second-best competing genome (default `--uncertainty-mode second`) | Whether the read could belong to multiple taxa |
 
-These metrics enable classification into biologically meaningful categories:
+These metrics enable classification into biologically meaningful categories.
+The table lists the hard thresholds used for the `legacy_call` column:
 
 | Category | Novelty | Uncertainty | Interpretation |
 |----------|---------|-------------|----------------|
 | Known Species | < 4% | < 1.5% | Matches a sequenced species |
 | Novel Species | 4-20% | < 1.5% | Likely a new species within a known genus |
 | Novel Genus | 20-25% | < 1.5% | Likely a new genus within the family |
-| Conserved Region | any | > 5% | Conserved gene, placement ambiguous |
+| Species Boundary | any | 1.5-5% | Competing genomes near the species boundary |
+| Ambiguous / Conserved Region | any | >= 5% | Placement ambiguous (Conserved Region when hits span genera) |
+| Unclassified | > 25% | < 1.5% | Beyond the Novel Genus range |
+
+The primary `taxonomic_call` column is a Bayesian MAP over 2D Gaussians
+derived from these ranges. Its boundaries are close to, but not the same
+as, the hard thresholds: with default settings and U = 0, Known -> Novel
+Species lies near N ~ 6.2%, Novel Species -> Novel Genus near N ~ 18.6%,
+and Novel Genus -> Unclassified near N ~ 27.6%. Both columns are written.
 
 ### Threshold Basis
 
 The thresholds are based on established prokaryotic taxonomy:
 - **95-96% ANI** defines the species boundary (Jain et al. 2018)
-- **85% identity** approximates genus-level divergence
-- **75% identity** approximates family-level divergence
+- **~80% identity** (N = 20%) is used as the novel-genus boundary
+- Beyond **~75% identity** (N > 25%) reads are left Unclassified
 
 ---
 
@@ -205,15 +214,19 @@ wc -l genomes_list.tsv
 head -5 genomes_list.tsv
 ```
 
-Expected output:
+Expected output (tab-separated; `--include-metadata` adds `genome_size`, `genus` and `family`):
 
 ```
-accession        species                      genus           gtdb_taxonomy
-GCF_000195955.2  s__Francisella tularensis    g__Francisella  d__Bacteria;p__Proteobacteria;...
-GCF_000242755.1  s__Francisella philomiragia  g__Francisella  d__Bacteria;p__Proteobacteria;...
-GCF_000297895.1  s__Francisella noatunensis   g__Francisella  d__Bacteria;p__Proteobacteria;...
-GCF_001971545.1  s__Francisella opportunistica g__Francisella d__Bacteria;p__Proteobacteria;...
+accession        gtdb_taxonomy                              species
+GCF_000195955.2  d__Bacteria;p__Proteobacteria;...          Francisella tularensis
+GCF_000242755.1  d__Bacteria;p__Proteobacteria;...          Francisella philomiragia
+GCF_000297895.1  d__Bacteria;p__Proteobacteria;...          Francisella noatunensis
+GCF_001971545.1  d__Bacteria;p__Proteobacteria;...          Francisella opportunistica
 ```
+
+By default only GTDB species representatives are listed (`--reps-only`);
+`--all-genomes` lists every genome and records each genome's species
+representative in `genome_metadata.tsv`.
 
 Check the metadata file:
 
@@ -223,12 +236,12 @@ head -3 genome_metadata.tsv
 ```
 
 ```
-accession	species	genus	family	gtdb_taxonomy
-GCF_000195955.2	Francisella tularensis	Francisella	Francisellaceae	d__Bacteria;p__Proteobacteria;...
-GCF_000242755.1	Francisella philomiragia	Francisella	Francisellaceae	d__Bacteria;p__Proteobacteria;...
+accession	species	genus	family	representative	gtdb_taxonomy
+GCF_000195955.2	Francisella tularensis	Francisella	Francisellaceae	GCF_000195955.2	d__Bacteria;p__Proteobacteria;...
+GCF_000242755.1	Francisella philomiragia	Francisella	Francisellaceae	GCF_000242755.1	d__Bacteria;p__Proteobacteria;...
 ```
 
-This metadata file links genome accessions to species names and is used throughout the pipeline for species-level aggregation.
+This metadata file links genome accessions to species names and is used throughout the pipeline for species-level aggregation, representative mapping, and target-family inference. It is written next to the `--output` accession list.
 
 ### 3b. Download Genomes
 
@@ -321,7 +334,7 @@ metadarkmatter proteins predict \
 
 ### Tips for Large Families
 
-For families with > 500 genomes (e.g., Pseudomonadaceae), download only representative species:
+For families with > 500 genomes (e.g., Pseudomonadaceae), download only species representatives (`--reps-only` is the default; `--all-genomes` downloads every genome and is best combined with `ani compute --representatives-only`):
 
 ```bash
 metadarkmatter download genomes list "f__Pseudomonadaceae" \
@@ -436,25 +449,27 @@ metadarkmatter ani compute \
 ```
 
 The command:
-- Auto-detects the best available tool (prefers skani over fastANI)
+- Auto-detects the available tool (`--backend auto`: skani if on PATH, otherwise fastANI)
 - Computes all pairwise ANI values
-- Outputs a symmetric matrix in CSV format
+- Outputs a square matrix in CSV format (values 0-100)
 
-Expected output:
+Expected output (abridged):
 
 ```
 Metadarkmatter ANI Matrix Builder
 
-Step 1: Detecting ANI tool...
-  Using: skani (faster, recommended)
+Auto-detected backend: skani
+Input: 82 genomes from genomes
+Backend: skani
+Threads: 16
+Sensitivity: default (min_af=15.0%, screen=80.0%)
 
-Step 2: Computing pairwise ANI...
-  Genomes: 82
-  Comparisons: 3,321
-  Completed in 2m 34s
+Converting to metadarkmatter format...
 
-Step 3: Building matrix...
-  Matrix saved to ani_matrix.csv
+ANI matrix computed successfully!
+
+Output: ani_matrix.csv
+Genomes: 82
 ```
 
 ### Backend Selection
@@ -492,7 +507,13 @@ AAI (Average Amino acid Identity) is only needed for protein-level
 classification (`--alignment-mode protein`). Skip this step if you are
 using nucleotide-level classification with BLAST.
 
-AAI provides genus-level resolution for reads with 20-25% novelty. It is particularly useful for:
+**Current behaviour:** `score classify --aai` loads the AAI matrix, but the
+CLI classifier (`VectorizedClassifier`) does not currently use it, so
+classification output is the same with or without `--aai`. The AAI matrix
+is used for the AAI heatmap in `report generate --aai`. The statements
+below describe the intended role of AAI.
+
+AAI is intended to provide genus-level resolution for reads with 20-25% novelty. It is particularly useful for:
 - Samples with high genus-level diversity
 - Disambiguating borderline genus/species reads
 - Cross-genus validation
@@ -567,15 +588,10 @@ AAI mean: 62.8%
 
 ### Impact on Classification
 
-With full AAI coverage, expect:
-- **3-5% of genus-boundary reads** reclassified more accurately
-- Novel Genus reads (20-25% novelty) refined to Novel Species when AAI > 65%
-- Improved confidence scores for borderline classifications
-
-**Example from validation:**
-- 16 reads reclassified (3.3% of total)
-- 8 reads: Novel Genus → Novel Species (AAI confirmed same genus)
-- Novel Species count increased by 11.4%
+With the current CLI classifier, `--aai` does not change `taxonomic_call`
+or `legacy_call` (see the note above). The AAI-based genus refinement
+exists only in the programmatic `ANIWeightedClassifier`
+(`core/classification/classifiers/base.py`).
 
 ---
 
@@ -705,9 +721,13 @@ metadarkmatter blast align \
 
 | Parameter | Default | Sensitive | Purpose |
 |-----------|---------|-----------|---------|
-| --word-size | 7 | 6 | Smaller = more sensitive, slower |
-| --evalue | 1e-3 | 1e-2 | Higher = more remote homologs |
-| --max-targets | 100 | 200 | More targets = better uncertainty estimation |
+| --word-size | 7 (blastn; 11 for dc-megablast, 28 for megablast) | 6 | Smaller = more sensitive, slower |
+| --evalue | 1e-5 | 1e-2 | Higher = more remote homologs |
+| --max-targets | 500 | 500+ | More targets = better uncertainty estimation |
+
+The output is gzip-compressed when `--output` ends in `.gz`.
+For references dominated by 80-100% ANI hits, `--task dc-megablast` is
+roughly 10x faster with similar sensitivity in that range.
 
 **For highly divergent samples:**
 
@@ -759,8 +779,12 @@ metadarkmatter mmseqs2 search \
 | 100K | 30-60 min | 5-10 min | ✓ 5x faster |
 | 1M+ | 3-6 hours | 15-30 min | ✓ 10-15x faster |
 
+For paired-end reads use `--query-1`/`--query-2` instead of `--query`; the
+mates are concatenated and receive `/1` and `/2` ID suffixes (unless
+already present), so they are classified as separate reads.
+
 **Key points:**
-- Output is BLAST-compatible (works seamlessly with classification)
+- Output is BLAST-compatible (13 columns including `qlen`; minus-strand coordinates are normalized during classification)
 - Use `--query-db` to cache query database for repeated searches
 - Requires 2-5x database size in temporary disk space
 - Best for production pipelines with >100K reads
@@ -782,14 +806,10 @@ metadarkmatter score classify \
 ```
 
 **Key options:**
-- `--aai`: Enables genus-level disambiguation for reads with 20-25% novelty
-- `--metadata`: Adds species/genus columns and enables species-level aggregation
-
-**AAI Impact:**
-- AAI is only consulted for reads in the genus boundary range (20-25% novelty)
-- If AAI > 65%: Read stays in same genus, classified as Novel Species
-- If AAI < 60%: Read represents different genus, classified as Novel Genus
-- Improves accuracy by 3-5% for genus-boundary reads
+- `--aai`: Accepted, but currently has no effect on the classification output (see Step 4b)
+- `--metadata`: Adds species/genus/family columns, maps hits to species
+  representatives for ANI lookups, and infers the target family for
+  Off-target detection
 
 **Without AAI:**
 If you didn't compute an AAI matrix, simply omit the `--aai` flag:
@@ -807,23 +827,26 @@ metadarkmatter score classify \
 
 | Mode | Flag | Best For |
 |------|------|----------|
-| Standard | (none) | < 1M alignments |
-| Streaming | --streaming | > 100M alignments, memory-constrained |
+| Standard | (none) | Most datasets |
+| Streaming | --streaming | Very large files, memory-constrained |
 
-Note: `--streaming` mode does not support `--metadata` for species tracking.
+Note: with `--streaming`, `--metadata` is still used for representative
+mapping and target-family inference, but species/genus/family columns are
+not added to the output. Streaming does not support `--id-mapping` or
+`--genomes`, and requires each read's hits to be contiguous in the file.
 
 ### Output Files
 
-**classifications.csv** - Per-read results with species information:
+**classifications.csv** - Per-read results with species information (selected columns; the file also contains `legacy_call`, posterior probabilities, `confidence_score`, family-validation columns and more, see the [User Guide](USER_GUIDE.md#classification-results-file)):
 
 ```csv
 read_id,best_match_genome,top_hit_identity,novelty_index,placement_uncertainty,taxonomic_call,species,genus
 read_00001,GCF_000195955.2,98.7,1.3,0.5,Known Species,Francisella tularensis,Francisella
 read_00002,GCF_000242755.1,91.2,8.8,1.2,Novel Species,Francisella philomiragia,Francisella
-read_00003,GCF_000297895.1,82.4,17.6,0.8,Novel Genus,Francisella noatunensis,Francisella
+read_00003,GCF_000297895.1,78.4,21.6,0.8,Novel Genus,Francisella noatunensis,Francisella
 ```
 
-**summary.json** - Sample statistics with species breakdown:
+**summary.json** - Sample statistics (abridged):
 
 ```json
 {
@@ -831,34 +854,38 @@ read_00003,GCF_000297895.1,82.4,17.6,0.8,Novel Genus,Francisella noatunensis,Fra
   "known_species": 31250,
   "novel_species": 12340,
   "novel_genus": 2890,
-  "conserved_regions": 1541,
+  "species_boundary": 0,
+  "ambiguous": 900,
+  "ambiguous_within_genus": 0,
+  "conserved_regions": 641,
   "unclassified": 500,
-  "novel_diversity_pct": 31.4,
+  "off_target": 0,
   "mean_novelty_index": 5.8,
-  "species_hit_counts": {
-    "Francisella tularensis": 28450,
-    "Francisella philomiragia": 12340,
-    "Francisella noatunensis": 5210,
-    "Unknown species": 2521
-  },
-  "species_count": 4
+  "mean_placement_uncertainty": 1.24,
+  "genome_hit_counts": {"GCF_000195955.2": 28450},
+  "species_hit_counts": {},
+  "known_species_pct": 64.4,
+  "novel_species_pct": 25.4,
+  "novel_genus_pct": 6.0,
+  "novel_diversity_pct": 31.4,
+  "species_count": 0
 }
 ```
 
+The file also contains `diversity_known`/`diversity_novel`/`diversity_uncertain`
+counts and percentages. In the current version `score classify --summary`
+computes the summary before the metadata join, so `species_hit_counts` is
+empty and `species_count` is 0 even with `--metadata`, and the
+`diversity_*` fields are 0; use the per-read `species` column (see Step 11)
+or the report for species-level counts.
+
 ### Console Output
 
-When using `--metadata`, the console displays species information:
+With `--summary`, the console shows a category table followed by:
 
 ```
 Mean Novelty Index: 5.80
 Mean Placement Uncertainty: 1.24
-Unique Species: 4
-
-Top Species:
-  Francisella tularensis: 28,450 (58.6%)
-  Francisella philomiragia: 12,340 (25.4%)
-  Francisella noatunensis: 5,210 (10.7%)
-  Unknown species: 2,521 (5.2%)
 ```
 
 ---
@@ -900,15 +927,17 @@ metadarkmatter score extract-novel \
 The output groups novel reads by their closest reference genome:
 
 ```csv
-best_match_genome,read_count,mean_novelty,min_novelty,max_novelty,mean_identity,dominant_category
-GCF_000242755.1,3521,8.4,5.1,14.2,91.6,Novel Species
-GCF_000297895.1,1842,18.2,15.3,24.1,81.8,Novel Genus
-GCF_001971545.1,1205,7.2,5.0,11.8,92.8,Novel Species
+best_match_genome,read_count,mean_novelty,min_novelty,max_novelty,mean_identity,mean_uncertainty,dominant_category
+GCF_000242755.1,3521,8.4,5.1,14.2,91.6,0.4,Novel Species
+GCF_000297895.1,1842,21.2,18.3,26.1,78.8,0.6,Novel Genus
+GCF_001971545.1,1205,7.2,5.0,11.8,92.8,0.3,Novel Species
 ```
+
+Use `--no-group` to write one row per read instead.
 
 Interpretation:
 - **GCF_000242755.1**: 3,521 reads at ~92% identity = candidate novel species related to *F. philomiragia*
-- **GCF_000297895.1**: 1,842 reads at ~82% identity = candidate novel genus related to *F. noatunensis*
+- **GCF_000297895.1**: 1,842 reads at ~79% identity = candidate novel genus related to *F. noatunensis*
 
 ### Extract Reads for Assembly
 
@@ -942,8 +971,8 @@ metadarkmatter report generate \
   --sample-name "Environmental Sample 01"
 ```
 
-**Matrix visualizations:**
-- `--ani`: Adds ANI Matrix heatmap showing nucleotide-level genome relationships
+**Matrix visualizations** (in the Reference tab):
+- `--ani`: Adds ANI Matrix heatmap showing nucleotide-level genome relationships, and the phylogenetic tree panel (>= 3 genomes)
 - `--aai`: Adds AAI Matrix heatmap showing protein-level genus relationships
 - Both matrices are interactive with hover tooltips showing pairwise values
 
@@ -958,25 +987,21 @@ metadarkmatter report generate \
   --output report.html
 ```
 
-Open `report.html` in a browser. The interactive report includes:
+Open `report.html` in a browser. The report is self-contained by default
+(`--report-mode offline`) and has these tabs:
 
-1. **Overview** - Classification breakdown pie chart and statistics
-2. **Distributions** - Novelty index and uncertainty histograms
-3. **Scatter Plot** - Reads in novelty vs. uncertainty space
-4. **Recruitment** - Read recruitment plots (if BAM provided)
-5. **Species** - Species-level breakdown (when `--metadata` is provided)
-6. **Genomes** - Top reference genome matches
-7. **ANI Matrix** - Interactive heatmap of nucleotide-level genome similarities (if `--ani` provided)
-8. **AAI Matrix** - Interactive heatmap of protein-level genus relationships (if `--aai` provided)
-9. **Data Table** - Searchable classification results
+1. **Summary** - Metric cards, diversity bar, key findings, top species table (with `--metadata`)
+2. **Classification** - Novelty vs. uncertainty scatter, distributions, confidence analysis (posterior entropy, posterior composition)
+3. **Novel Diversity** - Novel clusters with phylogenetic context (shown only when novel reads exist)
+4. **Reference** - Top-20 species bar chart (with `--metadata`), ANI/AAI heatmaps, collapsible phylogenetic tree and recruitment-plot panels (recruitment requires `--recruitment`)
+5. **Data** - Searchable classification table
 
-### Species Breakdown Tab
+### Species-Level Views
 
-When you provide `--metadata`, the report includes a dedicated "Species Breakdown" tab with:
+When you provide `--metadata`, species information appears in:
 
-- **Species Composition Pie Chart** - Shows proportion of reads assigned to each species (top 10)
-- **Species Read Count Bar Chart** - Horizontal bar chart of top 20 species by read count
-- **Summary Metrics** - Unique species detected vs. reference species in database
+- **Summary tab** - Top species table
+- **Reference tab** - Horizontal bar chart of the top 20 species by read count
 
 This is particularly useful for:
 - Understanding which known species dominate your sample
@@ -995,6 +1020,8 @@ metadarkmatter report multi \
   --pattern "*_classifications.csv"
 ```
 
+Sample names are derived from the file names.
+
 ---
 
 ## Step 11: Interpret Results
@@ -1009,7 +1036,7 @@ Examine your `summary.json`:
 | mean_novelty_index | 5.8 | Average divergence from references |
 | novel_species | 12,340 | Reads from potential new species |
 | novel_genus | 2,890 | Reads from potential new genera |
-| species_count | 4 | Number of reference species detected |
+| species_count | 0 | Currently always 0 from `score classify --summary` (see Step 8) |
 
 ### Species-Level Insights
 
@@ -1087,10 +1114,12 @@ metadarkmatter score extract-novel \
   --min-novelty 15 \
   --read-ids validation_reads.txt
 
-# Stage 2: BLAST against GTDB (if you have a GTDB BLAST database)
+# Stage 2: BLAST the selected reads against GTDB (if you have a GTDB BLAST database)
 # Note: BLAST accepts FASTQ directly - no conversion needed
+seqtk subseq extraction/${SAMPLE}_taxid${TAXID}_R1.fastq.gz validation_reads.txt \
+  > validation_reads.fastq
 metadarkmatter blast align \
-  --query extraction/${SAMPLE}_taxid${TAXID}_R1.fastq.gz \
+  --query validation_reads.fastq \
   --database /path/to/gtdb_blast_db \
   --output validation.blast.tsv.gz \
   --threads $THREADS
@@ -1124,7 +1153,7 @@ df = pl.read_csv("classifications_no_metadata.csv")
 # Enrich with species information
 enriched_df = metadata.join_classifications(df)
 print(enriched_df.columns)
-# ['read_id', 'best_match_genome', ..., 'species', 'genus']
+# ['read_id', 'best_match_genome', ..., 'species', 'genus', 'family']  (family if present in metadata)
 
 # Aggregate by species
 species_summary = metadata.aggregate_by_species(enriched_df)
@@ -1303,7 +1332,7 @@ echo "Files created:"
 echo "  - genome_metadata.tsv (species/genus taxonomy)"
 echo "  - blastdb/pangenome_contig_mapping.tsv (contig-to-genome mapping)"
 echo "  - results/classifications.csv (with species columns)"
-echo "  - results/report.html (with Species Breakdown tab)"
+echo "  - results/report.html (species views in Summary and Reference tabs)"
 ```
 
 Run the script:
@@ -1476,12 +1505,12 @@ chmod +x analyze_custom_genomes.sh
 **Solutions:**
 
 1. **Use more threads**: `--threads 32` (or more if available)
-2. **Reduce sensitivity** (if appropriate): `--word-size 11 --evalue 1e-5`
+2. **Reduce sensitivity** (if appropriate): `--task dc-megablast` (word size 11 by default)
 3. **Run on HPC cluster** with job parallelization
 4. **For >100K reads only**: Consider MMseqs2 (see Step 7 Advanced section)
    - ⚠️ Only use MMseqs2 for datasets >100,000 reads
    - For smaller datasets, MMseqs2 is actually slower than BLAST
-   - See "Decision Guide: BLAST vs MMseqs2" in Step 7 for details
+   - See "When MMseqs2 is faster" in Step 7 for details
 
 ---
 
@@ -1503,17 +1532,17 @@ This tutorial demonstrated how to use metadarkmatter to discover novel bacterial
 - **Species-Level Tracking**: Genome metadata propagates through the pipeline, enabling species-level aggregation in results and reports
 - **Multi-Contig Support**: Standardized FASTA headers (`{accession}|{contig_id}`) ensure reliable genome identification from draft assemblies
 - **Scalable Performance**: BLAST handles most datasets efficiently; MMseqs2 available for very large datasets (>100K reads)
-- **Integrated Reporting**: HTML reports include a dedicated "Species Breakdown" tab showing composition charts and read counts per species
+- **Integrated Reporting**: HTML reports show species read counts in the Summary tab and a top-20 species bar chart in the Reference tab
 
 ### Output Files Summary
 
 | File | Purpose |
 |------|---------|
 | `genome_metadata.tsv` | Species/genus taxonomy for all reference genomes |
-| `contig_mapping.tsv` | Links contigs to parent genomes for draft assemblies |
-| `classifications.csv` | Per-read results with species and genus columns |
-| `summary.json` | Sample statistics including species_hit_counts |
-| `report.html` | Interactive report with Species Breakdown tab |
+| `blastdb/pangenome_contig_mapping.tsv` | Links contigs to parent genomes for draft assemblies |
+| `classifications.csv` | Per-read results with species, genus and family columns |
+| `summary.json` | Sample statistics (category counts, genome_hit_counts) |
+| `report.html` | Interactive self-contained HTML report |
 
 The ANI-weighted approach provides a quantitative framework for distinguishing known species from potential novel species and genera, enabling targeted discovery of microbial dark matter.
 
