@@ -914,7 +914,7 @@ class VectorizedClassifier:
                 .then(100.0)
                 .otherwise(100.0 - pl.col("second_genome_ani"))
             )
-            .otherwise(  # "max" mode (default)
+            .otherwise(  # "max" mode (default is "second")
                 pl.when(pl.col("max_ani") == 0.0)
                 .then(100.0)
                 .otherwise(100.0 - pl.col("max_ani"))

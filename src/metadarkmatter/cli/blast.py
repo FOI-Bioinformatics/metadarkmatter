@@ -427,10 +427,10 @@ def align_reads(
     Aligns query reads against a reference database using parameters optimized
     for detecting divergent sequences. Output is in tabular format (outfmt 6)
     with columns: qseqid, sseqid, pident, length, mismatch, gapopen, qstart,
-    qend, sstart, send, evalue, bitscore.
+    qend, sstart, send, evalue, bitscore, qlen.
 
-    The default parameters (word_size=7, evalue=1e-3) are optimized for
-    detecting remote homology in metagenomic dark matter analysis.
+    Defaults: --task blastn with --word-size following the task (blastn 7,
+    dc-megablast 11, megablast 28), --evalue 1e-5, --max-targets 500.
 
     Example:
 
@@ -440,14 +440,12 @@ def align_reads(
             --database blastdb/pangenome \\
             --output sample.blast.tsv.gz
 
-        # High-sensitivity alignment
+        # Faster alignment against closely related references
         metadarkmatter blast align \\
             --query extracted_reads.fasta \\
             --database blastdb/pangenome \\
             --output sample.blast.tsv.gz \\
-            --word-size 7 \\
-            --evalue 1e-3 \\
-            --max-targets 100 \\
+            --task dc-megablast \\
             --threads 16
     """
     out = QuietConsole(console, quiet=quiet)

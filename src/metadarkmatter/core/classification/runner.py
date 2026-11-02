@@ -375,7 +375,7 @@ def run_classification(
 
     if request.streaming:
         # Streaming mode writes directly to file - no in-memory DataFrame.
-        log("[cyan]Streaming mode: processing in 5M alignment partitions[/cyan]\n")
+        log(f"[cyan]Streaming mode: processing in {request.chunk_size:,}-row partitions[/cyan]\n")
 
         if genome_metadata:
             log(

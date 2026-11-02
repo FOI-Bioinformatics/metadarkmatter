@@ -208,7 +208,7 @@ def compute_post_qc(
     if qc.low_confidence_fraction > 0.3:
         qc.warnings.append(
             f"Low confidence reads ({qc.low_confidence_fraction:.0%}): "
-            f"many reads have confidence scores below 0.5. "
+            f"many reads are flagged low_confidence (posterior entropy > 1.5). "
             f"Results should be interpreted with caution."
         )
 
