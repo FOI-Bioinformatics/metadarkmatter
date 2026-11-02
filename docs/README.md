@@ -8,7 +8,7 @@ Metadarkmatter requires external bioinformatics tools (non-Python software):
 
 **Required:**
 ```bash
-conda install -c bioconda kraken2 krakentools blast skani
+conda install -c bioconda kraken2 krakentools blast skani   # or fastani instead of skani
 ```
 
 | Tool | Purpose |
@@ -16,11 +16,12 @@ conda install -c bioconda kraken2 krakentools blast skani
 | Kraken2 | Taxonomic classification |
 | KrakenTools | Read extraction by taxid |
 | BLAST+ | Nucleotide alignment |
-| skani | Fast ANI computation |
+| skani or fastANI | ANI computation (`ani compute --backend auto` prefers skani) |
 
 **Optional:**
 - **MMseqs2**: For datasets >100K reads only (`conda install -c bioconda mmseqs2`)
 - **seqtk**: For assembly workflows (`conda install -c bioconda seqtk`)
+- **Diamond** (+ **Prodigal** for missing proteins): For protein mode and AAI matrices
 
 ---
 
@@ -60,7 +61,7 @@ conda install -c bioconda kraken2 krakentools blast skani
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - System architecture and design
 - **[TECHNICAL_MANUAL.md](TECHNICAL_MANUAL.md)** - Algorithm implementation details
 - **[API_REFERENCE.md](API_REFERENCE.md)** - Python API documentation
-- **[CHANGELOG.md](CHANGELOG.md)** - Project changes and updates
+- **[CHANGELOG.md](../CHANGELOG.md)** - Project changes and updates (repository root)
 
 ---
 
@@ -98,15 +99,15 @@ metadarkmatter score classify \
 
 ## Key Concepts
 
-**Novelty Index (N)**: `100 - percent_identity`
-- N < 4%: Known species (pident > 96%)
-- 4-20%: Novel species
-- 20-25%: Novel genus
+**Novelty Index (N)**: `100 - percent_identity` of the top hit
 
-**Placement Uncertainty (U)**: `100 - max(ANI between competing genomes)`
-- U < 1.5%: Confident placement
-- 1.5-5%: Species boundary zone
-- U >= 5%: Conserved region (ambiguous)
+**Placement Uncertainty (U)**: `100 - ANI(best genome, second-best competing genome)` (default `--uncertainty-mode second`; `max` uses the highest ANI to any competing genome)
+
+Hard thresholds used by the `legacy_call` column (nucleotide mode):
+- N < 4%: Known species (pident > 96%); 4-20%: Novel species; 20-25%: Novel genus
+- U < 1.5%: Confident placement; 1.5-5%: Species boundary zone; U >= 5%: Ambiguous / Conserved region
+
+The primary `taxonomic_call` is a Bayesian MAP over 2D Gaussians whose boundaries differ somewhat from these thresholds (for example Known -> Novel Species at N ~ 6.2 when U = 0); see [CLAUDE.md](../CLAUDE.md#classification-thresholds).
 
 **Species-Level Tracking**: Use `--metadata genome_metadata.tsv` to track diversity by species/genus in classifications and reports.
 
@@ -143,9 +144,10 @@ docs/
 └── Technical
     ├── ARCHITECTURE.md                      # System design diagrams
     ├── TECHNICAL_MANUAL.md                  # Implementation details
-    ├── API_REFERENCE.md                     # Python API
-    └── CHANGELOG.md                         # Project changes
+    └── API_REFERENCE.md                     # Python API
 ```
+
+The project changelog is [`CHANGELOG.md`](../CHANGELOG.md) at the repository root.
 
 ---
 

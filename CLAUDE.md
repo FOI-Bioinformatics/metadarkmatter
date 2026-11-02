@@ -26,18 +26,25 @@ project environment variables (`METADARKMATTER_SEED`,
 mdm download genomes list "f__Francisellaceae" --output genomes.tsv
 mdm download genomes fetch --accessions genomes.tsv --output-dir genomes/
 
-# 2. Extract family reads with Kraken2 (requires a built kraken2 DB).
-mdm kraken2 extract --kraken-output sample.kraken --reads-1 sample_R1.fastq.gz \
+# 2. Extract family reads with Kraken2 (classify needs a built kraken2 DB;
+#    --output is a directory receiving {sample}.kraken and {sample}.kreport,
+#    and extract needs the .kreport next to the .kraken file). Extracted
+#    reads are written as {sample}_taxid{taxid}_R1/_R2.fastq.gz.
+mdm kraken2 classify --reads-1 sample_R1.fastq.gz --reads-2 sample_R2.fastq.gz \
+  --kraken-db db/ --output kraken_out/
+mdm kraken2 extract --kraken-output kraken_out/sample.kraken --reads-1 sample_R1.fastq.gz \
   --reads-2 sample_R2.fastq.gz --taxid 34064 --output extraction/
 
-# 3. Compute ANI matrix (auto-selects fastANI, falls back to skani).
+# 3. Compute ANI matrix (--backend auto prefers skani, falls back to fastANI).
 mdm ani compute --genomes genomes/ --output ani_matrix.csv --threads 16
 
 # 4. Sequence alignment (choose ONE option)
 
 # Option A: BLAST (single-end only). Default --task is blastn (sensitive,
-# slow); for closely-related references add '--task dc-megablast
-# --word-size 11' for ~10x speedup with similar 80-100% ANI sensitivity.
+# slow); for closely-related references add '--task dc-megablast'
+# for ~10x speedup with similar 80-100% ANI sensitivity. --word-size
+# defaults per task (blastn 7, dc-megablast 11, megablast 28). Output is
+# gzipped when --output ends in .gz (also for mmseqs2 search / blastx align).
 mdm blast makedb --genomes genomes/ --output blastdb/pangenome
 mdm blast align --query extraction/sample_taxid34064_R1.fastq.gz --database blastdb/pangenome \
   --output sample.blast.tsv.gz --threads 16
@@ -51,7 +58,10 @@ mdm mmseqs2 search \
 # 5. Classify reads (target family auto-inferred from --metadata).
 #    For >5M alignments add '--streaming --chunk-size 500000' to keep
 #    memory bounded (vectorized mode estimates ~18 GB at 10M hits;
-#    streaming finishes the same workload in seconds).
+#    streaming finishes the same workload in seconds). With --streaming,
+#    --metadata still drives representative mapping and family inference
+#    but species/genus/family columns are omitted, and each read's hits
+#    must be contiguous (as BLAST/MMseqs2 emit them) or it errors.
 mdm score classify --alignment sample.blast.tsv.gz --ani ani_matrix.csv \
   --metadata genome_metadata.tsv --output classifications.csv
 
@@ -85,8 +95,8 @@ metadarkmatter score classify --alignment external_results.tsv.gz --ani ani_matr
 - `core/genome_utils.py` - `extract_accession_from_filename()`
 
 **Requirements:**
-- Alignment must be BLAST tabular format (outfmt 6), 12 or 13 columns, tab-separated
-- ID mapping is not supported with `--streaming` mode
+- Alignment must be BLAST tabular format (outfmt 6), 12, 13 (+qlen) or 14 (+qlen, qcov) columns, tab-separated
+- ID mapping (`--id-mapping` or `--genomes`) is not supported with `--streaming`; the combination is rejected with an error (`core/classification/runner.py`)
 - Genome accessions in mapping must match ANI matrix row/column labels
 
 ## Representative Genome Architecture
@@ -118,7 +128,7 @@ metadarkmatter score classify --alignment sample.blast.tsv.gz --ani ani_matrix.c
 - `core/metadata.py` - `GenomeMetadata.get_representative()`, `build_representative_mapping()`, `has_representatives`, `representative_count`
 - `cli/mapping.py` - `select-representatives` command
 - `cli/ani.py` - `--metadata` + `--representatives-only` flags on compute; `--metadata` on validate
-- `cli/score.py` - Wires representative mapping from metadata to VectorizedClassifier
+- `core/classification/runner.py` - Wires representative mapping from metadata to VectorizedClassifier (called by `cli/score.py`)
 - `core/classification/classifiers/vectorized.py` - `representative_mapping` parameter, `representative_genome` column for ANI lookups
 
 **Metadata format** (`genome_metadata.tsv`):
@@ -148,11 +158,11 @@ GCF_001234567.1	F. tularensis	Francisella	Francisellaceae	GCF_000195955.2	d__...
 **MMseqs2:**
 - Accepts FASTQ, FASTA, or gzipped versions (.gz)
 - Supports both single-end (`--query`) and paired-end (`--query-1`, `--query-2`)
-- For paired-end: reads are concatenated internally (standard MMseqs2 approach)
+- For paired-end: reads are concatenated internally (standard MMseqs2 approach); mate IDs get `/1` and `/2` suffixes unless already present, so mates are classified as separate reads
 - 5-100x faster than BLAST for large datasets
 - Recommended for >100K reads
 
-See [Tutorial](docs/TUTORIAL_ENVIRONMENTAL_SPECIES.md) Step 7 for detailed decision guide
+See [Tutorial](docs/TUTORIAL_ENVIRONMENTAL_SPECIES.md) Step 7 for runtime guidance
 
 ## Documentation
 
@@ -226,7 +236,7 @@ validation against a held-out family.
 
 ## Phylogeny Tab
 
-The HTML report includes an interactive phylogenetic tree tab showing novel clusters in evolutionary context.
+The HTML report includes an interactive phylogenetic tree showing novel clusters in evolutionary context. It is rendered as a collapsible "Phylogenetic Tree" panel inside the Reference tab (`sections/reference.py`), not as a separate top-level tab; the top-level tabs are Summary, Classification, Novel Diversity (only when novel reads exist), Reference, and Data (`generator.py::_build_navigation`).
 
 **CLI Options:**
 ```bash
@@ -277,6 +287,7 @@ src/metadarkmatter/
 │   ├── random.py             # METADARKMATTER_SEED resolution (v0.2.0)
 │   ├── runtime.py            # Process-wide --dry-run via MDM_DRY_RUN (v0.2.0)
 │   ├── sequence_validation.py # FASTA/FASTQ streaming validators (v0.2.0)
+│   ├── pipeline/orchestrator.py # 'mdm run pipeline' steps, checkpointing, run_manifest.json
 │   ├── classification/       # Classification pipeline
 │   │   ├── bayesian.py       # Bayesian-primary classifier (6-cat 2D Gaussians + Stage 2)
 │   │   ├── thresholds.py     # Legacy threshold cascade + apply_legacy_thresholds()
@@ -284,7 +295,8 @@ src/metadarkmatter/
 │   │   ├── sensitivity.py    # Threshold sensitivity analysis (also exposed via 'mdm score sensitivity')
 │   │   ├── evaluation.py     # Accuracy / ECE / confusion matrix (v0.2.0; exposed via 'mdm score evaluate')
 │   │   ├── adaptive.py       # GMM-based adaptive threshold detection
-│   │   ├── ani_matrix.py     # ANIMatrix class
+│   │   ├── ani_matrix.py     # ANIMatrix class (float64; mirrors one-directional pairs; rejects 0-1 scale)
+│   │   ├── runner.py         # score classify orchestration (metadata, ID mapping, streaming vs in-memory)
 │   │   └── classifiers/      # Classifier implementations
 │   │       ├── base.py       # ANIWeightedClassifier (programmatic API, Bayesian-primary)
 │   │       └── vectorized.py # VectorizedClassifier (sole CLI classifier, Bayesian-primary)
@@ -307,7 +319,7 @@ src/metadarkmatter/
         │   ├── summary.py    # SummaryMixin (_compute_summary + overview/metric cards)
         │   ├── classification.py # ClassificationMixin (+ _confidence_* panel builders)
         │   ├── novel.py      # NovelMixin (novel-diversity tab)
-        │   ├── reference.py  # ReferenceMixin (ANI/AAI heatmaps, recruitment, species bar)
+        │   ├── reference.py  # ReferenceMixin (ANI/AAI heatmaps, recruitment, species bar, phylogeny panel)
         │   ├── phylogeny.py  # PhylogenyMixin (_build_phylogeny_content / _build_phylogeny_section)
         │   └── data.py       # DataMixin (interactive data table)
         ├── assets/           # Bundled JS (Plotly inlined; D3 vendored on demand) + SRI cache (v0.2.0)
@@ -341,6 +353,20 @@ Companion artifacts at the repo root:
 
 ## Classification Thresholds
 
+These hard thresholds define the **`legacy_call`** cascade
+(`core/classification/thresholds.py::apply_legacy_thresholds`). The
+primary **`taxonomic_call`** is the Bayesian MAP over 2D Gaussians
+(`core/classification/bayesian.py`), and its decision boundaries do not
+coincide with these thresholds. Measured with the default config
+(nucleotide, U = 0, multi-hit read): Known -> Novel Species at N ~ 6.2,
+Novel Species -> Novel Genus at N ~ 18.6, Novel Genus -> Unclassified at
+N ~ 27.6; at N = 1, Species Boundary wins from U ~ 3.8 and Ambiguous
+from U ~ 5.5. Protein mode (U = 0): ~11.3 / ~25.1 / ~40.4. Single-hit
+reads: the inferred uncertainty only enters `legacy_call`;
+`taxonomic_call` uses `placement_uncertainty` (0 for single-hit reads).
+In protein mode `get_effective_thresholds()` returns the fixed protein
+constants, so custom/YAML/adaptive novelty thresholds do not apply there.
+
 ### Nucleotide Mode (BLASTN, default)
 - Known Species: N < 4%, U < 1.5%
 - Novel Species: 4% <= N < 20%, U < 1.5%
@@ -353,7 +379,12 @@ Companion artifacts at the repo root:
 
 Where:
 - **N** = Novelty Index = `100 - TopHitIdentity`
-- **U** = Placement Uncertainty = `100 - max(ANI between competing genomes)`
+- **U** = Placement Uncertainty. With the default `uncertainty_mode="second"`,
+  `U = 100 - ANI(best genome, highest-scoring competing genome)` among hits
+  within the bitscore threshold (95% of top); `uncertainty_mode="max"` uses
+  the maximum ANI to any competing genome. Hits to genomes sharing a
+  representative are collapsed first. Missing ANI pairs fall back to 70%
+  for lookups; ANI matrices must be on a 0-100 scale (0-1 is rejected).
 
 See [docs/REFERENCE.md](docs/REFERENCE.md) for complete threshold tables and interpretation.
 
@@ -430,7 +461,8 @@ Where `min = 1 - strength`, `max = 1 + strength`, `strength` defaults to 0.5.
   `core/classification/evaluation.py`
 
 ### Enhanced Scoring (always on)
-- Inferred uncertainty for single-hit reads
-- Alignment quality, identity confidence, placement confidence
-- Discovery score for novel taxa prioritization
-- All computed automatically (no flags needed)
+- Inferred uncertainty for single-hit reads (`inferred_uncertainty`,
+  `uncertainty_type` columns; used by `legacy_call`, not by `taxonomic_call`)
+- Alignment quality, identity confidence, placement confidence and
+  discovery score are computed and written only with
+  `--include-legacy-scores`

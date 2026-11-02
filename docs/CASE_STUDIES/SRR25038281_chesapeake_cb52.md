@@ -25,6 +25,14 @@ The full v0.2.0 pipeline. Kraken2 step skipped because the sample is
 already a Francisella isolate (no host or off-target contamination
 worth filtering at the family level).
 
+The numbers below were produced with v0.2.0, before the classifier and
+report fixes merged in PR #13 (deterministic choice of the second genome
+for placement uncertainty, float64 ANI storage, streaming-schema fixes,
+among others). Re-running with the current code may shift category
+counts somewhat; the run has not been repeated since. The reverse-strand
+coordinate fix in that PR does not affect this run, because BLASTN
+reports minus-strand hits with `sstart > send` rather than `qstart > qend`.
+
 ```bash
 # Reference: 48 GTDB f__Francisellaceae representatives
 mdm download genomes list "f__Francisellaceae" --output genomes.tsv
@@ -42,10 +50,12 @@ mdm blast align \
     --output cb52.blast.tsv.gz \
     --threads 8 \
     --task dc-megablast \
-    --word-size 11
+    --word-size 11   # now the default for dc-megablast; kept for the record
 
 # Streaming mode because the alignment is ~10M hits and the default
-# vectorized classifier needs ~18 GB RAM for this input.
+# vectorized classifier needs ~18 GB RAM for this input. With --streaming,
+# --metadata provides the representative mapping and target-family
+# inference; species/genus/family columns are not written to the CSV.
 mdm score classify \
     --alignment cb52.blast.tsv.gz \
     --ani ani_matrix.csv \
@@ -115,12 +125,15 @@ agrees with that designation.
 - **Memory.** The vectorized classifier estimated 18 GB RAM for
   this alignment. `--streaming --chunk-size 500000` keeps memory
   bounded and finishes in seconds.
-- **Backend.** `mdm ani compute` autoselected `fastANI` because it
-  was on PATH. `skani` would also work; both produce the same
+- **Backend.** `fastANI` computed the ANI matrix in this run. The
+  `--backend auto` default prefers `skani` when it is on PATH and falls
+  back to `fastANI`; pass `--backend fastani` to reproduce this run
+  exactly. `skani` would also work; both produce the same
   category-level result for this sample.
-- **R2 not aligned.** Only R1 was aligned because the BLAST wrapper
-  expects single-end input. Adding `--query` support for paired-end
-  reads is on the roadmap for a future release.
+- **R2 not aligned.** Only R1 was aligned because `blast align`
+  takes single-end input (`--query`). To use both mates, align with
+  `mdm mmseqs2 search --query-1 ... --query-2 ...`; mates receive `/1`
+  and `/2` ID suffixes and are classified as separate reads.
 
 ## Reproduction script
 

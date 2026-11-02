@@ -16,14 +16,14 @@ Metadarkmatter identifies novel bacterial taxa ("microbial dark matter") in meta
 
 - **Novelty Index (N)**: Sequence divergence from closest reference genome
 - **Placement Uncertainty (U)**: Phylogenetic ambiguity based on ANI between competing genomes
-- **Classification**: Known Species, Novel Species, Novel Genus, or Conserved Region
+- **Classification** (`taxonomic_call`): Known Species, Novel Species, Novel Genus, Species Boundary, Ambiguous, Unclassified, plus the refined categories Conserved Region and Ambiguous Within Genus, and Off-target when family validation is active
 
 ### How It Works
 
 1. **Competitive alignment**: Reads aligned against all reference genomes simultaneously
 2. **ANI-weighted scoring**: Top hits evaluated using genome-genome ANI matrix
 3. **Uncertainty quantification**: Placement confidence computed from ANI between competing matches
-4. **Threshold-based classification**: Literature-backed boundaries for species (95% ANI) and genus (75% ANI)
+4. **Bayesian classification**: Posterior probabilities over six categories from 2D Gaussians in (novelty, uncertainty) space, with parameters derived from the literature-based threshold ranges (species boundary at 95-96% ANI); a hard-threshold `legacy_call` is reported alongside
 
 ## Installation
 
@@ -46,18 +46,18 @@ Metadarkmatter requires external bioinformatics tools. Install via conda/mamba:
 
 ```bash
 conda create -n metadarkmatter -c conda-forge -c bioconda \
-  kraken2 krakentools blast skani mmseqs2 diamond pyani
+  kraken2 krakentools blast skani fastani mmseqs2 diamond
 conda activate metadarkmatter
 ```
 
 **Core Tools:**
 - **Kraken2 + KrakenTools**: Taxonomic read classification and extraction
 - **BLAST+**: Nucleotide alignment (accepts FASTQ directly)
-- **skani**: Fast ANI computation
+- **skani** / **fastANI**: ANI computation (either one is sufficient)
 - **MMseqs2**: Fast sequence search for large datasets (>100K reads)
 - **Diamond**: Protein alignment and AAI computation (for protein mode)
 
-**Optional:** `seqtk` (assembly workflows), `pyani` (alternative ANI tool)
+**Optional:** `seqtk` (extracting candidate reads), `prodigal` (protein prediction for AAI), `bowtie2` + `samtools` (recruitment plots via `mdm map`)
 
 ## Quick Start
 
@@ -65,8 +65,12 @@ conda activate metadarkmatter
 
 `mdm run pipeline` chains the whole workflow (download -> extract -> align ->
 ANI -> classify -> report) with per-step checkpointing, `--from` resume, and a
-`run_manifest.json`. Re-running skips steps whose outputs already exist; add
-`--dry-run` to preview the plan without executing.
+`run_manifest.json` (with per-step start/finish times). Re-running skips steps
+whose outputs already exist; `--from STEP` re-runs that step and all later
+ones; add `--dry-run` to preview the plan without executing. With
+`--config run.yaml`, YAML values apply unless the corresponding flag is
+passed explicitly. For paired-end MMseqs2 alignment of pre-extracted reads,
+add `--extracted-reads-2` with `--aligner mmseqs2`.
 
 ```bash
 mdm run pipeline \
@@ -102,16 +106,17 @@ mdm kraken2 extract --kraken-output kraken_out/sample.kraken \
 # 3. Build BLAST database and align.
 #    Default --task is blastn (word_size 7), tuned for divergent recruitment
 #    but slow on large reference sets. For corpora dominated by 80-100%
-#    ANI hits, --task dc-megablast gives ~10x speedup with similar
-#    sensitivity in that range.
+#    ANI hits, --task dc-megablast (word_size 11 by default) gives ~10x
+#    speedup with similar sensitivity in that range. The output is
+#    gzipped because the --output name ends in .gz.
 mdm blast makedb --genomes genomes/ --output blastdb/pangenome
 mdm blast align --query extraction/sample_taxid34064_R1.fastq.gz \
   --database blastdb/pangenome --output sample.blast.tsv.gz --threads 16
 # Optionally add --task dc-megablast for closely-related references.
 
 # 4. Compute ANI matrix.
-#    Picks the first ANI tool found on PATH (fastANI by default, skani
-#    if fastANI is unavailable). Run 'mdm doctor' to inspect tooling.
+#    '--backend auto' (default) uses skani if it is on PATH, otherwise
+#    fastANI. Run 'mdm doctor' to inspect tooling.
 mdm ani compute --genomes genomes/ --output ani_matrix.csv --threads 16
 
 # 5. Classify reads and generate report.
@@ -160,24 +165,23 @@ Metadarkmatter automatically tracks species metadata throughout the pipeline:
 
 - **Automatic metadata**: `genome_metadata.tsv` created during genome download with species, genus, family, and full GTDB taxonomy
 - **Standardized headers**: FASTA headers rewritten to `{accession}|{contig_id}` format for reliable genome identification from multi-contig draft genomes
-- **Species aggregation**: `--metadata` option in `score classify` adds species/genus columns to output
-- **Species breakdown**: HTML reports include a dedicated "Species Breakdown" tab with composition charts
+- **Species aggregation**: `--metadata` option in `score classify` adds species/genus/family columns to output (not in `--streaming` mode)
+- **Species breakdown**: the report's Summary tab lists top species and the Reference tab shows a top-20 species bar chart
 
 ### Novel Diversity Detection
 
-- Identify **Novel Species** candidates (4-20% novelty, <1.5% uncertainty)
-- Identify **Novel Genus** candidates (20-25% novelty, <1.5% uncertainty)
+- Identify **Novel Species** and **Novel Genus** candidates. The hard-threshold `legacy_call` uses 4-20% and 20-25% novelty with <1.5% uncertainty; the primary Bayesian `taxonomic_call` has somewhat different boundaries (see [CLAUDE.md](CLAUDE.md#classification-thresholds))
 - Extract candidate reads with `score extract-novel` for targeted assembly
-- Literature-backed thresholds based on 95-96% ANI species boundary
+- Threshold ranges based on the 95-96% ANI species boundary
 
 ### Coverage-Weighted Hit Selection
 
-Optional feature to prioritize alignments spanning larger portions of reads:
+Enabled by default (`linear`) to prioritize alignments spanning larger portions of reads:
 
 - **Problem solved**: Short conserved domains (e.g., 16S rRNA) with high identity can dominate over longer, more informative alignments
 - **Solution**: Weight bitscore by alignment coverage to favor hits that explain more of the read
 - **Modes**: Linear, logarithmic, or sigmoid weighting functions
-- **Usage**: `--coverage-weight-mode linear` in `score classify`
+- **Usage**: `--coverage-weight-mode {none,linear,log,sigmoid}` in `score classify` (default `linear`)
 
 ### Performance
 
