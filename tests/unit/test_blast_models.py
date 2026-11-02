@@ -169,12 +169,19 @@ class TestBlastHitGenomeName:
         assert hit.genome_name == "unknown"
 
     def test_pipe_delimited_format(self, valid_blast_hit_dict):
-        """Should extract genome name from pipe-delimited format."""
-        valid_blast_hit_dict["sseqid"] = "contig_1234|my_genome_name"
+        """Standardized "{genome}|{contig}" headers: genome is before the pipe."""
+        valid_blast_hit_dict["sseqid"] = "my_genome_name|contig_1234"
         hit = BlastHit(**valid_blast_hit_dict)
 
-        # Based on regex pattern, should extract name after pipe
         assert hit.genome_name == "my_genome_name"
+
+    def test_non_accession_genomes_stay_distinct(self, valid_blast_hit_dict):
+        """MAG-style genome names must not collapse onto a shared contig name."""
+        names = []
+        for sseqid in ("bin_01|contig_5", "bin_02|contig_5"):
+            valid_blast_hit_dict["sseqid"] = sseqid
+            names.append(BlastHit(**valid_blast_hit_dict).genome_name)
+        assert names == ["bin_01", "bin_02"]
 
 
 class TestBlastHitFromLine:

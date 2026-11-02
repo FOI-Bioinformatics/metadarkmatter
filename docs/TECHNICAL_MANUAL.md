@@ -751,12 +751,14 @@ class BlastHit(BaseModel):
    def genome_name(self) -> str:
        if not self.sseqid or not self.sseqid.strip():
            return "unknown"
+       if "|" in self.sseqid:              # "{genome}|{contig}"
+           return self.sseqid.split("|", 1)[0].strip() or "unknown"
        match = self.GENOME_PATTERN.match(self.sseqid)
        if match:
            if match.group("genome"):
                return match.group("genome")
            if match.group("name"):
-               return match.group("name")   # part after the first '|'
+               return match.group("name")
        return self.sseqid.split()[0]
    ```
 

@@ -1067,7 +1067,7 @@ Represents one alignment between a metagenomic read and a reference genome seque
 @property
 def genome_name(self) -> str
 ```
-Extract genome identifier from subject sequence ID. Returns a leading `GCF_`/`GCA_`/`NZ_` accession if present; otherwise, for `a|b` IDs, the part after the first pipe; otherwise the text before the first space. Note that the vectorized path (`extract_genome_name_expr()` in `core/parsers.py`) instead takes the text before the first pipe, matching the standardized `{accession}|{contig_id}` headers.
+Extract genome identifier from subject sequence ID. For `a|b` IDs (the standardized `{accession}|{contig_id}` headers), returns the text before the first pipe, the same as the vectorized path (`extract_genome_name_expr()` in `core/parsers.py`). Otherwise returns a leading `GCF_`/`GCA_`/`NZ_` accession if present, else the text before the first space; empty IDs give `"unknown"`.
 
 **Methods**:
 ```python

@@ -1289,16 +1289,16 @@ When family validation is active, `family_bitscore_ratio`, `family_identity_gap`
   "conserved_regions": 200,
   "unclassified": 50,
   "off_target": 0,
-  "diversity_known": 0,
-  "diversity_novel": 0,
-  "diversity_uncertain": 0,
+  "diversity_known": 6500,
+  "diversity_novel": 2500,
+  "diversity_uncertain": 1000,
   "mean_novelty_index": 3.5,
   "mean_placement_uncertainty": 1.2,
   "genome_hit_counts": {"GCF_000123456.1": 3500, "GCF_000789012.1": 2800},
   "species_hit_counts": {},
-  "diversity_known_pct": 0.0,
-  "diversity_novel_pct": 0.0,
-  "diversity_uncertain_pct": 0.0,
+  "diversity_known_pct": 65.0,
+  "diversity_novel_pct": 25.0,
+  "diversity_uncertain_pct": 10.0,
   "known_species_pct": 65.0,
   "novel_species_pct": 20.0,
   "novel_genus_pct": 5.0,
@@ -1307,7 +1307,7 @@ When family validation is active, `family_bitscore_ratio`, `family_identity_gap`
 }
 ```
 
-Counts are taken from `taxonomic_call`. `species_hit_counts` and `species_count` are filled only when `--metadata` is given. The `diversity_*` fields are currently written as 0 by `score classify` (see `diversity_status` in the classification file instead).
+Counts are taken from `taxonomic_call`; the `diversity_*` fields group them by the per-read `diversity_status` (Known = Known Species; Novel = Novel Species + Novel Genus; Uncertain = the remaining in-family categories). `species_hit_counts` and `species_count` are filled only when `--metadata` is given and are empty with `--streaming`.
 
 ---
 

@@ -507,13 +507,12 @@ AAI (Average Amino acid Identity) is only needed for protein-level
 classification (`--alignment-mode protein`). Skip this step if you are
 using nucleotide-level classification with BLAST.
 
-**Current behaviour:** `score classify --aai` loads the AAI matrix, but the
-CLI classifier (`VectorizedClassifier`) does not currently use it, so
-classification output is the same with or without `--aai`. The AAI matrix
-is used for the AAI heatmap in `report generate --aai`. The statements
-below describe the intended role of AAI.
+With `score classify --aai`, the AAI matrix refines genus-level calls for
+reads in the novel-genus novelty range (see "Impact on Classification"
+below); placement uncertainty still comes from the ANI matrix. The AAI
+matrix is also used for the AAI heatmap in `report generate --aai`.
 
-AAI is intended to provide genus-level resolution for reads with 20-25% novelty. It is particularly useful for:
+AAI provides genus-level resolution for reads with 20-25% novelty. It is particularly useful for:
 - Samples with high genus-level diversity
 - Disambiguating borderline genus/species reads
 - Cross-genus validation
@@ -588,10 +587,12 @@ AAI mean: 62.8%
 
 ### Impact on Classification
 
-With the current CLI classifier, `--aai` does not change `taxonomic_call`
-or `legacy_call` (see the note above). The AAI-based genus refinement
-exists only in the programmatic `ANIWeightedClassifier`
-(`core/classification/classifiers/base.py`).
+For reads with novelty in the novel-genus range (20-25% nucleotide, 25-40%
+protein) and low placement uncertainty, `--aai` overrides both
+`taxonomic_call` and `legacy_call` using the maximum AAI between the top
+genome and the competing hit genomes: > 65% -> Novel Species, 58-65% ->
+Ambiguous Within Genus, < 58% -> Novel Genus. Other reads, and reads with
+no AAI value for any competitor, keep their ANI-based call.
 
 ---
 
@@ -806,7 +807,7 @@ metadarkmatter score classify \
 ```
 
 **Key options:**
-- `--aai`: Accepted, but currently has no effect on the classification output (see Step 4b)
+- `--aai`: Refines genus-level calls for novel-genus candidates (see Step 4b)
 - `--metadata`: Adds species/genus/family columns, maps hits to species
   representatives for ANI lookups, and infers the target family for
   Off-target detection
@@ -873,11 +874,10 @@ read_00003,GCF_000297895.1,78.4,21.6,0.8,Novel Genus,Francisella noatunensis,Fra
 ```
 
 The file also contains `diversity_known`/`diversity_novel`/`diversity_uncertain`
-counts and percentages. In the current version `score classify --summary`
-computes the summary before the metadata join, so `species_hit_counts` is
-empty and `species_count` is 0 even with `--metadata`, and the
-`diversity_*` fields are 0; use the per-read `species` column (see Step 11)
-or the report for species-level counts.
+counts and percentages (from the per-read `diversity_status` column).
+`species_hit_counts` and `species_count` are filled when `--metadata` is
+given (the example above was run without it); they are empty/0 with
+`--streaming`, which does not write species columns.
 
 ### Console Output
 
@@ -1036,7 +1036,7 @@ Examine your `summary.json`:
 | mean_novelty_index | 5.8 | Average divergence from references |
 | novel_species | 12,340 | Reads from potential new species |
 | novel_genus | 2,890 | Reads from potential new genera |
-| species_count | 0 | Currently always 0 from `score classify --summary` (see Step 8) |
+| species_count | 0 | Number of species with hits; requires `--metadata` (see Step 8) |
 
 ### Species-Level Insights
 

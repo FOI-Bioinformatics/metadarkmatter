@@ -67,7 +67,7 @@ metadarkmatter = "metadarkmatter.cli.main:app"
 mdm = "metadarkmatter.cli.main:app"
 
 [project.urls]
-Repository = "https://github.com/metadarkmatter/metadarkmatter"
+Repository = "https://github.com/FOI-Bioinformatics/metadarkmatter"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/metadarkmatter"]

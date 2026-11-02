@@ -390,7 +390,11 @@ class BayesianClassifier:
         if identity_gap is not None and identity_gap < self.config.identity_gap_ambiguous_max and num_hits > 1:
             priors[amb_idx] *= bay.identity_gap_boost
 
-        if num_hits == 1 and novelty_index >= self.config.novelty_novel_species_min:
+        # Use the effective (mode-aware) threshold, as the vectorized path
+        # does; the raw config field is the nucleotide value, so protein-mode
+        # single-hit reads were boosted from N >= 4 instead of N >= 10.
+        n_sp_min = self.config.get_effective_thresholds()["novelty_novel_species_min"]
+        if num_hits == 1 and novelty_index >= n_sp_min:
             priors[amb_idx] *= bay.single_hit_boost
 
         # Bayes' rule: posterior = likelihood * prior / evidence

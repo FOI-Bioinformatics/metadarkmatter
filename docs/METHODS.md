@@ -641,7 +641,7 @@ In protein mode `ScoringConfig.get_effective_thresholds()` returns the fixed con
 - AAI 58-65%: Genus boundary zone
 - AAI < 58%: Different genus
 
-These AAI rules are applied only by the programmatic `ANIWeightedClassifier` (after the Bayesian call, for Novel Genus candidates). `score classify --aai` loads the AAI matrix and passes it to `VectorizedClassifier`, which builds an AAI lookup table but does not currently use it in classification.
+These AAI rules are applied after the Bayesian call and Stage 2 refinement, to reads with N in the novel-genus range and U below the confident-placement maximum, by both `score classify --aai` (`VectorizedClassifier`) and the programmatic `ANIWeightedClassifier`. They override both `taxonomic_call` and `legacy_call`. The AAI value used is the maximum AAI between the top genome and any competing hit genome with AAI > 0; reads with no such value keep their ANI-based call.
 
 **Multi-factor confidence score scaling** (constants used only by the unused `calculate_confidence_score()`, Section 3.1):
 

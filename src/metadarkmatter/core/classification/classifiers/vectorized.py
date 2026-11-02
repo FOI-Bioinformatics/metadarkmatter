@@ -833,10 +833,21 @@ class VectorizedClassifier:
                 .agg([
                     # Count distinct secondary representatives
                     pl.col("representative_genome").n_unique().alias("num_secondary_genomes"),
-                    # Count representatives in same genus as best hit (ANI >= 80%)
-                    pl.col("ani").filter(pl.col("ani") >= genus_threshold).count().alias("same_genus_count"),
-                    # Count representatives in same species as best hit (ANI >= 95%)
-                    pl.col("ani").filter(pl.col("ani") >= species_threshold).count().alias("same_species_count"),
+                    # Count DISTINCT representatives in the same genus / species
+                    # as the best hit. These are compared with
+                    # num_secondary_genomes (also distinct), so they must not
+                    # count hit rows: several contigs of one genome would
+                    # otherwise make the counts unequal and mislabel the read
+                    # as across_genera (which can turn Ambiguous into
+                    # Conserved Region).
+                    pl.col("representative_genome")
+                    .filter(pl.col("ani") >= genus_threshold)
+                    .n_unique()
+                    .alias("same_genus_count"),
+                    pl.col("representative_genome")
+                    .filter(pl.col("ani") >= species_threshold)
+                    .n_unique()
+                    .alias("same_species_count"),
                     # Min ANI to secondary representatives (used for genus uncertainty)
                     pl.col("ani").min().fill_null(0.0).alias("min_ani_secondary"),
                 ])
@@ -860,6 +871,33 @@ class VectorizedClassifier:
                 "same_species_count": pl.UInt32,
                 "min_ani_secondary": pl.Float64,
             })
+
+        # Step 5c: AAI-based genus uncertainty (only when an AAI matrix is
+        # supplied). Mirrors ANIWeightedClassifier: 100 - max AAI between the
+        # best genome and any competing genome among the read's hits, using
+        # only pairs with AAI > 0. Before this, --aai was loaded but never
+        # used by the CLI classifier.
+        aai_metrics: pl.DataFrame | None = None
+        if (
+            self._aai_lookup_symmetric is not None
+            and not self._aai_lookup_symmetric.is_empty()
+            and self.config.use_aai_for_genus
+        ):
+            competitors = df_with_threshold.filter(
+                pl.col("representative_genome") != pl.col("best_representative")
+            ).select(["qseqid", "best_representative", "representative_genome"])
+            if not competitors.is_empty():
+                aai_metrics = (
+                    competitors.join(
+                        self._aai_lookup_symmetric,
+                        left_on=["best_representative", "representative_genome"],
+                        right_on=["genome1", "genome2"],
+                        how="inner",
+                    )
+                    .filter(pl.col("aai") > 0.0)
+                    .group_by("qseqid")
+                    .agg((100.0 - pl.col("aai").max()).cast(pl.Float64).alias("_aai_uncertainty"))
+                )
 
         # Step 6: Combine all metrics
         result = (
@@ -958,6 +996,33 @@ class VectorizedClassifier:
         # Compute legacy_call using the hard threshold cascade for side-by-side comparison
         from metadarkmatter.core.classification.thresholds import apply_legacy_thresholds
         result = apply_legacy_thresholds(result, self.config)
+
+        # AAI genus override (same rule as ANIWeightedClassifier): within the
+        # Novel Genus novelty range and below the genus uncertainty cap,
+        # AAI > aai_genus_boundary_high -> Novel Species, AAI in the boundary
+        # zone -> Ambiguous Within Genus, AAI < aai_genus_boundary_low ->
+        # Novel Genus. Applied to both calls before the derived flags.
+        if aai_metrics is not None:
+            result = result.join(aai_metrics, on="qseqid", how="left")
+            in_genus_range = (
+                pl.col("_aai_uncertainty").is_not_null()
+                & (pl.col("novelty_index") >= eff["novelty_novel_genus_min"])
+                & (pl.col("novelty_index") <= eff["novelty_novel_genus_max"])
+                & (pl.col("placement_uncertainty") < eff["uncertainty_novel_genus_max"])
+            )
+            low = 100.0 - self.config.aai_genus_boundary_high
+            high = 100.0 - self.config.aai_genus_boundary_low
+            aai_call = (
+                pl.when(pl.col("_aai_uncertainty") < low)
+                .then(pl.lit("Novel Species"))
+                .when(pl.col("_aai_uncertainty") <= high)
+                .then(pl.lit("Ambiguous Within Genus"))
+                .otherwise(pl.lit("Novel Genus"))
+            )
+            result = result.with_columns([
+                pl.when(in_genus_range).then(aai_call).otherwise(pl.col(c)).alias(c)
+                for c in ("taxonomic_call", "legacy_call")
+            ]).drop("_aai_uncertainty")
 
         # Add diversity_status, is_novel, and low_confidence flags
         bay_cfg = self.config.bayesian

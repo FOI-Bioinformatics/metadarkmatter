@@ -96,6 +96,16 @@ class BlastHit(BaseModel):
         if not self.sseqid or not self.sseqid.strip():
             return "unknown"
 
+        # Standardized database headers are "{genome}|{contig}" (see
+        # concatenate_genomes_with_mapping): the genome is the part BEFORE
+        # the first pipe. This matches extract_genome_name_expr() used by the
+        # CLI classifier. The previous regex returned the part after the pipe
+        # for non-accession genomes (e.g. MAG bins), so "bin_01|contig_5" and
+        # "bin_02|contig_5" were treated as the same genome.
+        if "|" in self.sseqid:
+            head = self.sseqid.split("|", 1)[0].strip()
+            return head or "unknown"
+
         match = self.GENOME_PATTERN.match(self.sseqid)
         if match:
             if match.group("genome"):

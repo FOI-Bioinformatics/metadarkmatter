@@ -355,8 +355,12 @@ class ANIWeightedClassifier:
                 if ani > max_ani:
                     max_ani = ani
 
-        if num_ambiguous_hits <= 1:
-            # Only one genome hit, no uncertainty
+        if num_ambiguous_hits <= 1 or not second_genome_found:
+            # Only one hit, or all ambiguous hits are to the best genome
+            # (e.g. several contigs of it): confident placement. Without the
+            # second check this fell through to effective_ani == 0 and was
+            # reported as U=100 ("genome not in ANI matrix"), disagreeing
+            # with VectorizedClassifier (U=0, num_secondary_genomes == 0).
             return 0.0, num_ambiguous_hits
 
         # Choose ANI based on uncertainty mode ("second", else "max" default)
@@ -402,6 +406,7 @@ class ANIWeightedClassifier:
 
         max_ani = 0.0
         num_genus_hits = 0
+        any_secondary = False
 
         for hit in hits_iter:
             if hit.bitscore < genus_bitscore_cutoff:
@@ -409,12 +414,13 @@ class ANIWeightedClassifier:
             num_genus_hits += 1
             secondary_genome = hit.genome_name
             if secondary_genome != best_genome:
+                any_secondary = True
                 ani = self.ani_matrix.get_ani(best_genome, secondary_genome)
                 if ani > max_ani:
                     max_ani = ani
 
-        if num_genus_hits <= 1:
-            # Only one genome hit at genus level
+        if num_genus_hits <= 1 or not any_secondary:
+            # Only one hit, or only hits to the best genome, at genus level
             return None, num_genus_hits
 
         if max_ani == 0.0:
