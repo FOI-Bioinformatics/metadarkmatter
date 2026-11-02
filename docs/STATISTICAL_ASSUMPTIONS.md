@@ -72,9 +72,14 @@ redefined (e.g. the split of *Clostridium*), set explicit thresholds.
 (N, U) space, and a Gaussian gives a closed-form log-likelihood. There is
 no peer-reviewed precedent for this exact form in microbial classification.
 
-**Defaults.** Means and sigmas are hand-set in
-`core/classification/bayesian.py:114-163` based on the centre and half-width
-of each category's threshold region.
+**Defaults.** Means and sigmas are derived in `build_category_params`
+(`core/classification/bayesian.py`, the `defaults` list) from the centre
+and width of each category's threshold region (sigma = width/3 + 0.5 or
+half-width + 0.5); the Ambiguous and Unclassified Gaussians use fixed
+widths. The likelihood includes the `1 / (2 pi sigma_N sigma_U)`
+normalisation. The resulting MAP decision boundaries differ from the
+hard thresholds (e.g. Known -> Novel Species at N ~ 6.2% rather than
+4% at U = 0); see `docs/METHODS.md` section 2.5.
 
 **Failure modes.**
 - *Correlation*: novelty and placement uncertainty are not strictly
@@ -120,9 +125,22 @@ reads with novelty in the novel-species range or higher.
 **Source.** Heuristic. These boosts capture the intuition that small
 identity gaps and single-hit evidence are weak signals.
 
-**Failure modes.** The boost factors are not data-driven. On datasets
-dominated by single-hit reads (low-coverage environmental samples), the
-single-hit boost can dominate and inflate the Ambiguous fraction.
+**Defaults and conditions.** `identity_gap_boost = 2.0` applies when
+`identity_gap` is not null, `identity_gap < identity_gap_ambiguous_max`
+(2.0) and `num_ambiguous_hits > 1`. `single_hit_boost = 1.5` applies when
+`num_ambiguous_hits == 1` and `N >= novelty_novel_species_min` (effective
+threshold). Both multiply the Ambiguous prior before normalisation.
+
+**Failure modes.** The boost factors are not data-driven. With the
+default Gaussians they are also weak: a scan of N at U = 0 found no
+change of the MAP call below N ~ 46% from either boost, so in
+`taxonomic_call` single-hit reads and reads with small identity gaps are
+not shifted towards Ambiguous at low placement uncertainty (the boosts
+can still move the Species Boundary / Ambiguous transition at higher U). The
+corresponding hard rules in `legacy_call` (single hit with N >= 7%, or
+identity gap < 2%, -> Ambiguous) act much more strongly, so the two
+calls can differ substantially on datasets dominated by single-hit reads
+(low-coverage environmental samples).
 
 ## 6. Linear coverage weighting
 
@@ -147,18 +165,33 @@ benchmark with `coverage_weight_mode = "none"` and compare.
 
 ## 7. Inferred uncertainty for single-hit reads
 
-**Assumption.** A read with exactly one ANI-matrix hit can have its
-placement uncertainty inferred from its novelty index using a piecewise-
-linear function (slopes 0.5, 1.0, 1.5 across novelty bands).
+**Assumption.** A read with only one hit in the bitscore window (or whose
+hits all map to one species representative) can have its placement
+uncertainty inferred from its novelty index using a piecewise-linear
+function (base 5%, slopes 0.5, 1.0, 1.5 across the novelty bands, and a
+constant 35% above the novel-genus range).
 
 **Source.** Construction: reads at low novelty have a small uncertainty
 band, reads near the species boundary have a wider band, and reads at the
-genus boundary have the widest band. The slopes are not fitted.
+genus boundary have the widest band. The slopes are not fitted. The
+function steps from 30.5% to 35% at N = 25% (nucleotide); with the
+protein-mode breakpoints it rises to 47.5% below N = 40% and then drops
+to 35%.
+
+**Where it is used.** The value is reported as `inferred_uncertainty` and
+drives the legacy single-hit rule (`legacy_call` = Ambiguous when it is
+>= `single_hit_uncertainty_threshold`, i.e. N >= 7% by default) and the
+legacy `placement_confidence` sub-score. It is not an input to the
+Bayesian `taxonomic_call` or `confidence_score`: the Bayesian model sees
+`placement_uncertainty = 0` for these reads, so `single_hit_uncertainty_threshold`
+has no effect on `taxonomic_call`.
 
 **Failure modes.** Inferred uncertainty is a smooth proxy for the missing
 empirical uncertainty; it cannot recover real ANI competition that was
-not measured. Treat single-hit Bayesian calls as lower-confidence than
-multi-hit calls.
+not measured. Because `taxonomic_call` treats single-hit reads as having
+zero uncertainty, their `confidence_score` can be as high as that of
+well-supported multi-hit reads; treat single-hit Bayesian calls as
+lower-confidence than multi-hit calls and compare with `legacy_call`.
 
 ## 8. Adjacent novelty-band merging
 
@@ -177,8 +210,12 @@ single population into adjacent-band singletons.
 ## 9. Off-target classification
 
 **Assumption.** A read whose best in-family bitscore is less than
-`family_ratio_threshold * best_overall_bitscore` is labelled
-`Off-target` and given a low fixed confidence; its placement uncertainty
+`family_ratio_threshold * best_overall_bitscore` (or that has no
+in-family hit at all) is labelled `Off-target` and given a low fixed
+confidence; "in-family" means the hit genome is in the ANI matrix (or
+in the representative mapping when metadata provides one). Family
+validation is active when `--target-family` is given or inferred from
+the `family` column of the metadata; its placement uncertainty
 is reported as `null` because the matching genome is outside the ANI
 matrix.
 
@@ -204,16 +241,24 @@ posterior to 100.
 **Failure modes.** Linear scaling assumes uniform information content
 across the entropy range. Empirically, classifier accuracy as a function
 of entropy is non-linear; the linear mapping over-rewards mid-range
-posteriors. The Phase 1 calibration pipeline replaces this with an
-isotonic or logistic fit against a labelled holdout set.
+posteriors. `scripts/calibrate_entropy.py` can fit an isotonic
+regression of accuracy on entropy (per-bin averaging when scikit-learn
+is absent) and store it as `bayesian.entropy_calibration`; no such
+calibration is shipped as a default (`docs/CALIBRATION_RESULTS.md`).
 
 ## 11. ANI matrix completeness
 
-**Assumption.** Pairs missing from the ANI matrix are treated as 0.0% ANI
-(i.e. unrelated) rather than as missing data.
+**Assumption.** Pairs that are in the ANI matrix but were not computed
+(stored as 0, typically below the ANI tool's reporting threshold) are
+treated as `ANI_DEFAULT_UNRELATED = 70%` for lookups, i.e. U = 30%. A
+competing genome that is absent from the matrix altogether gives U =
+100%. Pairs supplied in only one direction are mirrored; matrices on a
+0-1 scale are rejected. Adaptive threshold detection excludes uncomputed
+pairs rather than using the 70% substitute.
 
-**Source.** Construction: missing pairs are typically those below the
-ANI tool's reporting threshold, so 0.0 is the conservative substitute.
+**Source.** Construction: 70% is a conservative within-family value for
+distant pairs; either substitute places the read well above the 5%
+conserved-region threshold.
 
 **Failure modes.** When the ANI matrix is computed only over
 representatives, missing pairs may reflect computational shortcuts rather
@@ -226,9 +271,16 @@ representative mapping in the metadata file is comprehensive.
 and config, the classifier produces deterministic output.
 
 **Verification.** Sorting in the vectorized classifier uses
-`(weighted_bitscore, pident, genome_name)` for stable tie-breaking.
-Random-state-dependent components (adaptive GMM, visualisation
-sampling) accept a `random_state` seed.
+`(weighted_bitscore, pident, genome_name)` for stable tie-breaking, and
+since PR #13 the second genome used for `uncertainty_mode = "second"` is
+chosen with the same total order (previously an unstable sort made
+`placement_uncertainty` depend on batch size, so streaming and
+in-memory runs could disagree). ANI values are stored as float64.
+Streaming mode requires each read's hits to be contiguous and raises an
+error otherwise. Random-state-dependent components (adaptive GMM,
+visualisation sampling) take their seed from `METADARKMATTER_SEED`
+(default 42). `tests/integration/test_pipeline_determinism.py` checks
+byte-identical `score classify` output across two runs.
 
 **Failure modes.** External tools (FastANI, MMseqs2, Diamond) may be
 non-deterministic across runs due to multi-threading; pin tool versions
