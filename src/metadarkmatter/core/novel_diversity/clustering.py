@@ -1,11 +1,24 @@
 """
 Novel diversity clustering for identifying putative novel taxa.
 
-Groups novel reads by their nearest reference genome and novelty level
-to form clusters representing putative novel species or genera.  When an
-ANI matrix is provided, genomes within a shared ANI neighborhood are
-merged before clustering, reducing inflation caused by reads scattering
-across equidistant references.
+Novel reads (Novel Species / Novel Genus) are grouped into "novel lineage
+groups". Three grouping methods are available:
+
+- ``genus`` (default when metadata gives genus names): reads are grouped by
+  the GTDB genus of their nearest reference; within a genus, references are
+  linked when their ANI is >= ``genome_neighborhood_threshold`` (80%), so
+  distant lineages of one genus stay apart. Reads of one novel organism
+  usually spread over several references of the same genus, so this keeps
+  them together without chaining a whole family, as unrestricted
+  single-linkage ANI merging does in dense clades. Groups are not split by
+  call or novelty band; the group's call is the majority call of its reads.
+- ``reference``: one group per nearest reference (species representative).
+  Used when no genus information is available.
+- ``legacy``: the previous method, (ANI neighbourhood of the nearest
+  reference) x 5% novelty band x call, with adjacent-band merging.
+
+A group is a candidate lineage, not a confirmed single organism: a novel
+genus whose reads hit one existing genus is pooled with that genus.
 """
 
 from __future__ import annotations
@@ -26,19 +39,17 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+Grouping = Literal["auto", "genus", "reference", "legacy"]
+GROUPING_CHOICES: tuple[str, ...] = ("auto", "genus", "reference", "legacy")
+
 
 class NovelDiversityAnalyzer:
     """
-    Analyzes novel diversity by clustering reads into putative novel taxa.
+    Analyzes novel diversity by grouping novel reads into novel lineage groups.
 
-    Clusters are formed based on:
-    - Best match genome (closest reference), optionally merged by ANI neighborhood
-    - Novelty band (5% intervals)
-    - Taxonomic call (Novel Species or Novel Genus)
-
-    Adjacent bands sharing the same (representative genome, taxonomic call)
-    are merged when their novelty ranges overlap or nearly overlap, reducing
-    boundary artifacts at hard band edges.
+    The grouping method is set by ``grouping`` (see the module docstring):
+    ``genus`` (default with genus metadata), ``reference`` (fallback without
+    it) or ``legacy`` (neighbourhood x novelty band x call).
 
     This enables researchers to:
     1. Identify distinct novel organisms in their sample
@@ -64,6 +75,7 @@ class NovelDiversityAnalyzer:
         min_cluster_size: int = 3,
         genome_neighborhood_threshold: float = 80.0,
         merge_band_tolerance: float = 2.0,
+        grouping: Grouping | str = "auto",
     ) -> None:
         """
         Initialize the analyzer.
@@ -77,9 +89,17 @@ class NovelDiversityAnalyzer:
             ani_matrix: ANI matrix for genome neighborhood merging
             novelty_band_size: Size of novelty bands in percent (default 5.0)
             min_cluster_size: Minimum reads to form a cluster (default 3)
-            genome_neighborhood_threshold: ANI threshold for grouping genomes
-                into the same neighborhood (default 80.0)
+            genome_neighborhood_threshold: ANI threshold for linking
+                references: within a genus (genus grouping) or across all
+                references (legacy grouping). Default 80.0
+            merge_band_tolerance: Adjacent-band merge tolerance (legacy only)
+            grouping: "genus", "reference", "legacy", or "auto" (genus when
+                metadata provides genus names for the novel reads' references,
+                otherwise reference). See the module docstring.
         """
+        if grouping not in GROUPING_CHOICES:
+            msg = f"grouping must be one of {GROUPING_CHOICES}, got {grouping!r}"
+            raise ValueError(msg)
         self._df = classifications
         self._metadata = metadata
         self._ani_matrix = ani_matrix
@@ -87,6 +107,8 @@ class NovelDiversityAnalyzer:
         self._min_cluster_size = min_cluster_size
         self._genome_neighborhood_threshold = genome_neighborhood_threshold
         self._merge_band_tolerance = merge_band_tolerance
+        self._grouping_requested: str = grouping
+        self.grouping: str | None = None  # resolved method, set by cluster_novel_reads
         self._clusters: list[NovelCluster] | None = None
         self._summary: NovelDiversitySummary | None = None
 
@@ -325,14 +347,12 @@ class NovelDiversityAnalyzer:
 
         Algorithm:
             1. Filter to Novel Species and Novel Genus reads only
-            2. Compute novelty band for each read
-            3. Map genomes to neighborhood representatives (ANI-aware)
-            4. Group by (representative_genome, novelty_band, taxonomic_call)
-            5. Merge adjacent bands with overlapping novelty ranges
-            6. Filter by minimum cluster size
-            7. Generate cluster IDs and suggested names
-            8. Assign confidence ratings (Bayesian-informed when available)
-            9. Infer phylogenetic context
+            2. Map hit genomes to their species representatives
+            3. Group reads by the resolved grouping method (genus, reference
+               or legacy neighbourhood x band x call)
+            4. Filter by minimum group size
+            5. Generate IDs (NSP_/NGN_ by the group's majority call), names,
+               confidence ratings and phylogenetic context
         """
         if self._clusters is not None:
             return self._clusters
@@ -379,6 +399,142 @@ class NovelDiversityAnalyzer:
                 pl.col("best_match_genome").alias("cluster_genome")
             )
 
+        grouping = self._resolve_grouping(novel_df)
+        self.grouping = grouping
+        if grouping == "legacy":
+            rows = self._legacy_rows(novel_df)
+        else:
+            rows = self._lineage_rows(novel_df, grouping)
+
+        # Filter by minimum cluster size
+        rows = [r for r in rows if r["read_count"] >= self._min_cluster_size]
+        return self._build_clusters(rows, grouping)
+
+    # ------------------------------------------------------------------
+    # Grouping methods
+    # ------------------------------------------------------------------
+
+    def _genus_of(self, accession: str) -> str | None:
+        if self._metadata is None:
+            return None
+        genus = self._metadata.get_genus(accession)
+        if not genus or genus == "Unknown":
+            return None
+        return str(genus)
+
+    def _resolve_grouping(self, novel_df: pl.DataFrame) -> str:
+        """Resolve ``auto`` to ``genus`` or ``reference``."""
+        requested = self._grouping_requested
+        if requested in ("reference", "legacy"):
+            return requested
+        genomes = novel_df["cluster_genome"].unique().to_list()
+        has_genus = any(self._genus_of(g) is not None for g in genomes)
+        if has_genus:
+            return "genus"
+        logger.warning(
+            "No genus information for the novel reads' references (no --metadata, "
+            "or no genus column); grouping novel reads by nearest reference "
+            "instead of by genus. Reads of one novel organism may be split "
+            "across several groups."
+        )
+        return "reference"
+
+    def _genus_components(self, genomes: list[str]) -> dict[str, str]:
+        """Map each genome to a group key: its genus, split by ANI within the genus.
+
+        References of one genus are linked (single linkage) when their ANI is
+        >= ``genome_neighborhood_threshold``; links never cross genera, so a
+        dense family cannot chain into one group. Without an ANI matrix every
+        genus is one group. Genomes without a genus form their own group.
+        """
+        parent = {g: g for g in genomes}
+
+        def find(x: str) -> str:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        genus_of = {g: self._genus_of(g) for g in genomes}
+        by_genus: dict[str, list[str]] = {}
+        for g in genomes:
+            if genus_of[g] is not None:
+                by_genus.setdefault(str(genus_of[g]), []).append(g)
+        ani = self._ani_matrix
+        for members in by_genus.values():
+            for i, a in enumerate(members):
+                for b in members[i + 1:]:
+                    linked = (
+                        ani is None
+                        or not (ani.has_genome(a) and ani.has_genome(b))
+                        or ani.get_ani(a, b) >= self._genome_neighborhood_threshold
+                    )
+                    if linked:
+                        ra, rb = find(a), find(b)
+                        if ra != rb:
+                            parent[max(ra, rb)] = min(ra, rb)
+        return {
+            g: (f"genus:{genus_of[g]}:{find(g)}" if genus_of[g] is not None else f"genome:{g}")
+            for g in genomes
+        }
+
+    def _lineage_rows(self, novel_df: pl.DataFrame, grouping: str) -> list[dict[str, Any]]:
+        """One group per genus (or per reference) of the nearest reference.
+
+        Genomes without a genus in the metadata form their own group.
+        """
+        genomes = sorted(novel_df["cluster_genome"].unique().to_list())
+        if grouping == "genus":
+            key_map = self._genus_components(genomes)
+        else:
+            key_map = {g: f"genome:{g}" for g in genomes}
+        df = novel_df.with_columns(
+            pl.col("cluster_genome").replace_strict(key_map).alias("_group_key")
+        )
+
+        agg_exprs = [
+            pl.len().alias("read_count"),
+            pl.col("novelty_index").mean().alias("mean_novelty"),
+            pl.col("novelty_index").min().alias("novelty_min"),
+            pl.col("novelty_index").max().alias("novelty_max"),
+            pl.col("effective_uncertainty").mean().alias("mean_uncertainty"),
+            pl.col("read_id").sort().alias("read_ids"),
+            pl.col("best_match_genome").unique().sort().alias("contributing_genomes"),
+            (pl.col("taxonomic_call") == "Novel Species").sum().alias("n_species"),
+            (pl.col("taxonomic_call") == "Novel Genus").sum().alias("n_genus"),
+        ]
+        if "inferred_uncertainty" in df.columns:
+            agg_exprs.append(pl.col("inferred_uncertainty").mean().alias("mean_inferred"))
+        if "discovery_score" in df.columns:
+            agg_exprs.append(pl.col("discovery_score").mean().alias("mean_discovery"))
+        if "confidence_score" in df.columns:
+            agg_exprs.append(pl.col("confidence_score").mean().alias("mean_bayesian_conf"))
+        grouped = df.group_by("_group_key").agg(agg_exprs).sort("_group_key")
+
+        # Nearest reference of each group: the genome with the most reads
+        # (ties broken by accession, so the choice is reproducible).
+        counts = (
+            df.group_by(["_group_key", "cluster_genome"]).agg(pl.len().alias("n"))
+            .sort(["_group_key", "n", "cluster_genome"], descending=[False, True, False])
+        )
+        top_genome: dict[str, str] = {}
+        for key, genome, _n in counts.iter_rows():
+            top_genome.setdefault(key, genome)
+
+        rows: list[dict[str, Any]] = []
+        band = self._novelty_band_size
+        for row in grouped.to_dicts():
+            n_sp, n_gn = int(row.pop("n_species")), int(row.pop("n_genus"))
+            row["taxonomic_call"] = "Novel Genus" if n_gn > n_sp else "Novel Species"
+            row["novel_species_reads"] = n_sp
+            row["novel_genus_reads"] = n_gn
+            row["representative_genome"] = top_genome[row.pop("_group_key")]
+            row["novelty_band"] = int(row["novelty_min"] // band) * int(band)
+            rows.append(row)
+        return rows
+
+    def _legacy_rows(self, novel_df: pl.DataFrame) -> list[dict[str, Any]]:
+        """Previous method: neighbourhood x novelty band x call."""
         # Step 3: Build genome neighborhoods and map to representatives.
         # Sort for a deterministic genome order (polars .unique() is unordered),
         # so neighborhood construction and tie-breaks are reproducible.
@@ -429,11 +585,9 @@ class NovelDiversityAnalyzer:
         # Step 5: Merge adjacent bands first, so that sub-threshold groups in
         # neighbouring bands can combine into a cluster that passes the
         # minimum size (filtering first would silently drop those reads).
-        rows = self._merge_adjacent_bands(grouped.to_dicts())
+        return self._merge_adjacent_bands(grouped.to_dicts())
 
-        # Step 6: Filter by minimum cluster size
-        rows = [r for r in rows if r["read_count"] >= self._min_cluster_size]
-
+    def _build_clusters(self, rows: list[dict[str, Any]], grouping: str) -> list[NovelCluster]:
         if not rows:
             logger.info(
                 f"No clusters with >= {self._min_cluster_size} reads found"
@@ -528,10 +682,13 @@ class NovelDiversityAnalyzer:
                 read_ids=read_ids,
                 mean_bayesian_confidence=mean_bayesian_conf,
                 contributing_genomes=contributing_genomes,
+                grouping=grouping,
+                novel_species_reads=row.get("novel_species_reads"),
+                novel_genus_reads=row.get("novel_genus_reads"),
             )
             clusters.append(cluster)
 
-        logger.info(f"Created {len(clusters)} novel diversity clusters")
+        logger.info(f"Created {len(clusters)} novel lineage groups ({grouping} grouping)")
         self._clusters = clusters
         return clusters
 
@@ -758,6 +915,7 @@ def build_report_analyzer(
     classifications: pl.DataFrame,
     metadata: GenomeMetadata | None,
     ani_matrix_df: pl.DataFrame | None,
+    grouping: Grouping | str = "auto",
 ) -> NovelDiversityAnalyzer:
     """Create the analyzer used by every report section.
 
@@ -778,4 +936,5 @@ def build_report_analyzer(
         ani_matrix=ani_obj,
         novelty_band_size=5.0,
         min_cluster_size=3,
+        grouping=grouping,
     )

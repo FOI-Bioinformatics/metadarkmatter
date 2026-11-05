@@ -192,6 +192,7 @@ class ReportConfig:
 
     # Phylogeny tab options
     skip_phylogeny: bool = False  # Skip phylogeny tab generation
+    cluster_grouping: str = "auto"  # novel lineage grouping (see novel_diversity.clustering)
     user_tree_path: Path | None = None  # Path to user-provided Newick tree
 
     plot_config: PlotConfig = field(default_factory=PlotConfig)

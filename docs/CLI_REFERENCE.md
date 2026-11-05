@@ -1580,6 +1580,7 @@ Generate a unified HTML report from classification results.
 | `--max-phylo-references` | | INT | 50 | Maximum reference genomes in the phylogenetic context heatmap |
 | `--tree` | | PATH | None | Newick tree file; if omitted, a neighbor-joining tree is built from the ANI matrix |
 | `--no-phylogeny` | | FLAG | False | Skip the phylogeny view (faster for large datasets) |
+| `--cluster-grouping` | | TEXT | auto | How the Novel Diversity tab groups novel reads: `auto` (genus when metadata gives genus names, otherwise reference), `genus` (GTDB genus of the nearest reference; within a genus, references below 80% ANI are kept apart), `reference` (nearest reference) or `legacy` (ANI neighbourhood x 5% novelty band x call, the previous method). See METHODS.md section 4.1 and NOVEL_LINEAGE_GROUPING.md. |
 | `--report-mode` | | TEXT | offline | 'offline' inlines Plotly (and vendored D3) for a self-contained file; 'cdn' uses remote script tags |
 | `--verbose` | `-v` | FLAG | False | Enable verbose output |
 | `--quiet` | `-q` | FLAG | False | Suppress progress output |
@@ -1699,7 +1700,7 @@ metadarkmatter report multi \
 
 ### `metadarkmatter report summarize`
 
-Summarize novel diversity into putative taxon clusters.
+Summarize novel diversity into novel lineage groups (one row per group).
 
 Positional argument: `CLASSIFICATIONS`
 
@@ -1707,8 +1708,10 @@ Positional argument: `CLASSIFICATIONS`
 |--------|-------|------|---------|-------------|
 | `--output` | `-o` | PATH | - | Output file path (TSV or JSON based on --format) (required) |
 | `--metadata` | `-m` | PATH | - | Genome metadata file (TSV) for species/genus/family lookups |
-| `--band-size` | `-b` | FLOAT | 5.0 | Size of novelty bands in percent (default 5.0) |
-| `--min-cluster-size` | `-s` | INT | 3 | Minimum reads to form a cluster (default 3) |
+| `--band-size` | `-b` | FLOAT | 5.0 | Size of novelty bands in percent (`--grouping legacy` only) |
+| `--min-cluster-size` | `-s` | INT | 3 | Minimum reads to form a group (default 3) |
+| `--ani` | `-a` | PATH | - | ANI matrix (CSV). With genus grouping, keeps references of one genus below 80% ANI apart; with legacy grouping, enables neighbourhood merging |
+| `--grouping` | `-g` | TEXT | auto | `auto` (genus when metadata gives genus names, otherwise reference), `genus` (GTDB genus of the nearest reference; within a genus, references below 80% ANI are kept apart), `reference` (nearest reference) or `legacy` (ANI neighbourhood x 5% novelty band x call, the previous method). See METHODS.md section 4.1 and NOVEL_LINEAGE_GROUPING.md. |
 | `--format` | `-f` | TEXT | tsv | Output format: 'tsv' or 'json' |
 | `--json` | `-j` | PATH | - | Additional JSON output path with full metadata |
 | `--verbose` | `-v` | FLAG | off | Enable verbose output |

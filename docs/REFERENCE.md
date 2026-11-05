@@ -86,7 +86,7 @@ For complete step-by-step workflows, see the
 | `visualize summary` | Summary charts |
 | `report generate` | Single-sample HTML report |
 | `report multi` | Multi-sample comparison |
-| `report summarize` | Summarize novel diversity into putative taxon clusters |
+| `report summarize` | Summarize novel reads into novel lineage groups (genus of nearest reference) |
 | `report vendor-d3` / `vendor-cdn-sri` | Cache D3 locally / compute SRI hashes for CDN tags |
 | `run pipeline` | Run the full pipeline end to end |
 | `doctor` | Report environment, dependencies and tool versions |

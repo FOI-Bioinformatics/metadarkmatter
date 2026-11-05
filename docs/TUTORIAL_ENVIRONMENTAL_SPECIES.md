@@ -992,7 +992,7 @@ Open `report.html` in a browser. The report is self-contained by default
 
 1. **Summary** - Metric cards, diversity bar, key findings, top species table (with `--metadata`)
 2. **Classification** - Novelty vs. uncertainty scatter, distributions, confidence analysis (posterior entropy, posterior composition)
-3. **Novel Diversity** - Novel clusters with phylogenetic context (shown only when novel reads exist)
+3. **Novel Diversity** - Novel lineage groups (by genus of the nearest reference) with phylogenetic context (shown only when novel reads exist)
 4. **Reference** - Top-20 species bar chart (with `--metadata`), ANI/AAI heatmaps, collapsible phylogenetic tree and recruitment-plot panels (recruitment requires `--recruitment`)
 5. **Data** - Searchable classification table
 

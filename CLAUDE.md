@@ -175,6 +175,7 @@ See [Tutorial](docs/TUTORIAL_ENVIRONMENTAL_SPECIES.md) Step 7 for runtime guidan
 - **[docs/STATISTICS_AUDIT.md](docs/STATISTICS_AUDIT.md)** - 2026-05 audit of classifier math, ANI symmetry fix, calibration guardrails, and the per-read calibration experiment orchestrator (`scripts/run_per_read_calibration.sh`)
 - **[docs/CALIBRATION.md](docs/CALIBRATION.md)** - Bayesian calibration pipeline (build benchmark -> fit Gaussians -> fit entropy -> evaluate)
 - **[docs/CLADE_NOVELTY_VALIDATION.md](docs/CLADE_NOVELTY_VALIDATION.md)** - Leave-one-out validation (`scripts/benchmark_leave_one_out.py`) of the clade-novelty rule (on by default) on three families. Use the same script to validate any change to classification defaults.
+- **[docs/NOVEL_LINEAGE_GROUPING.md](docs/NOVEL_LINEAGE_GROUPING.md)** - Multi-holdout validation (`scripts/benchmark_lineage_grouping.py`) of grouping novel reads by GTDB genus of the nearest reference (`NovelDiversityAnalyzer(grouping=...)`: auto/genus/reference/legacy; `report generate --cluster-grouping`, `report summarize --grouping`). Use it to validate changes to novel-read grouping.
 - **[docs/CALIBRATION_RESULTS.md](docs/CALIBRATION_RESULTS.md)** - Three-family validation. **Hand-tuned defaults beat every fitted YAML; do not ship calibrated configs as the default.** Calibration scripts remain as diagnostic tools.
 - **[docs/EXTERNAL_TOOLS.md](docs/EXTERNAL_TOOLS.md)** - Tested external tool versions and reproducibility checklist
 - **[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md)** - Production-readiness audit (8.4/10 internal-lab composite)
@@ -302,7 +303,7 @@ src/metadarkmatter/
 │   │       ├── base.py       # ANIWeightedClassifier (programmatic API, Bayesian-primary)
 │   │       └── vectorized.py # VectorizedClassifier (sole CLI classifier, Bayesian-primary)
 │   ├── novel_diversity/      # Novel taxa clustering and models
-│   │   ├── clustering.py     # Cluster novel reads by genome proximity
+│   │   ├── clustering.py     # Group novel reads into novel lineage groups (genus of nearest reference by default; reference/legacy)
 │   │   └── models.py         # NovelClusterResult, NovelReadInfo dataclasses
 │   └── phylogeny/            # Phylogenetic tree building and novel cluster placement
 │       ├── tree_builder.py   # ANI-to-Newick conversion, user tree loading

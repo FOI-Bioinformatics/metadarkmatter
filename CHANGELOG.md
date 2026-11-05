@@ -93,6 +93,20 @@ Production-readiness and UX hardening pass.
 
 ### Changed
 
+- Novel Diversity grouping (report and `report summarize`): novel reads are
+  now grouped into "novel lineage groups" by the GTDB genus of their nearest
+  reference, split within a genus at 80% ANI, instead of by (80% ANI
+  neighbourhood over all references, 5% novelty band, call). With five
+  Enterobacteriaceae genomes held out at once the old method chained the
+  family into four groups (purity 0.26); genus grouping gives purity 0.81
+  and keeps each organism's reads together in the other benchmark sets
+  (pair recall +0.13 to +0.31; docs/NOVEL_LINEAGE_GROUPING.md). Without genus
+  metadata, reads are grouped by nearest reference with a warning.
+  `--cluster-grouping legacy` / `--grouping legacy` reproduce the previous
+  groups exactly. Group IDs use the group's majority call; new
+  `novel_species_reads`, `novel_genus_reads` and `grouping` fields (also in
+  the lineage-group CSV). `report summarize` gains `--ani` and `--grouping`;
+  new `scripts/benchmark_lineage_grouping.py`.
 - `score batch` now runs each sample through the same runner and config
   builder as `score classify`, so it supports `--metadata`,
   `--id-mapping`/`--genomes`, `--target-family`, `--config`, `--aai`,

@@ -159,6 +159,17 @@ def generate_report(
         "--no-phylogeny",
         help="Skip phylogeny tab generation (faster for large datasets).",
     ),
+    cluster_grouping: str = typer.Option(
+        "auto",
+        "--cluster-grouping",
+        help=(
+            "How novel reads are grouped into novel lineage groups: 'auto' "
+            "(genus when metadata gives genus names, else reference), 'genus' "
+            "(GTDB genus of the nearest reference, split within a genus at 80%% "
+            "ANI), 'reference' (nearest reference) or 'legacy' (ANI "
+            "neighbourhood x 5%% novelty band x call; the previous default)."
+        ),
+    ),
     report_mode: str = typer.Option(
         "offline",
         "--report-mode",
@@ -239,6 +250,14 @@ def generate_report(
     if report_mode not in ("offline", "cdn"):
         console.print(
             f"[red]Invalid --report-mode '{report_mode}'. Use 'offline' or 'cdn'.[/red]"
+        )
+        raise typer.Exit(code=2)
+    from metadarkmatter.core.novel_diversity.clustering import GROUPING_CHOICES
+
+    if cluster_grouping not in GROUPING_CHOICES:
+        console.print(
+            f"[red]Invalid --cluster-grouping '{cluster_grouping}'. "
+            f"Use one of: {', '.join(GROUPING_CHOICES)}.[/red]"
         )
         raise typer.Exit(code=2)
 
@@ -414,6 +433,7 @@ def generate_report(
                 max_phylo_clusters=max_phylo_clusters,
                 max_phylo_references=max_phylo_references,
                 skip_phylogeny=no_phylogeny,
+                cluster_grouping=cluster_grouping,
                 user_tree_path=tree,
                 report_mode=report_mode,
                 plot_config=PlotConfig(),
@@ -660,6 +680,28 @@ def summarize_novel_diversity(
         "--min-cluster-size", "-s",
         help="Minimum reads to form a cluster (default 3)",
     ),
+    ani: Path | None = typer.Option(
+        None,
+        "--ani", "-a",
+        help=(
+            "ANI matrix (CSV). With genus grouping, references of one genus "
+            "below 80%% ANI are kept in separate groups; with legacy grouping, "
+            "enables neighbourhood merging."
+        ),
+        exists=True,
+        dir_okay=False,
+    ),
+    grouping: str = typer.Option(
+        "auto",
+        "--grouping", "-g",
+        help=(
+            "How novel reads are grouped into novel lineage groups: 'auto' "
+            "(genus when metadata gives genus names, else reference), 'genus' "
+            "(GTDB genus of the nearest reference, split within a genus at 80%% "
+            "ANI), 'reference' (nearest reference) or 'legacy' (ANI "
+            "neighbourhood x 5%% novelty band x call; the previous default)."
+        ),
+    ),
     output_format: str = typer.Option(
         "tsv",
         "--format", "-f",
@@ -682,11 +724,13 @@ def summarize_novel_diversity(
     ),
 ) -> None:
     """
-    Summarize novel diversity into putative taxon clusters.
+    Summarize novel diversity into novel lineage groups.
 
-    Groups reads classified as Novel Species or Novel Genus into clusters
-    based on their nearest reference genome and novelty level. This enables
-    identification of distinct novel organisms for further investigation.
+    Groups reads classified as Novel Species or Novel Genus by the GTDB genus
+    of their nearest reference (needs --metadata; within a genus, references
+    below 80% ANI stay apart when --ani is given). Without genus information,
+    reads are grouped by nearest reference. A group is a candidate lineage,
+    not a confirmed single organism. --band-size applies to --grouping legacy.
 
     Example:
 
@@ -712,6 +756,15 @@ def summarize_novel_diversity(
     out = QuietConsole(console, quiet=quiet)
 
     out.print("\n[bold blue]Novel Diversity Summary[/bold blue]\n")
+
+    from metadarkmatter.core.novel_diversity.clustering import GROUPING_CHOICES
+
+    if grouping not in GROUPING_CHOICES:
+        console.print(
+            f"[red]Error: Invalid --grouping '{grouping}'. "
+            f"Use one of: {', '.join(GROUPING_CHOICES)}.[/red]"
+        )
+        raise typer.Exit(code=1) from None
 
     # Validate format
     if output_format not in ("tsv", "json"):
@@ -762,11 +815,18 @@ def summarize_novel_diversity(
         try:
             from metadarkmatter.core.novel_diversity import NovelDiversityAnalyzer
 
+            ani_matrix = None
+            if ani is not None:
+                from metadarkmatter.core.classification.ani_matrix import ANIMatrix
+
+                ani_matrix = ANIMatrix.from_file(ani)
             analyzer = NovelDiversityAnalyzer(
                 classifications=df,
                 metadata=genome_metadata,
+                ani_matrix=ani_matrix,
                 novelty_band_size=novelty_band_size,
                 min_cluster_size=min_cluster_size,
+                grouping=grouping,
             )
             clusters = analyzer.cluster_novel_reads()
             summary = analyzer.get_summary()
@@ -777,7 +837,16 @@ def summarize_novel_diversity(
                 console.print_exception()
             raise typer.Exit(code=1) from None
 
-    out.print(f"  [green]Found {len(clusters)} clusters[/green]")
+    out.print(
+        f"  [green]Found {len(clusters)} novel lineage groups "
+        f"({analyzer.grouping} grouping)[/green]"
+    )
+    if analyzer.grouping == "reference" and grouping == "auto":
+        console.print(
+            "[yellow]Warning: no genus information (pass --metadata); novel reads "
+            "were grouped by nearest reference, so one novel organism may be "
+            "split across several groups.[/yellow]"
+        )
 
     if len(clusters) == 0:
         console.print(
