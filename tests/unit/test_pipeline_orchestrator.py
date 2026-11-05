@@ -113,21 +113,22 @@ def test_full_run_executes_enabled_steps_and_writes_manifest(tmp_path: Path):
     assert len(data["steps"]) == 8  # all steps recorded (3 skipped + 5 completed)
 
 
-def test_checkpoint_skips_present_outputs(tmp_path: Path):
+def test_outputs_without_completion_marker_are_not_cached(tmp_path: Path):
+    """Pre-existing (possibly partial) outputs without a .done marker re-run.
+
+    The cached path with identical inputs is covered in test_round2_cli_fixes.
+    """
     cfg = _compute_only_config(tmp_path)
     layout = PipelineLayout(root=cfg.output_dir)
-    # Pre-create the classification output so CLASSIFY is cached.
     layout.classifications.parent.mkdir(parents=True, exist_ok=True)
     layout.classifications.write_text("read_id,taxonomic_call\nr1,Known Species\n")
 
     runner = RecordingRunner()
-    pipeline = Pipeline(cfg, layout, runner=runner)
-    manifest = pipeline.run()
+    manifest = Pipeline(cfg, layout, runner=runner).run()
 
     statuses = {s.name: s.status for s in manifest.steps}
-    assert statuses["classify"] == StepStatus.CACHED
-    # classify command must NOT have been executed
-    assert not any("classify" in " ".join(c) for c in runner.calls)
+    assert statuses["classify"] == StepStatus.COMPLETED
+    assert any("classify" in " ".join(c) for c in runner.calls)
 
 
 def test_force_reruns_even_when_present(tmp_path: Path):

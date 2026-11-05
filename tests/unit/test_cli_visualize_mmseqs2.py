@@ -292,9 +292,10 @@ class TestVisualizeRecruitmentValidation:
                 "--output", str(output),
             ],
         )
-        # Exit code 0 because the command prints a warning and exits gracefully
-        assert result.exit_code == 0
-        assert "no alignments" in result.output.lower() or "warning" in result.output.lower()
+        # No alignments is an error (no empty plot, no "complete" message)
+        assert result.exit_code == 1
+        assert "no alignments" in result.output.lower()
+        assert not output.exists()
 
     @patch("metadarkmatter.cli.visualize.Samtools.check_available", return_value=True)
     @patch("metadarkmatter.cli.visualize.load_recruitment_data")

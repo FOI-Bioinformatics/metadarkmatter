@@ -47,6 +47,38 @@ _EXTERNAL_TOOLS: tuple[tuple[str, list[str]], ...] = (
     ("diamond", ["version"]),
     ("mashtree", ["--version"]),
     ("mash", ["--version"]),
+    # Needed only by specific subcommands (see _TOOL_NEEDED_BY).
+    ("bowtie2", ["--version"]),
+    ("bowtie2-build", ["--version"]),
+    ("samtools", ["--version"]),
+    ("prodigal", ["-v"]),
+)
+
+# Which command(s) need each tool that is not part of the core pipeline.
+_TOOL_NEEDED_BY: dict[str, str] = {
+    "bowtie2": "optional: 'map' (read mapping)",
+    "bowtie2-build": "optional: 'map' (read mapping)",
+    "samtools": "optional: 'map', 'visualize recruitment'",
+    "prodigal": "optional: 'proteins' (gene prediction)",
+}
+
+# Tools the default pipeline cannot run without. Each entry is a group of
+# alternatives: at least one member of every group must be on PATH.
+_REQUIRED_TOOL_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("blastn",),
+    ("makeblastdb",),
+    ("kraken2",),
+    ("skani", "fastANI"),
+)
+
+# Python packages the CLI cannot start or run its core commands without.
+_REQUIRED_PACKAGES: tuple[str, ...] = (
+    "polars",
+    "numpy",
+    "pydantic",
+    "typer",
+    "rich",
+    "pyyaml",
 )
 
 # bioconda install hint per external tool (the conda package name differs from
@@ -62,6 +94,10 @@ _TOOL_INSTALL_HINTS: dict[str, str] = {
     "diamond": "conda install -c bioconda diamond",
     "mashtree": "conda install -c bioconda mashtree",
     "mash": "conda install -c bioconda mash",
+    "bowtie2": "conda install -c bioconda bowtie2",
+    "bowtie2-build": "conda install -c bioconda bowtie2",
+    "samtools": "conda install -c bioconda samtools",
+    "prodigal": "conda install -c bioconda prodigal",
 }
 
 # Python packages reported when present; absence is not an error here.
@@ -167,6 +203,15 @@ def doctor(
         "--kraken-db",
         help="Optionally validate a Kraken2 database directory.",
     ),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help=(
+            "Exit non-zero if a required tool or package is missing "
+            "(blastn, makeblastdb, kraken2, skani or fastANI; core Python "
+            "packages) or a given --kraken-db is invalid."
+        ),
+    ),
 ) -> None:
     """Print a diagnostic report of the metadarkmatter environment."""
     console.print(f"[bold]metadarkmatter[/bold] {__version__}")
@@ -188,8 +233,12 @@ def doctor(
     pkg_table = Table(title="Python dependencies", show_header=True, header_style="bold")
     pkg_table.add_column("Package")
     pkg_table.add_column("Version")
+    missing_packages: list[str] = []
     for pkg in _PYTHON_PACKAGES:
-        pkg_table.add_row(pkg, _probe_package(pkg))
+        version = _probe_package(pkg)
+        if version == "not installed" and pkg in _REQUIRED_PACKAGES:
+            missing_packages.append(pkg)
+        pkg_table.add_row(pkg, version)
     console.print(pkg_table)
     console.print()
 
@@ -197,14 +246,19 @@ def doctor(
     tool_table.add_column("Tool")
     tool_table.add_column("Path")
     tool_table.add_column("Version")
+    tool_table.add_column("Needed by", overflow="fold")
     missing: list[str] = []
+    present: set[str] = set()
     for exe, args in _EXTERNAL_TOOLS:
         path, version = _probe_tool(exe, args)
         if not path:
             missing.append(exe)
-            tool_table.add_row(exe, "-", "[yellow]not found[/yellow]")
+            tool_table.add_row(
+                exe, "-", "[yellow]not found[/yellow]", _TOOL_NEEDED_BY.get(exe, "")
+            )
         else:
-            tool_table.add_row(exe, path, version)
+            present.add(exe)
+            tool_table.add_row(exe, path, version, _TOOL_NEEDED_BY.get(exe, ""))
     console.print(tool_table)
 
     if missing:
@@ -239,3 +293,19 @@ def doctor(
             "Kraken2 DB", "[dim]not checked[/dim]", "pass --kraken-db PATH to validate"
         )
     console.print(db_table)
+
+    # Strict mode: exit non-zero when required components are missing.
+    problems: list[str] = []
+    for group in _REQUIRED_TOOL_GROUPS:
+        if not any(t in present for t in group):
+            problems.append("missing required tool: " + " or ".join(group))
+    problems.extend(f"missing required package: {p}" for p in missing_packages)
+    if kraken_db is not None and not _check_kraken_db(kraken_db)[0]:
+        problems.append(f"invalid Kraken2 DB: {kraken_db}")
+    if problems:
+        console.print()
+        for problem in problems:
+            console.print(f"[red]{problem}[/red]")
+        if strict:
+            raise typer.Exit(code=1)
+        console.print("[dim]Re-run with --strict to exit non-zero on these.[/dim]")

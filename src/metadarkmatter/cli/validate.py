@@ -21,6 +21,7 @@ from metadarkmatter.core.sequence_validation import (
     validate_fasta,
     validate_fastq,
 )
+from metadarkmatter.models.classification import TaxonomicCall
 
 app = typer.Typer(
     name="validate",
@@ -30,7 +31,7 @@ app = typer.Typer(
 
 console = Console()
 
-BLAST_EXPECTED_COLUMNS = 12
+BLAST_VALID_COLUMN_COUNTS = (12, 13, 14)
 BLAST_COLUMN_NAMES = [
     "qseqid",
     "sseqid",
@@ -44,6 +45,8 @@ BLAST_COLUMN_NAMES = [
     "send",
     "evalue",
     "bitscore",
+    "qlen",
+    "qcov",
 ]
 
 REQUIRED_CLASSIFICATION_COLUMNS = [
@@ -54,13 +57,7 @@ REQUIRED_CLASSIFICATION_COLUMNS = [
     "taxonomic_call",
 ]
 
-VALID_TAXONOMIC_CALLS = {
-    "Known Species",
-    "Novel Species",
-    "Novel Genus",
-    "Ambiguous",
-    "Conserved Region Hit",
-}
+VALID_TAXONOMIC_CALLS = {call.value for call in TaxonomicCall}
 
 
 def _read_lines_sample(
@@ -103,46 +100,54 @@ def blast(
 
     console.print(f"Lines sampled: {len(lines)}")
 
-    # Check column count on first 10 lines
-    for i, line in enumerate(lines[:10]):
-        cols = line.split("\t")
-        if len(cols) != BLAST_EXPECTED_COLUMNS:
+    # Check column count on first 10 lines (12, 13 or 14 columns accepted,
+    # matching the classify parser; all lines must agree).
+    counts = [len(line.split("\t")) for line in lines[:10]]
+    n_cols = counts[0]
+    for i, count in enumerate(counts):
+        if count not in BLAST_VALID_COLUMN_COUNTS:
             issues.append(
-                f"Line {i + 1}: expected {BLAST_EXPECTED_COLUMNS} columns, "
-                f"found {len(cols)}"
+                f"Line {i + 1}: expected 12, 13 or 14 columns, found {count}"
             )
+        elif count != n_cols:
+            issues.append(
+                f"Line {i + 1}: column count {count} differs from line 1 ({n_cols})"
+            )
+    col_names = BLAST_COLUMN_NAMES[:n_cols]
+    console.print(f"Columns: {n_cols}")
 
-    # Check numeric columns (columns 3-12, 0-indexed 2-11)
+    # Check numeric columns (3-12 in outfmt 6, plus qlen/qcov when present)
     for i, line in enumerate(lines[:10]):
         cols = line.split("\t")
-        if len(cols) != BLAST_EXPECTED_COLUMNS:
+        if len(cols) != n_cols or n_cols not in BLAST_VALID_COLUMN_COUNTS:
             continue
-        for col_idx in range(2, BLAST_EXPECTED_COLUMNS):
+        for col_idx in range(2, n_cols):
             try:
                 float(cols[col_idx])
             except ValueError:
                 issues.append(
-                    f"Line {i + 1}, column {col_idx + 1} ({BLAST_COLUMN_NAMES[col_idx]}): "
+                    f"Line {i + 1}, column {col_idx + 1} ({col_names[col_idx]}): "
                     f"expected numeric, got '{cols[col_idx]}'"
                 )
 
     # Try reading with Polars
-    try:
-        df = pl.read_csv(
-            input,
-            separator="\t",
-            has_header=False,
-            n_rows=100,
-            new_columns=BLAST_COLUMN_NAMES,
-        )
-        schema_table = Table(title="Detected Schema")
-        schema_table.add_column("Column")
-        schema_table.add_column("Type")
-        for col_name in df.columns:
-            schema_table.add_row(col_name, str(df[col_name].dtype))
-        console.print(schema_table)
-    except Exception as e:
-        issues.append(f"Polars schema error: {e}")
+    if n_cols in BLAST_VALID_COLUMN_COUNTS:
+        try:
+            df = pl.read_csv(
+                input,
+                separator="\t",
+                has_header=False,
+                n_rows=100,
+                new_columns=col_names,
+            )
+            schema_table = Table(title="Detected Schema")
+            schema_table.add_column("Column")
+            schema_table.add_column("Type")
+            for col_name in df.columns:
+                schema_table.add_row(col_name, str(df[col_name].dtype))
+            console.print(schema_table)
+        except Exception as e:
+            issues.append(f"Polars schema error: {e}")
 
     # Report
     if issues:
@@ -299,10 +304,13 @@ def ani(
         console.print("[green]ANI matrix is valid[/green]")
 
 
-def _report_sequence_result(result: ValidationResult, kind: str) -> None:
+def _report_sequence_result(
+    result: ValidationResult, kind: str, sampled: bool = False
+) -> None:
     """Render a ValidationResult to the console and exit on failure."""
     console.print(f"File: {result.path}")
-    console.print(f"Records sampled: {result.record_count}")
+    label = "Records sampled" if sampled else "Records read"
+    console.print(f"{label}: {result.record_count}")
     if result.sample_record_id:
         console.print(f"First record id: {result.sample_record_id}")
     if result.issues:
@@ -345,7 +353,7 @@ def fasta(
 
     cap = max_records if max_records > 0 else None
     result = validate_fasta(input, max_records=cap, sequence_type=sequence_type)
-    _report_sequence_result(result, "FASTA")
+    _report_sequence_result(result, "FASTA", sampled=cap is not None)
 
 
 @app.command()
@@ -363,4 +371,4 @@ def fastq(
     """Validate a FASTQ file (4-line record structure)."""
     cap = max_records if max_records > 0 else None
     result = validate_fastq(input, max_records=cap)
-    _report_sequence_result(result, "FASTQ")
+    _report_sequence_result(result, "FASTQ", sampled=cap is not None)

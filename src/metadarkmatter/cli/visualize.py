@@ -181,6 +181,20 @@ def recruitment_plot(
         )
         raise typer.Exit(code=1) from None
 
+    if not known_threshold > novel_species_threshold > novel_genus_threshold:
+        console.print(
+            "[red]Error: identity thresholds must be strictly decreasing: "
+            "--known-threshold > --novel-species-threshold > "
+            f"--novel-genus-threshold (got {known_threshold}, "
+            f"{novel_species_threshold}, {novel_genus_threshold}).[/red]"
+        )
+        raise typer.Exit(code=1) from None
+
+    # An extensionless output name would otherwise produce an extensionless file.
+    if not output.suffix:
+        output = output.with_name(f"{output.name}.{output_format_lower}")
+        out.print(f"[dim]Output has no extension; writing {output}[/dim]")
+
     # Check samtools availability
     if not Samtools.check_available():
         console.print(
@@ -224,8 +238,12 @@ def recruitment_plot(
     out.print(f"  [green]Loaded {num_alignments:,} alignments[/green]")
 
     if num_alignments == 0:
-        console.print("[yellow]Warning: No alignments found matching filters[/yellow]")
-        raise typer.Exit(code=0)
+        console.print(
+            "[red]Error: No alignments found matching filters "
+            "(check --min-identity/--min-mapq, and that the input is a "
+            "mapped, indexed BAM).[/red]"
+        )
+        raise typer.Exit(code=1) from None
 
     # Show genome statistics
     if verbose:
@@ -241,6 +259,12 @@ def recruitment_plot(
     if genome:
         data = data.filter(data["genome_name"].is_in(genome))
         out.print(f"  [dim]Filtered to {len(data):,} alignments for {len(genome)} genome(s)[/dim]")
+        if len(data) == 0:
+            console.print(
+                "[red]Error: No alignments found for the requested genome(s): "
+                f"{', '.join(genome)}.[/red]"
+            )
+            raise typer.Exit(code=1) from None
 
     # Create custom bands if thresholds differ from defaults
     custom_bands = (
