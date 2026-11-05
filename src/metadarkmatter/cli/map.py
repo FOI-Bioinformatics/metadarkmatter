@@ -47,6 +47,43 @@ def _check_tools_available() -> tuple[bool, list[str]]:
     return len(missing) == 0, missing
 
 
+_INDEX_SUFFIXES = (".1", ".2", ".3", ".4", ".rev.1", ".rev.2")
+
+
+def _complete_index_files(index_prefix: Path) -> list[Path] | None:
+    """Return the Bowtie2 index files for ``index_prefix`` if all are present.
+
+    Handles both the small (.bt2) and large (.bt2l) index flavours.
+    """
+    for ext in (".bt2", ".bt2l"):
+        files = [Path(f"{index_prefix}{sfx}{ext}") for sfx in _INDEX_SUFFIXES]
+        if all(f.exists() and f.stat().st_size > 0 for f in files):
+            return files
+    return None
+
+
+def _index_is_current(index_prefix: Path, inputs: list[Path]) -> bool:
+    """True if a complete index exists and is not older than any input file."""
+    files = _complete_index_files(index_prefix)
+    if files is None or not inputs:
+        return False
+    newest_input = max(f.stat().st_mtime for f in inputs)
+    return all(f.stat().st_mtime >= newest_input for f in files)
+
+
+def _reads_file_is_empty(path: Path) -> bool:
+    """True if a reads file has no content (also for empty/blank .gz files)."""
+    try:
+        if path.suffix.lower() == ".gz":
+            import gzip
+
+            with gzip.open(path, "rb") as fh:
+                return fh.read(1) == b""
+        return path.stat().st_size == 0
+    except (OSError, EOFError):
+        return False
+
+
 def _derive_output_name(reads_1: Path) -> str:
     """Derive output name from reads file."""
     name = reads_1.name
@@ -200,6 +237,12 @@ def map_reads(
     if output.suffix.lower() != ".bam":
         output = output.with_suffix(".bam")
 
+    # Reject empty read files: Bowtie2 would "succeed" with an empty BAM.
+    for reads_path in (reads_1, reads_2):
+        if reads_path is not None and _reads_file_is_empty(reads_path):
+            console.print(f"\n[red]Error: Reads file is empty: {reads_path}[/red]")
+            raise typer.Exit(code=1)
+
     # Check skip-if-exists
     if skip_if_exists and output.exists():
         out.print(f"[yellow]Skipping: Output file already exists: {output}[/yellow]")
@@ -229,6 +272,20 @@ def map_reads(
             index_prefix = pangenome_path.with_suffix("")
             need_build_index = True
         need_concatenate = False
+
+    # Reuse a complete, up-to-date index built earlier for the same genomes.
+    if index is None and not (dry_run or is_dry_run()):
+        if genomes.is_dir():
+            genome_inputs = sorted(genomes.glob(genome_pattern))
+            if pangenome_path.exists() and _index_is_current(
+                index_prefix, genome_inputs
+            ) and pangenome_path.stat().st_mtime >= max(
+                (g.stat().st_mtime for g in genome_inputs), default=float("inf")
+            ):
+                need_concatenate = False
+                need_build_index = False
+        elif _index_is_current(index_prefix, [pangenome_path]):
+            need_build_index = False
 
     # Override if user provided an index
     if index is not None:

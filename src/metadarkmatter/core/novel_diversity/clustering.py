@@ -98,6 +98,22 @@ class NovelDiversityAnalyzer:
             msg = f"Classification DataFrame missing required columns: {missing}"
             raise ValueError(msg)
 
+    def _representative_mapping(self) -> dict[str, str]:
+        """Return {accession: species representative} from metadata, if any.
+
+        Empty when no metadata is available or no genome maps to a different
+        representative (identity mapping), so the default path is unchanged.
+        """
+        if self._metadata is None:
+            return {}
+        try:
+            mapping = self._metadata.build_representative_mapping()
+        except Exception:  # pragma: no cover - defensive for stub metadata
+            return {}
+        if not isinstance(mapping, dict):
+            return {}
+        return {k: v for k, v in mapping.items() if k != v}
+
     # ------------------------------------------------------------------
     # Genome neighborhood merging
     # ------------------------------------------------------------------
@@ -127,12 +143,14 @@ class NovelDiversityAnalyzer:
             pl.col("taxonomic_call").is_in(["Novel Species", "Novel Genus"])
         )
         genome_counts: dict[str, int] = {}
+        rep_map = self._representative_mapping()
         for g, cnt in (
             novel_df.group_by("best_match_genome")
             .agg(pl.len().alias("n"))
             .iter_rows()
         ):
-            genome_counts[g] = cnt
+            g = rep_map.get(g, g)
+            genome_counts[g] = genome_counts.get(g, 0) + cnt
 
         # Union-find
         parent: dict[str, str] = {g: g for g in novel_genomes}
@@ -259,6 +277,14 @@ class NovelDiversityAnalyzer:
                 last_band = max(last_band, nxt["novelty_band"])
 
                 # Merge optional fields
+                if current.get("mean_inferred") is not None and nxt.get("mean_inferred") is not None:
+                    current["mean_inferred"] = (
+                        current["mean_inferred"] * w_curr + nxt["mean_inferred"] * w_nxt
+                    )
+                elif nxt.get("mean_inferred") is None:
+                    pass
+                else:
+                    current["mean_inferred"] = nxt["mean_inferred"]
                 if "mean_discovery" in current and current["mean_discovery"] is not None:
                     nxt_disc = nxt.get("mean_discovery")
                     if nxt_disc is not None:
@@ -330,43 +356,38 @@ class NovelDiversityAnalyzer:
             .alias("novelty_band")
         )
 
-        # Step 2b: Compute effective uncertainty
-        has_ambiguous_hits = "num_ambiguous_hits" in novel_df.columns
+        # Step 2b: Report the real placement uncertainty.  Single-hit reads
+        # have placement_uncertainty == 0 (no competing genome); that value is
+        # reported as-is rather than replaced by a novelty-derived guess.
+        novel_df = novel_df.with_columns(
+            pl.col("placement_uncertainty").fill_null(0.0).alias("effective_uncertainty")
+        )
 
-        if has_ambiguous_hits:
+        # Step 2c: Map each hit genome to its species representative so that
+        # clustering, neighborhood analysis and tree placement operate on
+        # genomes present in the (representative-only) ANI matrix.  The raw
+        # genome is kept for display in ``contributing_genomes``.
+        rep_map = self._representative_mapping()
+        if rep_map:
             novel_df = novel_df.with_columns(
-                pl.when(pl.col("num_ambiguous_hits") <= 1)
-                .then(
-                    pl.min_horizontal(
-                        pl.col("novelty_index") * 0.4,
-                        pl.lit(15.0)
-                    )
-                )
-                .otherwise(pl.col("placement_uncertainty"))
-                .alias("effective_uncertainty")
+                pl.col("best_match_genome")
+                .replace_strict(rep_map, default=pl.col("best_match_genome"))
+                .alias("cluster_genome")
             )
         else:
             novel_df = novel_df.with_columns(
-                pl.when(pl.col("placement_uncertainty") < 0.1)
-                .then(
-                    pl.min_horizontal(
-                        pl.col("novelty_index") * 0.4,
-                        pl.lit(15.0)
-                    )
-                )
-                .otherwise(pl.col("placement_uncertainty"))
-                .alias("effective_uncertainty")
+                pl.col("best_match_genome").alias("cluster_genome")
             )
 
         # Step 3: Build genome neighborhoods and map to representatives.
         # Sort for a deterministic genome order (polars .unique() is unordered),
         # so neighborhood construction and tie-breaks are reproducible.
-        unique_genomes = sorted(novel_df["best_match_genome"].unique().to_list())
+        unique_genomes = sorted(novel_df["cluster_genome"].unique().to_list())
         genome_neighborhood = self._build_genome_neighborhoods(unique_genomes)
 
         novel_df = novel_df.with_columns(
-            pl.col("best_match_genome")
-            .replace_strict(genome_neighborhood, default=pl.col("best_match_genome"))
+            pl.col("cluster_genome")
+            .replace_strict(genome_neighborhood, default=pl.col("cluster_genome"))
             .alias("representative_genome")
         )
 
@@ -383,6 +404,11 @@ class NovelDiversityAnalyzer:
             pl.col("read_id").alias("read_ids"),
             pl.col("best_match_genome").unique().alias("contributing_genomes"),
         ]
+
+        if "inferred_uncertainty" in novel_df.columns:
+            agg_exprs.append(
+                pl.col("inferred_uncertainty").mean().alias("mean_inferred")
+            )
 
         if has_discovery:
             agg_exprs.append(
@@ -439,6 +465,7 @@ class NovelDiversityAnalyzer:
             read_ids = row["read_ids"]
             mean_discovery = row.get("mean_discovery")
             mean_bayesian_conf = row.get("mean_bayesian_conf")
+            mean_inferred = row.get("mean_inferred")
             contributing_genomes = row.get("contributing_genomes") or []
 
             # Ensure contributing_genomes is a flat list of strings
@@ -493,6 +520,7 @@ class NovelDiversityAnalyzer:
                 novelty_min=novelty_min,
                 novelty_max=novelty_max,
                 mean_placement_uncertainty=mean_uncertainty,
+                mean_inferred_uncertainty=mean_inferred,
                 mean_discovery_score=mean_discovery,
                 suggested_name=suggested_name,
                 confidence=confidence,
@@ -724,3 +752,30 @@ class NovelDiversityAnalyzer:
                 return f"Novel genus sister to {genus}"
             else:
                 return "Novel genus (family unknown)"
+
+
+def build_report_analyzer(
+    classifications: pl.DataFrame,
+    metadata: GenomeMetadata | None,
+    ani_matrix_df: pl.DataFrame | None,
+) -> NovelDiversityAnalyzer:
+    """Create the analyzer used by every report section.
+
+    The Novel Diversity tab and the phylogeny tree both call this, so they
+    share one definition of clusters (IDs, read counts, confidence).
+    """
+    ani_obj = None
+    if ani_matrix_df is not None and len(ani_matrix_df) > 0:
+        from metadarkmatter.core.classification.ani_matrix import ANIMatrix
+
+        try:
+            ani_obj = ANIMatrix.from_dataframe(ani_matrix_df)
+        except Exception as e:
+            logger.warning(f"Could not convert ANI matrix for clustering: {e}")
+    return NovelDiversityAnalyzer(
+        classifications=classifications,
+        metadata=metadata,
+        ani_matrix=ani_obj,
+        novelty_band_size=5.0,
+        min_cluster_size=3,
+    )

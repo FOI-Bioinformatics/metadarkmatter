@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import tempfile
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,31 +57,57 @@ def extract_genome_name(contig: str) -> str:
     return contig
 
 
-def calculate_percent_identity(cigar: str, md_tag: str | None = None) -> float:
-    """Calculate percent identity from CIGAR string.
-
-    This is an approximation based on CIGAR operations.
-    More accurate calculation would use the MD tag if available.
-    """
-    # Parse CIGAR
-    matches = 0
-    total = 0
-
+def _cigar_counts(cigar: str) -> tuple[int, int, int, int, int]:
+    """Return (M_or_eq_len, mismatch_X_len, ins_len, del_len, eq_len) from a CIGAR."""
+    m = x = ins = dele = eq = 0
     for match in re.finditer(r"(\d+)([MIDNSHP=X])", cigar):
         length = int(match.group(1))
         op = match.group(2)
+        if op == "M":
+            m += length
+        elif op == "=":
+            eq += length
+        elif op == "X":
+            x += length
+        elif op == "I":
+            ins += length
+        elif op == "D":
+            dele += length
+    return m, x, ins, dele, eq
 
-        if op in ("M", "="):
-            matches += length
-            total += length
-        elif op == "X" or op in ("I", "D"):
-            total += length
-        # S, H, N, P don't affect identity calculation
 
-    if total == 0:
+def calculate_percent_identity(
+    cigar: str,
+    md_tag: str | None = None,
+    nm_tag: int | None = None,
+) -> float:
+    """Calculate percent identity of an alignment.
+
+    Preference order:
+
+    1. ``NM`` tag: identity = 1 - NM / aligned_length, where aligned_length is
+       the number of alignment columns (M/=/X + I + D) and NM is the edit
+       distance (mismatches + inserted + deleted bases).
+    2. ``MD`` tag: mismatches counted from MD, plus I and D from the CIGAR.
+    3. CIGAR only: ``=``/``X`` operations are exact; plain ``M`` cannot
+       distinguish matches from mismatches and is counted as matching, so the
+       result is an upper bound.
+    """
+    m, x, ins, dele, eq = _cigar_counts(cigar)
+    aligned = m + x + eq + ins + dele
+    if aligned == 0:
         return 0.0
 
-    return 100.0 * matches / total
+    if nm_tag is not None:
+        return max(0.0, 100.0 * (1.0 - nm_tag / aligned))
+
+    if md_tag:
+        md_clean = re.sub(r"\^[A-Za-z]+", "", md_tag)
+        mismatches = len(re.findall(r"[A-Za-z]", md_clean))
+        return max(0.0, 100.0 * (1.0 - (mismatches + ins + dele) / aligned))
+
+    matches = m + eq
+    return 100.0 * matches / aligned
 
 
 def parse_sam_line(line: str) -> AlignmentRecord | None:
@@ -92,9 +119,10 @@ def parse_sam_line(line: str) -> AlignmentRecord | None:
     if len(fields) < 11:
         return None
 
-    # Skip unmapped reads
+    # Skip unmapped (0x4), secondary (0x100) and supplementary (0x800)
+    # alignments so each read is counted once.
     flag = int(fields[1])
-    if flag & 4:  # Unmapped
+    if flag & 0x904:
         return None
 
     read_id = fields[0]
@@ -114,8 +142,19 @@ def parse_sam_line(line: str) -> AlignmentRecord | None:
         if op in ("M", "=", "X", "I", "D"):
             alignment_length += length
 
-    # Calculate percent identity
-    percent_identity = calculate_percent_identity(cigar)
+    # Optional NM / MD tags for an accurate identity
+    nm_tag: int | None = None
+    md_tag: str | None = None
+    for tag in fields[11:]:
+        if tag.startswith("NM:i:"):
+            try:
+                nm_tag = int(tag[5:])
+            except ValueError:
+                nm_tag = None
+        elif tag.startswith("MD:Z:"):
+            md_tag = tag[5:]
+
+    percent_identity = calculate_percent_identity(cigar, md_tag=md_tag, nm_tag=nm_tag)
 
     # Extract genome name
     genome_name = extract_genome_name(contig)
@@ -157,25 +196,45 @@ def stream_bam_alignments(
     if min_mapq > 0:
         cmd.extend(["-q", str(min_mapq)])
 
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    with tempfile.TemporaryFile(mode="w+") as stderr_file:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=stderr_file,
+            text=True,
+        )
+        completed = False
+        returncode: int | None = None
+        try:
+            if process.stdout is None:
+                return
 
-    if process.stdout is None:
-        return
+            for line in process.stdout:
+                record = parse_sam_line(line)
+                if record is None:
+                    continue
 
-    for line in process.stdout:
-        record = parse_sam_line(line)
-        if record is None:
-            continue
+                if record.percent_identity >= min_identity:
+                    yield record
+            completed = True
+        finally:
+            # Also runs when the consumer stops iterating early (generator
+            # close): stop samtools, release the pipe and reap the process.
+            if not completed and process.poll() is None:
+                process.terminate()
+            close = getattr(process.stdout, "close", None)
+            if close is not None:
+                close()
+            try:
+                returncode = process.wait(timeout=10)
+            except subprocess.TimeoutExpired:  # pragma: no cover
+                process.kill()
+                returncode = process.wait()
 
-        if record.percent_identity >= min_identity:
-            yield record
-
-    process.wait()
+        if completed and isinstance(returncode, int) and returncode != 0:
+            stderr_file.seek(0)
+            msg = f"samtools view failed (exit {returncode}): {stderr_file.read().strip()}"
+            raise RuntimeError(msg)
 
 
 def load_recruitment_data(

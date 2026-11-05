@@ -96,7 +96,7 @@ class PhylogenyMixin(_ReportBase):
         try:
             from metadarkmatter.core.phylogeny import (
                 ani_to_newick,
-                extract_novel_clusters,
+                from_diversity_cluster,
                 load_user_tree,
                 place_novel_clusters,
             )
@@ -113,16 +113,41 @@ class PhylogenyMixin(_ReportBase):
             if newick is None:
                 return None
 
-            # Extract novel clusters from classifications
-            novel_clusters = extract_novel_clusters(self.df, min_reads=3)
+            # Use the same clusters as the Novel Diversity tab (one source of
+            # cluster IDs, read counts and confidence).
+            from metadarkmatter.core.novel_diversity.clustering import (
+                build_report_analyzer,
+            )
+            from metadarkmatter.core.phylogeny.tree_builder import count_missing_pairs
+
+            analyzer = build_report_analyzer(self.df, self.genome_metadata, self.ani_matrix)
+            novel_clusters = [
+                from_diversity_cluster(c) for c in analyzer.cluster_novel_reads()
+            ]
 
             # Place novel clusters on the tree
+            unplaced: list[str] = []
             if novel_clusters:
                 final_newick = place_novel_clusters(
-                    newick, novel_clusters, ani_matrix_pd
+                    newick, novel_clusters, ani_matrix_pd, unplaced=unplaced
                 )
             else:
                 final_newick = newick
+
+            if unplaced:
+                tree_source_note += (
+                    f" {len(unplaced)} of {len(novel_clusters)} novel cluster(s) could not "
+                    f"be placed because their nearest genome is not a tip of this tree: "
+                    f"{', '.join(sorted(unplaced))}."
+                )
+            n_missing = count_missing_pairs(ani_matrix_pd)
+            if n_missing > 0 and user_tree_path is None:
+                tree_source_note += (
+                    f" {n_missing} genome pair(s) had no computed ANI and were treated as "
+                    f"70% ANI when building the tree."
+                )
+            placed_ids = {c.cluster_id for c in novel_clusters} - set(unplaced)
+            novel_clusters = [c for c in novel_clusters if c.cluster_id in placed_ids]
 
             # Strip BioPython comment blocks from Newick (JavaScript parser can't handle them)
             # Comments look like: NSP_001:0.1[{"classification": "novel_species", ...}]

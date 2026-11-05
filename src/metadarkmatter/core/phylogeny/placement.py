@@ -73,7 +73,7 @@ def _estimate_branch_length(novelty: float, classification: str) -> float:
     """Estimate branch length based on novelty level.
 
     Uses a simple linear mapping from novelty index to branch length.
-    Novel genus clusters get longer branches than novel species.
+    The same rule applies to novel species and novel genera.
 
     Args:
         novelty: Mean novelty index (0-100).
@@ -84,14 +84,29 @@ def _estimate_branch_length(novelty: float, classification: str) -> float:
     """
     # Branch lengths are in percent-divergence units, matching the
     # reference tree built by ``ani_to_newick`` (distance = 100 - ANI).
-    # Novelty of 5% -> 5.0, Novelty of 25% -> 25.0
-    base_length = float(novelty)
+    # Novelty of 5% -> 5.0, Novelty of 25% -> 25.0.  The same rule applies to
+    # novel species and novel genera (no arbitrary scaling).
+    return round(float(novelty), 4)
 
-    # Novel genus gets additional length to reflect greater divergence
-    if classification == "novel_genus":
-        base_length *= 1.5
 
-    return round(base_length, 4)
+def from_diversity_cluster(cluster: Any) -> NovelCluster:
+    """Convert a ``novel_diversity.models.NovelCluster`` to a placement cluster.
+
+    This keeps the tree and the Novel Diversity tab on one source of cluster
+    IDs, read counts and confidence ratings.
+    """
+    return NovelCluster(
+        cluster_id=cluster.cluster_id,
+        classification=(
+            "novel_species" if cluster.taxonomic_call == "Novel Species" else "novel_genus"
+        ),
+        best_match_genome=cluster.nearest_genome,
+        mean_identity=round(100.0 - cluster.mean_novelty_index, 2),
+        mean_novelty=round(cluster.mean_novelty_index, 2),
+        mean_uncertainty=round(cluster.mean_placement_uncertainty, 2),
+        read_count=cluster.read_count,
+        confidence_rating=cluster.confidence,
+    )
 
 
 def _find_node_by_name(tree: Tree, name: str) -> Any:
@@ -188,6 +203,7 @@ def place_novel_clusters(
     novel_clusters: list[NovelCluster],
     ani_matrix: pd.DataFrame,
     genome_metadata: dict[str, dict[str, str]] | None = None,
+    unplaced: list[str] | None = None,
 ) -> str:
     """Place novel clusters on a phylogenetic tree.
 
@@ -203,6 +219,8 @@ def place_novel_clusters(
             for placement but available for future distance-based placement).
         genome_metadata: Optional dictionary mapping genome accessions to
             metadata dicts with species/genus information.
+        unplaced: Optional list that is extended with the cluster IDs that
+            could not be placed (genome missing from the tree).
 
     Returns:
         Modified Newick tree string with novel clusters inserted.
@@ -230,6 +248,8 @@ def place_novel_clusters(
                 f"Genome {cluster.best_match_genome} not found in tree; "
                 f"skipping placement of cluster {cluster.cluster_id}"
             )
+            if unplaced is not None:
+                unplaced.append(cluster.cluster_id)
             continue
 
         # Estimate branch length based on novelty
@@ -268,6 +288,8 @@ def place_novel_clusters(
             logger.debug(f"Placed {cluster.cluster_id} as sibling to {cluster.best_match_genome}")
         else:
             logger.warning(f"Failed to place cluster {cluster.cluster_id}")
+            if unplaced is not None:
+                unplaced.append(cluster.cluster_id)
 
     # Convert back to Newick
     output = StringIO()

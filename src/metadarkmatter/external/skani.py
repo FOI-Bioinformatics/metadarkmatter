@@ -36,6 +36,19 @@ class Skani(ExternalTool):
     TOOL_NAME: ClassVar[str] = "skani"
     INSTALL_HINT: ClassVar[str] = "conda install -c bioconda skani"
 
+    MAX_ARGV_GENOMES: ClassVar[int] = 1000
+    GENOME_SUFFIXES: ClassVar[tuple[str, ...]] = (
+        ".fna", ".fa", ".fasta", ".fna.gz", ".fa.gz", ".fasta.gz",
+    )
+
+    @classmethod
+    def list_genome_files(cls, directory: Path) -> list[Path]:
+        """Sorted FASTA files directly inside ``directory``."""
+        return sorted(
+            p for p in directory.iterdir()
+            if p.is_file() and p.name.lower().endswith(cls.GENOME_SUFFIXES)
+        )
+
     def build_command(
         self,
         *,
@@ -49,6 +62,7 @@ class Skani(ExternalTool):
         full_matrix: bool = True,
         sparse: bool = False,
         no_learned_ani: bool = False,
+        mode: str | None = None,
     ) -> list[str]:
         """Build skani triangle (all-vs-all) command.
 
@@ -72,6 +86,9 @@ class Skani(ExternalTool):
             no_learned_ani: If True, disable the learned ANI regression model.
                 By default, skani uses learned ANI when c >= 70 and >= 150,000
                 bases are aligned.
+            mode: skani sensitivity mode: None/"default", "medium" (-c 70)
+                or "slow" (-c 30). Mutually exclusive with compression_factor
+                in skani, so ``compression_factor`` wins when both are given.
 
         Returns:
             Command as list of strings.
@@ -81,8 +98,16 @@ class Skani(ExternalTool):
 
         # Input genomes
         if isinstance(genomes, Path):
-            # Directory: use glob pattern
-            cmd.append(str(genomes / "*"))
+            # Directory: expand to the sorted FASTA file list (skani does not
+            # glob; a literal "dir/*" would be passed as one filename).
+            files = self.list_genome_files(genomes)
+            if len(files) > self.MAX_ARGV_GENOMES:
+                list_path = output.with_name(output.name + ".genomes.list")
+                list_path.parent.mkdir(parents=True, exist_ok=True)
+                list_path.write_text("".join(f"{p}\n" for p in files))
+                cmd.extend(["-l", str(list_path)])
+            else:
+                cmd.extend(str(p) for p in files)
         else:
             # List of paths
             cmd.extend(str(p) for p in genomes)
@@ -96,6 +121,12 @@ class Skani(ExternalTool):
         # Algorithm parameters
         if compression_factor is not None:
             cmd.extend(["-c", str(compression_factor)])
+
+        if mode in ("medium", "slow") and compression_factor is None:
+            cmd.append(f"--{mode}")
+        elif mode not in (None, "default", "medium", "slow"):
+            msg = f"Unknown skani mode: {mode!r} (expected default, medium or slow)"
+            raise ValueError(msg)
 
         if marker_compression_factor is not None:
             cmd.extend(["-m", str(marker_compression_factor)])

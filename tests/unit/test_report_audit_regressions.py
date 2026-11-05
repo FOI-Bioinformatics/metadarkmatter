@@ -404,7 +404,7 @@ class TestTreeConsistency:
         from metadarkmatter.core.phylogeny.placement import _estimate_branch_length
 
         assert _estimate_branch_length(5.0, "novel_species") == pytest.approx(5.0)
-        assert _estimate_branch_length(20.0, "novel_genus") == pytest.approx(30.0)
+        assert _estimate_branch_length(20.0, "novel_genus") == pytest.approx(20.0)
 
     def test_tree_independent_of_row_order(self):
         from io import StringIO
