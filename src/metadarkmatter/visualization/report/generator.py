@@ -11,7 +11,7 @@ import html
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
@@ -31,6 +31,7 @@ from metadarkmatter.visualization.report.sections.data import DataMixin
 from metadarkmatter.visualization.report.sections.novel import NovelMixin
 from metadarkmatter.visualization.report.sections.phylogeny import PhylogenyMixin
 from metadarkmatter.visualization.report.sections.reference import ReferenceMixin
+from metadarkmatter.visualization.report.sections.run_info import RunInfoMixin
 from metadarkmatter.visualization.report.sections.summary import SummaryMixin
 from metadarkmatter.visualization.report.styles import get_css_styles
 from metadarkmatter.visualization.report.templates import (
@@ -114,6 +115,7 @@ class ReportGenerator(
     NovelMixin,
     ReferenceMixin,
     PhylogenyMixin,
+    RunInfoMixin,
     DataMixin,
     _ReportBase,
 ):
@@ -131,6 +133,7 @@ class ReportGenerator(
         ani_matrix: pl.DataFrame | None = None,
         aai_matrix: pl.DataFrame | None = None,
         genome_metadata: GenomeMetadata | None = None,
+        provenance: dict[str, Any] | None = None,
     ) -> None:
         """
         Initialize report generator.
@@ -148,6 +151,8 @@ class ReportGenerator(
             ani_matrix: Optional ANI matrix for heatmap
             aai_matrix: Optional AAI matrix for genus-level heatmap
             genome_metadata: Optional genome metadata for species-level aggregation
+            provenance: Optional provenance sidecar contents written by
+                ``score classify`` (shown in the Run information panel)
         """
         self.df = _coerce_classification_dtypes(classifications)
         self.config = config or ReportConfig()
@@ -155,6 +160,7 @@ class ReportGenerator(
         self.ani_matrix = ani_matrix
         self.aai_matrix = aai_matrix
         self.genome_metadata = genome_metadata
+        self.provenance = provenance
 
         # Compute summary statistics
         self.summary = self._compute_summary()

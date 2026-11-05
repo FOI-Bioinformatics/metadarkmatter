@@ -366,7 +366,10 @@ class SummaryMixin(_ReportBase):
             ))
         category_html = CATEGORY_GRID_TEMPLATE.format(cells="\n".join(grid_cells))
 
-        content = kpi_html + bar_html + self._build_ani_qc_note() + two_col_html + category_html
+        content = (
+            kpi_html + bar_html + self._build_ani_qc_note() + two_col_html
+            + category_html + self._build_run_info_panel()
+        )
 
         return TAB_SECTION_TEMPLATE.format(
             tab_id="summary",

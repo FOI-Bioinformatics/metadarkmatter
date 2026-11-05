@@ -17,6 +17,10 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from metadarkmatter.cli.utils import QuietConsole, extract_sample_name, spinner_progress
 from metadarkmatter.core.io_utils import read_dataframe
 from metadarkmatter.core.metadata import GenomeMetadata
+from metadarkmatter.visualization.report.provenance import (
+    default_provenance_path,
+    load_provenance,
+)
 
 app = typer.Typer(
     name="report",
@@ -72,6 +76,17 @@ def generate_report(
         None,
         "--metadata", "-m",
         help="Genome metadata file (TSV) for species-level breakdown",
+        exists=True,
+        dir_okay=False,
+    ),
+    provenance: Path | None = typer.Option(
+        None,
+        "--provenance",
+        help=(
+            "Provenance JSON written by 'score classify' (shown in the Summary "
+            "tab's Run information panel). Default: <classifications>.provenance.json "
+            "next to --classifications, if it exists."
+        ),
         exists=True,
         dir_okay=False,
     ),
@@ -346,6 +361,35 @@ def generate_report(
             # without recruitment plots rather than failing the whole run.
             console.print(f"[yellow]Warning: Could not extract from BAM: {e}[/yellow]")
 
+    provenance_data = None
+    provenance_path = provenance
+    if provenance_path is None:
+        candidate = default_provenance_path(classifications)
+        if candidate.is_file():
+            provenance_path = candidate
+    if provenance_path is not None:
+        provenance_data = load_provenance(provenance_path)
+        if provenance_data is None:
+            console.print(
+                f"[yellow]Warning: could not use provenance file {provenance_path}; "
+                "the Run information panel will show derived values only.[/yellow]"
+            )
+        else:
+            out.print(f"  [green]Loaded provenance from {provenance_path.name}[/green]")
+    else:
+        out.print(
+            "  [dim]No provenance sidecar found (Run information will show "
+            "derived values only)[/dim]"
+        )
+
+    input_names = {"classifications": classifications.name}
+    for role, path in (
+        ("ani", ani_matrix), ("aai", aai_matrix), ("metadata", metadata),
+        ("recruitment", recruitment_data),
+    ):
+        if path is not None:
+            input_names[role] = path.name
+
     # Step 3: Generate report
     out.print("\n[bold]Step 3:[/bold] Generating report...")
 
@@ -366,6 +410,7 @@ def generate_report(
                 max_scatter_points=max_scatter_points,
                 max_table_rows=max_table_rows,
                 classifications_name=classifications.name,
+                input_names=input_names,
                 max_phylo_clusters=max_phylo_clusters,
                 max_phylo_references=max_phylo_references,
                 skip_phylogeny=no_phylogeny,
@@ -382,6 +427,7 @@ def generate_report(
                 ani_matrix=ani_df,
                 aai_matrix=aai_df,
                 genome_metadata=genome_metadata,
+                provenance=provenance_data,
             )
 
             progress.update(task, description="Writing HTML...")

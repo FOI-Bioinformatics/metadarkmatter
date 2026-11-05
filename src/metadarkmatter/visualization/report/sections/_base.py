@@ -37,6 +37,7 @@ class _ReportBase:
     ani_matrix: pl.DataFrame | None
     aai_matrix: pl.DataFrame | None
     genome_metadata: GenomeMetadata | None
+    provenance: dict[str, Any] | None
     summary: TaxonomicSummary
     _plot_data: dict[str, tuple[str, str]]
 
@@ -295,6 +296,10 @@ function toggleHeatmapView(metric, view) {
         js_lines.append("</script>")
 
         return "\n".join(js_lines)
+
+    def _build_run_info_panel(self) -> str:
+        """Provided by RunInfoMixin; declared here for cross-mixin typing."""
+        raise NotImplementedError
 
     def _build_phylogeny_content(self) -> str:
         """Provided by PhylogenyMixin; declared here for cross-mixin typing."""
