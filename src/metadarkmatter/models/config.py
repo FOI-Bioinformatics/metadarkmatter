@@ -281,20 +281,21 @@ class ScoringConfig(BaseModel):
         ),
     )
 
-    # Clade-novelty refinement (opt-in, nucleotide mode). A read whose
+    # Clade-novelty refinement (on by default, nucleotide mode). A read whose
     # placement among several references of one genus is ambiguous can still
     # be confidently novel if it is divergent from EVERY competing reference:
     # placement uncertainty answers "which reference", not "is it novel".
     # See docs/METHODS.md (clade-novelty rule) and
     # scripts/benchmark_leave_one_out.py for the validation.
     clade_novel_species: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Stage 2 rule: call Ambiguous/Species Boundary reads Novel Species "
             "when all competitors are within one genus and the read is at least "
             "clade_novelty_min %% divergent from both the best and the "
             "second-best reference (and below clade_novelty_max). Nucleotide "
-            "mode only; off by default pending multi-family validation."
+            "mode only. On by default after leave-one-out validation on three "
+            "families (docs/CLADE_NOVELTY_VALIDATION.md)."
         ),
     )
     clade_novelty_min: float = Field(

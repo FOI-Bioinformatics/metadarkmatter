@@ -1,8 +1,8 @@
 # Clade-novelty rule: leave-one-out validation
 
-This document records the validation of the opt-in clade-novelty Stage 2 rule
-(`ScoringConfig.clade_novel_species`, `score classify --clade-novel-species`).
-The rule is described in [METHODS.md](METHODS.md#105-clade-novelty-rule-opt-in).
+This document records the validation of the clade-novelty Stage 2 rule
+(`ScoringConfig.clade_novel_species`, on by default; `score classify --no-clade-novel-species` disables it).
+The rule is described in [METHODS.md](METHODS.md#105-clade-novelty-rule).
 
 ## Problem
 
@@ -118,10 +118,13 @@ Observations:
 
 ## Status
 
-The rule improved novel-species recall in all three families without a
-measurable loss in novel-versus-known precision. It is shipped **off by
-default**; changing the default is a separate decision (see CLAUDE.md,
-"Calibration: diagnostic only").
+The rule improved novel-species recall in all three families, including the
+two held-out families, without a measurable loss in novel-versus-known
+precision, which meets the held-out-family requirement in CLAUDE.md
+("Calibration: diagnostic only"). It is therefore **on by default**.
+`--no-clade-novel-species` (or `clade_novelty: {enabled: false}` in a YAML
+config) reproduces the previous classification exactly. Re-run the benchmark
+with `--compare-clade-rule` when changing the rule's thresholds.
 
 ## Reproducing
 

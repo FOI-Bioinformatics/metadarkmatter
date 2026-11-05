@@ -174,7 +174,7 @@ See [Tutorial](docs/TUTORIAL_ENVIRONMENTAL_SPECIES.md) Step 7 for runtime guidan
 - **[docs/STATISTICAL_ASSUMPTIONS.md](docs/STATISTICAL_ASSUMPTIONS.md)** - Load-bearing modelling assumptions, sources, and empirically observed failure modes
 - **[docs/STATISTICS_AUDIT.md](docs/STATISTICS_AUDIT.md)** - 2026-05 audit of classifier math, ANI symmetry fix, calibration guardrails, and the per-read calibration experiment orchestrator (`scripts/run_per_read_calibration.sh`)
 - **[docs/CALIBRATION.md](docs/CALIBRATION.md)** - Bayesian calibration pipeline (build benchmark -> fit Gaussians -> fit entropy -> evaluate)
-- **[docs/CLADE_NOVELTY_VALIDATION.md](docs/CLADE_NOVELTY_VALIDATION.md)** - Leave-one-out validation (`scripts/benchmark_leave_one_out.py`) of the opt-in clade-novelty rule on three families. Use the same script to validate any change to classification defaults.
+- **[docs/CLADE_NOVELTY_VALIDATION.md](docs/CLADE_NOVELTY_VALIDATION.md)** - Leave-one-out validation (`scripts/benchmark_leave_one_out.py`) of the clade-novelty rule (on by default) on three families. Use the same script to validate any change to classification defaults.
 - **[docs/CALIBRATION_RESULTS.md](docs/CALIBRATION_RESULTS.md)** - Three-family validation. **Hand-tuned defaults beat every fitted YAML; do not ship calibrated configs as the default.** Calibration scripts remain as diagnostic tools.
 - **[docs/EXTERNAL_TOOLS.md](docs/EXTERNAL_TOOLS.md)** - Tested external tool versions and reproducibility checklist
 - **[docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md)** - Production-readiness audit (8.4/10 internal-lab composite)
@@ -427,10 +427,10 @@ Where `min = 1 - strength`, `max = 1 + strength`, `strength` defaults to 0.5.
 - Prior modulation: identity_gap_boost (2.0x) and single_hit_boost (1.5x) for Ambiguous prior
 - Shannon entropy as confidence metric (0 = confident, 2.585 = uniform over 6 categories)
 - `confidence_score = (1 - entropy / log2(6)) * 100` (0-100 scale)
-- Output columns: taxonomic_call (Bayesian MAP), legacy_call (hard thresholds), 6 posterior columns, posterior_entropy, confidence_score
+- Output columns: taxonomic_call (Bayesian MAP), legacy_call (hard thresholds), 6 posterior columns, posterior_entropy, confidence_score, clade_novel_species (nucleotide mode)
 - `--config` loads YAML config; `score export-config` generates editable YAML
 - `--include-legacy-scores` adds old sub-scores (alignment_quality, etc.)
-- Opt-in clade-novelty rule (`--clade-novel-species`, `ScoringConfig.clade_novel_species`, YAML `clade_novelty`): Ambiguous/Species Boundary reads whose competitors are within one genus and that are >= 5% divergent from both the best and second-best reference (N < 18.6) become Novel Species; adds a `clade_novel_species` column. Off by default; nucleotide mode only. Implemented in `bayesian.apply_clade_novelty_rule`, validated in `docs/CLADE_NOVELTY_VALIDATION.md`
+- Clade-novelty rule (on by default; `--no-clade-novel-species`, `ScoringConfig.clade_novel_species`, YAML `clade_novelty`): Ambiguous/Species Boundary reads whose competitors are within one genus and that are >= 5% divergent from both the best and second-best reference (N < 18.6) become Novel Species; adds a `clade_novel_species` column. Nucleotide mode only; turning it off reproduces the previous calls. Implemented in `bayesian.apply_clade_novelty_rule`, validated in `docs/CLADE_NOVELTY_VALIDATION.md`
 - `--bayesian` flag deprecated (always-on); numeric flags deprecated when `--config` used
 - Key files: `core/classification/bayesian.py`, `models/config.py` (YAML methods), `cli/score.py` (export-config)
 

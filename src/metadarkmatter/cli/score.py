@@ -186,7 +186,7 @@ class _ClassifyOptions:
     bayesian: bool
     config_file: Path | None
     preset: str | None
-    clade_novel_species: bool = False
+    clade_novel_species: bool | None = None
 
 
 def _is_gzip(path: Path) -> bool:
@@ -237,8 +237,8 @@ def _explicit_flag_overrides(opts: _ClassifyOptions) -> dict[str, Any]:
         overrides["min_query_coverage"] = opts.min_query_coverage
     if opts.include_legacy_scores:
         overrides["include_legacy_scores"] = True
-    if opts.clade_novel_species:
-        overrides["clade_novel_species"] = True
+    if opts.clade_novel_species is not None:
+        overrides["clade_novel_species"] = opts.clade_novel_species
     return overrides
 
 
@@ -327,7 +327,11 @@ def build_classify_config(opts: _ClassifyOptions) -> tuple[ScoringConfig, list[s
         target_family=opts.target_family,
         family_ratio_threshold=opts.family_ratio_threshold,
         include_legacy_scores=opts.include_legacy_scores,
-        clade_novel_species=opts.clade_novel_species,
+        **(
+            {"clade_novel_species": opts.clade_novel_species}
+            if opts.clade_novel_species is not None
+            else {}
+        ),
     )
     return config, messages
 
@@ -616,15 +620,15 @@ def classify(
             "Off by default in the Bayesian-primary workflow."
         ),
     ),
-    clade_novel_species: bool = typer.Option(
-        False,
-        "--clade-novel-species",
+    clade_novel_species: bool | None = typer.Option(
+        None,
+        "--clade-novel-species/--no-clade-novel-species",
         help=(
-            "Opt-in Stage 2 rule (nucleotide mode): call Ambiguous/Species "
-            "Boundary reads Novel Species when all competitors are within one "
-            "genus and the read is divergent from both the best and the "
-            "second-best reference. Adds a clade_novel_species column. "
-            "See docs/METHODS.md."
+            "Stage 2 rule (nucleotide mode, on by default): call Ambiguous/"
+            "Species Boundary reads Novel Species when all competitors are "
+            "within one genus and the read is divergent from both the best and "
+            "the second-best reference. Adds a clade_novel_species column. "
+            "Default comes from --config/--preset (on). See docs/METHODS.md."
         ),
     ),
     quiet: bool = typer.Option(
