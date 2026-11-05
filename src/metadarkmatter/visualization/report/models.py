@@ -166,7 +166,12 @@ class ReportConfig:
     title: str = "Metadarkmatter Classification Report"
     theme: str = "light"
     page_size: int = 100
-    max_table_rows: int = 10000  # Configurable via CLI --max-table-rows
+    # Rows embedded in the Data tab table; None = every read. A limit keeps a
+    # deterministic stratified sample (see data_table.select_table_rows).
+    max_table_rows: int | None = None  # CLI --max-table-rows
+    classifications_name: str = ""  # file name quoted in the truncation notice
+    # File names of the inputs, shown in the Run information panel (role -> name)
+    input_names: dict[str, str] = field(default_factory=dict)
     max_scatter_points: int = 50000
     include_plotlyjs: str = "cdn"  # 'cdn', 'embed', or path
     # Asset mode for embedded JS dependencies (Plotly, D3). 'offline' inlines

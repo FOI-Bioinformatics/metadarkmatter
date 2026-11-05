@@ -17,6 +17,10 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from metadarkmatter.cli.utils import QuietConsole, extract_sample_name, spinner_progress
 from metadarkmatter.core.io_utils import read_dataframe
 from metadarkmatter.core.metadata import GenomeMetadata
+from metadarkmatter.visualization.report.provenance import (
+    default_provenance_path,
+    load_provenance,
+)
 
 app = typer.Typer(
     name="report",
@@ -25,6 +29,9 @@ app = typer.Typer(
 )
 
 console = Console()
+
+# Above this many reads, warn that an unlimited Data tab table gets heavy.
+LARGE_TABLE_WARNING_ROWS = 300_000
 
 
 @app.command(name="generate")
@@ -72,6 +79,17 @@ def generate_report(
         exists=True,
         dir_okay=False,
     ),
+    provenance: Path | None = typer.Option(
+        None,
+        "--provenance",
+        help=(
+            "Provenance JSON written by 'score classify' (shown in the Summary "
+            "tab's Run information panel). Default: <classifications>.provenance.json "
+            "next to --classifications, if it exists."
+        ),
+        exists=True,
+        dir_okay=False,
+    ),
     recruitment_data: Path | None = typer.Option(
         None,
         "--recruitment", "-r",
@@ -102,11 +120,17 @@ def generate_report(
         help="Maximum points in scatter plots (for performance)",
         min=1000,
     ),
-    max_table_rows: int = typer.Option(
-        10000,
+    max_table_rows: int | None = typer.Option(
+        None,
         "--max-table-rows",
-        help="Maximum rows in data table (for file size)",
-        min=100,
+        help=(
+            "Maximum rows embedded in the Data tab table (default: all reads). "
+            "When set, a deterministic sample is kept, balanced across "
+            "classification categories (rare categories in full, highest "
+            "novelty first within a category); the report states that the "
+            "table is truncated. Summary counts and plots always use all reads."
+        ),
+        min=1,
     ),
     max_phylo_clusters: int = typer.Option(
         20,
@@ -258,6 +282,13 @@ def generate_report(
 
     out.print(f"  [green]Loaded {len(df):,} classifications[/green]")
 
+    if max_table_rows is None and len(df) > LARGE_TABLE_WARNING_ROWS:
+        console.print(
+            f"[yellow]Warning: embedding all {len(df):,} reads in the Data tab will "
+            "make the report large and slow to open; consider --max-table-rows "
+            "(e.g. 100000) to embed a deterministic sample instead.[/yellow]"
+        )
+
     if verbose:
         # Show classification breakdown
         counts = df.group_by("taxonomic_call").len().sort("len", descending=True)
@@ -330,6 +361,35 @@ def generate_report(
             # without recruitment plots rather than failing the whole run.
             console.print(f"[yellow]Warning: Could not extract from BAM: {e}[/yellow]")
 
+    provenance_data = None
+    provenance_path = provenance
+    if provenance_path is None:
+        candidate = default_provenance_path(classifications)
+        if candidate.is_file():
+            provenance_path = candidate
+    if provenance_path is not None:
+        provenance_data = load_provenance(provenance_path)
+        if provenance_data is None:
+            console.print(
+                f"[yellow]Warning: could not use provenance file {provenance_path}; "
+                "the Run information panel will show derived values only.[/yellow]"
+            )
+        else:
+            out.print(f"  [green]Loaded provenance from {provenance_path.name}[/green]")
+    else:
+        out.print(
+            "  [dim]No provenance sidecar found (Run information will show "
+            "derived values only)[/dim]"
+        )
+
+    input_names = {"classifications": classifications.name}
+    for role, path in (
+        ("ani", ani_matrix), ("aai", aai_matrix), ("metadata", metadata),
+        ("recruitment", recruitment_data),
+    ):
+        if path is not None:
+            input_names[role] = path.name
+
     # Step 3: Generate report
     out.print("\n[bold]Step 3:[/bold] Generating report...")
 
@@ -349,6 +409,8 @@ def generate_report(
                 alignment_mode=alignment_mode,
                 max_scatter_points=max_scatter_points,
                 max_table_rows=max_table_rows,
+                classifications_name=classifications.name,
+                input_names=input_names,
                 max_phylo_clusters=max_phylo_clusters,
                 max_phylo_references=max_phylo_references,
                 skip_phylogeny=no_phylogeny,
@@ -365,6 +427,7 @@ def generate_report(
                 ani_matrix=ani_df,
                 aai_matrix=aai_df,
                 genome_metadata=genome_metadata,
+                provenance=provenance_data,
             )
 
             progress.update(task, description="Writing HTML...")

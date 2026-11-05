@@ -194,9 +194,11 @@ def test_plots_have_no_fixed_width():
 def test_data_table_optional_columns_and_clear():
     out = _html()
     assert 'onclick="clearAllFilters()"' in out and "clearFiltersTop" in out
-    assert 'data-col="16"' in out and "Legacy Call" in out
-    assert "var cols = [11, 12, 16, 17]" in out or "var cols = [12, 16, 17]" in out or "16, 17]" in out
-    assert "13," not in out.split("var cols = ")[1].split("]")[0]
+    # Optional columns appear in the header/menu only when they hold data
+    assert 'data-col="legacy_call"' in out and "Legacy Call" in out
+    assert 'data-col="confidence_score"' in out
+    assert 'data-col="discovery_score"' not in out
+    assert 'id="colLabel' not in out  # old JS-revealed hidden menu entries are gone
 
 
 # 10. labels

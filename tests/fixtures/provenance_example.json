@@ -1,0 +1,110 @@
+{
+  "command": [
+    "mdm",
+    "score",
+    "classify",
+    "--alignment",
+    "sample.mmseqs2.tsv.gz",
+    "--ani",
+    "ani.csv",
+    "--metadata",
+    "genome_metadata.tsv",
+    "--output",
+    "cls.csv"
+  ],
+  "config": {
+    "aai_genus_boundary_high": 65.0,
+    "aai_genus_boundary_low": 58.0,
+    "alignment_mode": "nucleotide",
+    "bayesian": {
+      "category_params": null,
+      "entropy_calibration": null,
+      "entropy_threshold": 1.5,
+      "identity_gap_boost": 2.0,
+      "priors": {
+        "ambiguous": 0.16666666666666666,
+        "known_species": 0.16666666666666666,
+        "novel_genus": 0.16666666666666666,
+        "novel_species": 0.16666666666666666,
+        "species_boundary": 0.16666666666666666,
+        "unclassified": 0.16666666666666666
+      },
+      "single_hit_boost": 1.5
+    },
+    "bitscore_threshold_pct": 95.0,
+    "clade_novel_species": true,
+    "single_hit_novel_species": false,
+    "clade_novelty_max": 18.6,
+    "clade_novelty_min": 5.0,
+    "confidence_threshold": 50.0,
+    "coverage_weight_mode": "linear",
+    "coverage_weight_strength": 0.5,
+    "family_ratio_threshold": 0.8,
+    "genus_bitscore_threshold_pct": 90.0,
+    "genus_uncertainty_ambiguous_min": 10.0,
+    "identity_gap_ambiguous_max": 2.0,
+    "include_legacy_scores": false,
+    "max_evalue": 0.0,
+    "merge_band_tolerance": 2.0,
+    "min_alignment_fraction": 0.3,
+    "min_alignment_length": 100,
+    "min_bitscore": 0.0,
+    "min_percent_identity": 70.0,
+    "min_query_coverage": 0.0,
+    "min_read_length": 0,
+    "novelty_known_max": 4.0,
+    "novelty_novel_genus_max": 25.0,
+    "novelty_novel_genus_min": 20.0,
+    "novelty_novel_species_max": 20.0,
+    "novelty_novel_species_min": 4.0,
+    "same_genus_ani_threshold": 80.0,
+    "same_species_ani_threshold": 95.0,
+    "single_hit_uncertainty_threshold": 10.0,
+    "target_family": null,
+    "uncertainty_conserved_min": 5.0,
+    "uncertainty_known_max": 1.5,
+    "uncertainty_mode": "second",
+    "uncertainty_novel_genus_max": 1.5,
+    "uncertainty_novel_species_max": 1.5,
+    "use_aai_for_genus": true
+  },
+  "created_utc": "2026-05-02T10:15:30Z",
+  "inputs": {
+    "aai": null,
+    "alignment": {
+      "path": "/data/run1/sample.mmseqs2.tsv.gz",
+      "sha256": "1f0caaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "size": 997231
+    },
+    "ani": {
+      "path": "/data/run1/ani.csv",
+      "sha256": "9b2dbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "size": 1099
+    },
+    "id_mapping": null,
+    "metadata": {
+      "path": "/data/run1/genome_metadata.tsv",
+      "sha256": "77e1cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "size": 2284
+    }
+  },
+  "metadarkmatter_version": "0.2.0",
+  "outputs": {
+    "classifications": {
+      "path": "/data/run1/cls.csv",
+      "sha256": "4d5edddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "size": 2313174
+    }
+  },
+  "platform": "Linux-6.18-x86_64",
+  "python": "3.13.1",
+  "results": {
+    "taxonomic_call_counts": {
+      "Known Species": 10,
+      "Novel Species": 10
+    },
+    "total_reads": 90
+  },
+  "schema": "metadarkmatter.provenance/1",
+  "seed": 42
+}

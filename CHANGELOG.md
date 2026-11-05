@@ -22,6 +22,17 @@ Production-readiness and UX hardening pass.
   sample does not stop the others but the command exits non-zero.
 - `--ani-backend` for `run pipeline` / `run cohort` (`auto`, `fastani`,
   `skani`).
+- Report: Data tab table is rendered client-side from compact embedded JSON
+  (report size on the e2e example 13.0 MB -> 6.2 MB, page load about 2.7 s ->
+  2.0 s); `--max-table-rows` now defaults to no limit and keeps a deterministic
+  category-balanced sample when set, with a truncation notice.
+- Report: collapsible Run information panel (Summary tab) fed by the
+  `<classifications>.provenance.json` sidecar (`--provenance PATH`).
+- Report: `taxonomic_call` x `legacy_call` comparison table, per-species
+  breakdown table and stacked species bar, client-side CSV downloads (call
+  comparison, species breakdown, novel clusters, ANI/AAI matrix).
+- Report: WAI-ARIA tabs with keyboard navigation and URL hash deep links,
+  button collapsible headers, colourblind-safe Okabe-Ito category palette.
 - `metadarkmatter run pipeline` — single end-to-end orchestration command
   that chains download -> kraken2 extract -> align -> ANI -> classify ->
   report. Reuses the existing subcommands as steps, with a structured output

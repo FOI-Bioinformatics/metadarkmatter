@@ -124,16 +124,19 @@ class TestNullUncertainty:
                           schema={"placement_uncertainty": pl.Float64})
         assert UncertaintyHistogram(df).create_figure() is not None
 
-    def test_report_with_off_target_renders_dash(self, tmp_path):
+    def test_report_with_off_target_embeds_null_uncertainty(self, tmp_path):
+        from tests.unit.report_helpers import embedded_json
+
         html_out = _render(_classifications(), tmp_path, ani_matrix=_ani_matrix())
-        # Off-target row: uncertainty cell rendered as "-" rather than crash
-        m = re.search(
-            r'<tr class="data-row" data-class="Off-target">.*?<td data-col="6">([^<]*)</td>',
-            html_out,
-            re.S,
-        )
-        assert m is not None
-        assert m.group(1) == "-"
+        payload = embedded_json(html_out, "mdm-table-data")
+        calls = payload["dicts"]["classification"]
+        off = calls.index("Off-target")
+        rows = [
+            i for i, c in enumerate(payload["cols"]["classification"]) if c == off
+        ]
+        assert rows
+        # Off-target rows carry null uncertainty; the client renders "-"
+        assert all(payload["cols"]["uncertainty"][i] is None for i in rows)
 
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ import html
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
 
@@ -20,6 +20,8 @@ from metadarkmatter.core.metadata import GenomeMetadata
 from metadarkmatter.visualization.plots.base import (
     format_count,
 )
+from metadarkmatter.visualization.report.breakdowns import SORTABLE_TABLE_JS
+from metadarkmatter.visualization.report.embed import CSV_EXPORT_JS
 from metadarkmatter.visualization.report.models import (
     ReportConfig,
     TaxonomicSummary,
@@ -30,6 +32,7 @@ from metadarkmatter.visualization.report.sections.data import DataMixin
 from metadarkmatter.visualization.report.sections.novel import NovelMixin
 from metadarkmatter.visualization.report.sections.phylogeny import PhylogenyMixin
 from metadarkmatter.visualization.report.sections.reference import ReferenceMixin
+from metadarkmatter.visualization.report.sections.run_info import RunInfoMixin
 from metadarkmatter.visualization.report.sections.summary import SummaryMixin
 from metadarkmatter.visualization.report.styles import get_css_styles
 from metadarkmatter.visualization.report.templates import (
@@ -113,6 +116,7 @@ class ReportGenerator(
     NovelMixin,
     ReferenceMixin,
     PhylogenyMixin,
+    RunInfoMixin,
     DataMixin,
     _ReportBase,
 ):
@@ -130,6 +134,7 @@ class ReportGenerator(
         ani_matrix: pl.DataFrame | None = None,
         aai_matrix: pl.DataFrame | None = None,
         genome_metadata: GenomeMetadata | None = None,
+        provenance: dict[str, Any] | None = None,
     ) -> None:
         """
         Initialize report generator.
@@ -147,6 +152,8 @@ class ReportGenerator(
             ani_matrix: Optional ANI matrix for heatmap
             aai_matrix: Optional AAI matrix for genus-level heatmap
             genome_metadata: Optional genome metadata for species-level aggregation
+            provenance: Optional provenance sidecar contents written by
+                ``score classify`` (shown in the Run information panel)
         """
         self.df = _coerce_classification_dtypes(classifications)
         self.config = config or ReportConfig()
@@ -154,6 +161,7 @@ class ReportGenerator(
         self.ani_matrix = ani_matrix
         self.aai_matrix = aai_matrix
         self.genome_metadata = genome_metadata
+        self.provenance = provenance
 
         # Compute summary statistics
         self.summary = self._compute_summary()
@@ -206,8 +214,8 @@ class ReportGenerator(
         plotly_js = self._build_plotly_js()
 
         # Combine JavaScript
-        js_scripts = TAB_NAVIGATION_JS + "\n" + DATA_TABLE_JS.format(
-            page_size=self.config.page_size
+        js_scripts = "\n".join(
+            [TAB_NAVIGATION_JS, CSV_EXPORT_JS, SORTABLE_TABLE_JS, DATA_TABLE_JS]
         )
 
         # Build Plotly CDN script tag (empty when embedding JS inline)
@@ -249,9 +257,12 @@ class ReportGenerator(
             active_class = " active" if is_active else ""
             safe_tab_id = html.escape(tab_id, quote=True)
             safe_label = html.escape(label)
+            selected = "true" if is_active else "false"
+            tabindex = "0" if is_active else "-1"
             nav_items.append(
-                f'        <button class="tab-btn{active_class}" '
-                f"onclick=\"showTab('{safe_tab_id}')\">{safe_label}</button>"
+                f'            <button type="button" role="tab" class="tab-btn{active_class}" '
+                f'id="tab-{safe_tab_id}" aria-controls="{safe_tab_id}" '
+                f'aria-selected="{selected}" tabindex="{tabindex}">{safe_label}</button>'
             )
 
         return "\n".join(nav_items)

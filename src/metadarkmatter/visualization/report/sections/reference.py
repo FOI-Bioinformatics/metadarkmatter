@@ -7,12 +7,21 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
+from metadarkmatter.visualization.plots.base import TAXONOMY_COLORS, place_legend_below
+from metadarkmatter.visualization.report.breakdowns import (
+    MAX_EXPORT_MATRIX_GENOMES,
+    build_species_table_html,
+    compute_species_breakdown,
+    matrix_csv,
+    species_breakdown_csv,
+)
 from metadarkmatter.visualization.report.components import (
     build_aai_heatmap,
     build_aai_stats_cards,
     build_ani_heatmap,
     build_ani_stats_cards,
 )
+from metadarkmatter.visualization.report.embed import csv_export_button, csv_export_payload
 from metadarkmatter.visualization.report.sections._base import _ReportBase
 from metadarkmatter.visualization.report.templates import (
     COLLAPSIBLE_PANEL_TEMPLATE,
@@ -29,6 +38,9 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+# Species (or genomes) drawn in the stacked bar chart.
+TOP_SPECIES_BAR_COUNT = 20
 
 
 class ReferenceMixin(_ReportBase):
@@ -49,6 +61,7 @@ class ReferenceMixin(_ReportBase):
         species_bar = self._build_species_bar_chart()
         if species_bar:
             content_parts.append(species_bar)
+            content_parts.append(self._build_species_breakdown_table())
 
         # 2. ANI/AAI heatmaps
         ani_content = self._build_ani_content()
@@ -127,7 +140,9 @@ class ReferenceMixin(_ReportBase):
 
         ani_id = "plot-ani-heatmap"
         self._register_plot(ani_id, heatmap_fig)
-        stats_html = build_ani_stats_cards(stats)
+        stats_html = build_ani_stats_cards(stats) + self._matrix_export_html(
+            "ani", self.ani_matrix
+        )
 
         # Check for representative genome toggle
         rep_matrix = self._filter_matrix_to_representatives(self.ani_matrix)
@@ -204,7 +219,9 @@ class ReferenceMixin(_ReportBase):
 
         aai_id = "plot-aai-heatmap"
         self._register_plot(aai_id, heatmap_fig)
-        stats_html = build_aai_stats_cards(stats)
+        stats_html = build_aai_stats_cards(stats) + self._matrix_export_html(
+            "aai", self.aai_matrix
+        )
 
         # Check for representative genome toggle
         rep_matrix = self._filter_matrix_to_representatives(self.aai_matrix)
@@ -356,82 +373,111 @@ class ReferenceMixin(_ReportBase):
         return filtered
 
     def _build_species_bar_chart(self) -> str:
-        """Build a species bar chart for the Reference tab.
+        """Stacked horizontal bars: top species (or genomes) by category.
 
-        Extracts only the horizontal bar chart of top species by read count.
-        Requires genome metadata to be available.
+        Each bar is one species (the genome accession when no species
+        metadata is available), split by Bayesian ``taxonomic_call`` so the
+        chart shows both how many reads a species received and how novel
+        those reads were. Off-target reads are excluded.
 
         Returns:
-            HTML string with the species bar chart, or empty string if no
-            metadata is available.
+            HTML for the chart container, or "" when there is nothing to plot.
         """
-        if self.genome_metadata is None:
-            return ""
-
         import plotly.graph_objects as go
 
-        # Join metadata to get species information
-        if "species" not in self.df.columns:
-            enriched_df = self.genome_metadata.join_classifications(self.df)
-        else:
-            enriched_df = self.df
-
-        # Only include in-family reads in species breakdown
-        if "taxonomic_call" in enriched_df.columns:
-            species_base_df = enriched_df.filter(
-                pl.col("taxonomic_call") != "Off-target"
-            )
-        else:
-            species_base_df = enriched_df
-
-        # Aggregate by species
-        species_counts = (
-            species_base_df.group_by("species")
-            .agg([
-                pl.len().alias("count"),
-                pl.col("novelty_index").mean().alias("mean_novelty"),
-                pl.col("top_hit_identity").mean().alias("mean_identity"),
-                pl.col("best_match_genome").n_unique().alias("genome_count"),
-            ])
-            .sort(["count", "species"], descending=[True, False], nulls_last=True)
-            .head(20)
+        table, categories, uses_species = compute_species_breakdown(
+            self.df, self.genome_metadata
         )
-
-        if len(species_counts) == 0:
+        if len(table) == 0:
             return ""
+        top = table.head(TOP_SPECIES_BAR_COUNT)
+        labels = top["label"].to_list()[::-1]
 
-        # Horizontal bar chart of species read counts
-        bar_fig = go.Figure()
-        bar_fig.add_trace(
-            go.Bar(
-                y=species_counts["species"].to_list()[::-1],
-                x=species_counts["count"].to_list()[::-1],
+        fig = go.Figure()
+        for cat in categories:
+            fig.add_trace(go.Bar(
+                y=labels,
+                x=top[cat].to_list()[::-1],
+                name=cat,
                 orientation="h",
-                marker_color="#22c55e",
-                text=[f"{c:,}" for c in species_counts["count"].to_list()[::-1]],
-                textposition="outside",
-                hovertemplate=(
-                    "<b>%{y}</b><br>"
-                    "Reads: %{x:,}<extra></extra>"
-                ),
-            )
-        )
-        bar_fig.update_layout(
-            title=f"Top {len(species_counts)} Species by Read Count",
+                marker={"color": TAXONOMY_COLORS.get(cat, "#999999"),
+                        "line": {"color": "rgba(0,0,0,0.35)", "width": 0.5}},
+                hovertemplate=f"<b>%{{y}}</b><br>{cat}: %{{x:,}} reads<extra></extra>",
+            ))
+        fig.add_trace(go.Scatter(
+            y=labels,
+            x=top["reads"].to_list()[::-1],
+            mode="text",
+            text=[f"{n:,}" for n in top["reads"].to_list()[::-1]],
+            textposition="middle right",
+            showlegend=False,
+            hoverinfo="skip",
+            cliponaxis=False,
+        ))
+        noun = "Species" if uses_species else "Genomes"
+        fig.update_layout(
+            title=f"Top {len(top)} {noun} by Read Count, Stacked by Classification",
             xaxis_title="Number of Reads",
             yaxis_title="",
+            barmode="stack",
             template="plotly_white",
-            height=max(400, 30 * len(species_counts)),
-            margin={"l": 40, "r": 40, "t": 60, "b": 60},
+            height=max(400, 30 * len(top) + 140),
+            margin={"l": 40, "r": 60, "t": 60, "b": 60},
         )
-        bar_fig.update_yaxes(automargin=True)
+        fig.update_yaxes(automargin=True)
+        place_legend_below(fig)
         species_bar_id = "plot-species-bar"
-        self._register_plot(species_bar_id, bar_fig)
+        self._register_plot(species_bar_id, fig)
 
         return PLOT_CONTAINER_SIMPLE_TEMPLATE.format(
             extra_class="full-width",
             plot_id=species_bar_id,
         )
+
+    def _build_species_breakdown_table(self) -> str:
+        """Sortable per-species (or per-genome) table with a CSV download."""
+        table, categories, uses_species = compute_species_breakdown(
+            self.df, self.genome_metadata
+        )
+        if len(table) == 0:
+            return ""
+        noun = "species" if uses_species else "genome"
+        header, rows = species_breakdown_csv(table, categories, uses_species=uses_species)
+        export = csv_export_button(
+            "species-breakdown",
+            csv_export_payload(f"{noun}_breakdown.csv", header, rows),
+            label="Download CSV",
+        )
+        return (
+            '<div class="plot-container full-width" id="species-breakdown">'
+            f'<div class="plot-title">Breakdown by {noun}</div>'
+            '<div class="plot-description">On-target reads per '
+            f"{noun} (best-match genome&rsquo;s species when metadata is available, "
+            "otherwise the genome accession), split by classification. "
+            "Novel % is Novel Species plus Novel Genus reads over all reads of the row. "
+            "Click a column header to sort.</div>"
+            f'<div class="export-bar">{export}</div>'
+            + build_species_table_html(table, categories, uses_species=uses_species)
+            + "</div>"
+        )
+
+    def _matrix_export_html(self, name: str, matrix: pl.DataFrame | None) -> str:
+        """CSV download button for a similarity matrix (or a size note)."""
+        if matrix is None or len(matrix) == 0:
+            return ""
+        exported = matrix_csv(matrix)
+        if exported is None:
+            return (
+                '<p class="mdm-note">The matrix has more than '
+                f"{MAX_EXPORT_MATRIX_GENOMES} genomes and is not embedded for download; "
+                "use the matrix file passed to the report.</p>"
+            )
+        header, rows = exported
+        return '<div class="export-bar">' + csv_export_button(
+            f"{name}-matrix",
+            csv_export_payload(f"{name}_matrix.csv", header, rows),
+            label=f"Download {name.upper()} matrix (CSV)",
+        ) + "</div>"
 
     def _build_recruitment_content(self) -> str | None:
         """Build recruitment plot HTML content without tab wrapper.

@@ -21,34 +21,51 @@ if TYPE_CHECKING:
 # Color Palettes
 # =============================================================================
 
+# Colourblind-safe categorical palette (Okabe & Ito 2008). Novel Species and
+# Novel Genus take the two warm, saturated hues so they stay visually
+# prominent; the remaining categories use cooler / neutral hues and are
+# additionally distinguishable by lightness.
+OKABE_ITO: dict[str, str] = {
+    "orange": "#E69F00",
+    "sky_blue": "#56B4E9",
+    "bluish_green": "#009E73",
+    "yellow": "#F0E442",
+    "blue": "#0072B2",
+    "vermillion": "#D55E00",
+    "reddish_purple": "#CC79A7",
+    "grey": "#999999",
+    "dark_grey": "#4D4D4D",
+}
+
 # Taxonomic classification colors (consistent with methodology)
 TAXONOMY_COLORS: dict[str, str] = {
-    "Known Species": "#2ecc71",      # Green
-    "Novel Species": "#f39c12",      # Orange
-    "Novel Genus": "#e74c3c",        # Red
-    "Species Boundary": "#3498db",   # Blue - at species boundary zone
-    "Ambiguous": "#1abc9c",          # Teal - high U within genus
-    "Ambiguous Within Genus": "#9b59b6",  # Purple
-    "Conserved Region": "#95a5a6",   # Gray
-    "Unclassified": "#7f8c8d",       # Dark gray
+    "Known Species": OKABE_ITO["bluish_green"],
+    "Novel Species": OKABE_ITO["orange"],
+    "Novel Genus": OKABE_ITO["vermillion"],
+    "Species Boundary": OKABE_ITO["sky_blue"],
+    "Ambiguous": OKABE_ITO["reddish_purple"],
+    "Ambiguous Within Genus": OKABE_ITO["blue"],
+    "Conserved Region": OKABE_ITO["grey"],
+    "Unclassified": OKABE_ITO["dark_grey"],
+    "Off-target": OKABE_ITO["yellow"],
 }
 
 # High-level diversity status colors (for summary views)
 DIVERSITY_COLORS: dict[str, str] = {
-    "Known": "#2ecc71",       # Green - confident known diversity
-    "Novel": "#e74c3c",       # Red - confident novel diversity
-    "Uncertain": "#95a5a6",   # Gray - uncertain classification
-    "Off-target": "#3498db",  # Blue - reads outside target family
+    "Known": OKABE_ITO["bluish_green"],
+    "Novel": OKABE_ITO["vermillion"],
+    "Uncertain": OKABE_ITO["grey"],
+    "Off-target": OKABE_ITO["yellow"],
 }
 
 # Bayesian 6-category colors used in report generator charts
 BAYESIAN_CATEGORY_COLORS: dict[str, str] = {
-    "Known Species": "#22c55e",
-    "Novel Species": "#f59e0b",
-    "Novel Genus": "#ef4444",
-    "Species Boundary": "#a855f7",
-    "Ambiguous": "#94a3b8",
-    "Unclassified": "#64748b",
+    "Known Species": TAXONOMY_COLORS["Known Species"],
+    "Novel Species": TAXONOMY_COLORS["Novel Species"],
+    "Novel Genus": TAXONOMY_COLORS["Novel Genus"],
+    "Species Boundary": TAXONOMY_COLORS["Species Boundary"],
+    "Ambiguous": TAXONOMY_COLORS["Ambiguous"],
+    "Unclassified": TAXONOMY_COLORS["Unclassified"],
 }
 
 # Sequential palette for categorical data

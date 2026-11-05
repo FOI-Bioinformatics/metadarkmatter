@@ -7,9 +7,11 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
+from metadarkmatter.visualization.report.breakdowns import clusters_csv
 from metadarkmatter.visualization.report.components import (
     build_phylogenetic_context_heatmap,
 )
+from metadarkmatter.visualization.report.embed import csv_export_button, csv_export_payload
 from metadarkmatter.visualization.report.novel_section import (
     NOVEL_EMPTY_TEMPLATE,
     PHYLOGENETIC_HEATMAP_INTRO_TEMPLATE,
@@ -198,6 +200,16 @@ class NovelMixin(_ReportBase):
             content_parts.append(heatmap_panel)
 
         # Build cluster table (includes phylogenetic placement)
+        header, rows = clusters_csv(clusters)
+        content_parts.append(
+            '<div class="export-bar">'
+            + csv_export_button(
+                "novel-clusters",
+                csv_export_payload("novel_clusters.csv", header, rows),
+                label="Download cluster table (CSV)",
+            )
+            + "</div>"
+        )
         content_parts.append(build_cluster_table_html(clusters))
 
         content = "\n".join(content_parts)

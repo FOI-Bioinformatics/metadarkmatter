@@ -366,7 +366,10 @@ class SummaryMixin(_ReportBase):
             ))
         category_html = CATEGORY_GRID_TEMPLATE.format(cells="\n".join(grid_cells))
 
-        content = kpi_html + bar_html + self._build_ani_qc_note() + two_col_html + category_html
+        content = (
+            kpi_html + bar_html + self._build_ani_qc_note() + two_col_html
+            + category_html + self._build_run_info_panel()
+        )
 
         return TAB_SECTION_TEMPLATE.format(
             tab_id="summary",
@@ -472,7 +475,8 @@ class SummaryMixin(_ReportBase):
                 f"{s.novel_genus:,} novel genus reads detected"
             )
             link_html = (
-                '<a class="finding-link" onclick="showTab(\'novel-diversity\')">'
+                '<a class="finding-link" href="#novel-diversity" '
+                "onclick=\"return showTab('novel-diversity')\">"
                 'See Novel Diversity tab</a>'
             )
             cards.append(OVERVIEW_FINDING_CARD_TEMPLATE.format(
@@ -538,7 +542,8 @@ class SummaryMixin(_ReportBase):
             link_html = ""
             if s.has_family_validation and s.off_target > 0:
                 link_html = (
-                    '<a class="finding-link" onclick="showTab(\'data\')">'
+                    '<a class="finding-link" href="#data" '
+                    "onclick=\"return showTab('data')\">"
                     "Review off-target reads in Data tab</a>"
                 )
             return OVERVIEW_FINDING_CARD_TEMPLATE.format(
