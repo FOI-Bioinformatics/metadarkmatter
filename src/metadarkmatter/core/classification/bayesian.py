@@ -346,6 +346,41 @@ def apply_clade_novelty_rule(
     )
 
 
+def single_hit_novel_species_mask(novelty_min: float) -> pl.Expr:
+    """Boolean expression selecting reads for the single-hit novelty rule.
+
+    A read with no competing reference (``ambiguity_scope == "unambiguous"``:
+    one hit, or all hits to one representative) has U = 0, where the Bayesian
+    Known / Novel Species boundary lies near N = 6.2. Reads in
+    ``[novelty_min, 6.2)`` are therefore called Known Species although they
+    are more divergent than the Known Species novelty threshold. Selected:
+    ``taxonomic_call == "Known Species"``, unambiguous scope and
+    ``novelty_index >= novelty_min``.
+    """
+    return (
+        (pl.col("taxonomic_call") == "Known Species")
+        & (pl.col("ambiguity_scope") == "unambiguous")
+        & (pl.col("novelty_index") >= novelty_min)
+    ).fill_null(False)
+
+
+def apply_single_hit_novelty_rule(df: pl.DataFrame, novelty_min: float) -> pl.DataFrame:
+    """Apply the single-hit novelty Stage 2 rule.
+
+    Sets taxonomic_call to "Novel Species" for reads selected by
+    :func:`single_hit_novel_species_mask` and adds a boolean
+    ``single_hit_novel_species`` column recording which reads were changed.
+    Posteriors and entropy are left unchanged.
+    """
+    mask = single_hit_novel_species_mask(novelty_min)
+    return df.with_columns(mask.alias("single_hit_novel_species")).with_columns(
+        pl.when(pl.col("single_hit_novel_species"))
+        .then(pl.lit("Novel Species"))
+        .otherwise(pl.col("taxonomic_call"))
+        .alias("taxonomic_call")
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main classifier
 # ---------------------------------------------------------------------------

@@ -569,6 +569,7 @@ Classify metagenomic reads from an alignment file (BLAST or MMseqs2).
 | `--strict-ani` | | FLAG | False | Refuse ANI matrices whose forward/reverse entries differ by more than 0.5 (default: warn) |
 | `--include-legacy-scores` | | FLAG | False | Add legacy sub-scores (alignment_quality, identity_confidence, placement_confidence, discovery_score) |
 | `--clade-novel-species/--no-clade-novel-species` | | FLAG | on | Stage 2 rule (nucleotide mode, on by default; `--no-clade-novel-species` disables it): call Ambiguous/Species Boundary reads Novel Species when all competitors are within one genus and the read is at least 5% divergent from both the best and the second-best reference (and below 18.6%). Adds a `clade_novel_species` column. See METHODS.md section 10.5 and CLADE_NOVELTY_VALIDATION.md. |
+| `--single-hit-novel-species/--no-single-hit-novel-species` | | FLAG | on | Stage 2 rule (nucleotide mode, on by default): call Known Species reads with no competing reference Novel Species when their novelty is >= the Known Species threshold (`novelty_known_max`, 4%). Adds a `single_hit_novel_species` column. See METHODS.md section 10.6. |
 | `--verbose` | `-v` | FLAG | False | Enable verbose output |
 | `--quiet` | `-q` | FLAG | False | Suppress progress output (for scripting) |
 | `--target-family` | | TEXT | None | Override the target family for off-target detection. Auto-inferred from `--metadata` when omitted (e.g., `f__Francisellaceae`). |
@@ -1285,7 +1286,7 @@ Columns written by `score classify` (in this order):
 | inferred_uncertainty | float | Inferred uncertainty for single-hit reads |
 | uncertainty_type | string | `measured`, `inferred` (single-hit reads), or `off_target` |
 
-When family validation is active, `family_bitscore_ratio`, `family_identity_gap`, `in_family_hit_fraction`, `external_best_genome`, `external_best_identity`, `in_family_identity` and `in_family_novelty_index` are added. With `--metadata` (in-memory mode), `species`, `genus` and `family` are appended. `--include-legacy-scores` adds `alignment_quality`, `identity_confidence`, `placement_confidence` and `discovery_score`. In nucleotide mode the clade-novelty rule (on by default) adds the boolean `clade_novel_species`; it is absent with `--no-clade-novel-species` and in protein mode.
+When family validation is active, `family_bitscore_ratio`, `family_identity_gap`, `in_family_hit_fraction`, `external_best_genome`, `external_best_identity`, `in_family_identity` and `in_family_novelty_index` are added. With `--metadata` (in-memory mode), `species`, `genus` and `family` are appended. `--include-legacy-scores` adds `alignment_quality`, `identity_confidence`, `placement_confidence` and `discovery_score`. In nucleotide mode the clade-novelty and single-hit novelty rules (both on by default) add the boolean columns `clade_novel_species` and `single_hit_novel_species`; each is absent when its rule is disabled and in protein mode.
 
 **Taxonomic Call Values:** `Known Species`, `Novel Species`, `Novel Genus`, `Species Boundary`, `Ambiguous`, `Ambiguous Within Genus`, `Conserved Region`, `Unclassified`, and `Off-target`. See the Alignment Mode section above for how the hard thresholds behind `legacy_call` relate to the Bayesian `taxonomic_call`.
 

@@ -39,7 +39,8 @@ This document describes the computational methods used by metadarkmatter for det
     - 10.3 [Stage 2 Refinement](#103-stage-2-refinement)
     - 10.4 [Shannon Entropy and Confidence](#104-shannon-entropy-and-confidence)
     - 10.5 [Clade-Novelty Rule](#105-clade-novelty-rule)
-    - 10.6 [Interpretation](#106-interpretation)
+    - 10.6 [Single-Hit Novelty Rule](#106-single-hit-novelty-rule)
+    - 10.7 [Interpretation](#107-interpretation)
 11. [References](#11-references)
 
 ---
@@ -889,7 +890,15 @@ Selected reads get `taxonomic_call = "Novel Species"` (and therefore `diversity_
 
 In a leave-one-out benchmark on three families (Francisellaceae, Lactobacillaceae, Enterobacteriaceae; `scripts/benchmark_leave_one_out.py`), the rule raised read-level novel-species recall from 0.47-0.52 to 0.59-0.70, left novel-versus-known precision at or above 0.989 and Novel Genus recall unchanged, and increased the fraction of genus-level reads called Novel Species. Details and limitations: [CLADE_NOVELTY_VALIDATION.md](CLADE_NOVELTY_VALIDATION.md). On the strength of that validation the rule is on by default; setting it off reproduces the previous classification exactly.
 
-### 10.6 Interpretation
+### 10.6 Single-Hit Novelty Rule
+
+For a read with no competing reference (`ambiguity_scope = "unambiguous"`: a single hit, or all hits to one representative) U = 0, and at U = 0 the Bayesian Known / Novel Species boundary lies near N = 6.2% rather than at `novelty_known_max` (4%; Section 2.5). Single-reference reads at 4-6% novelty were therefore called Known Species although they are more divergent than the Known Species threshold.
+
+With `single_hit_novel_species = true` (the default; disable with `score classify --no-single-hit-novel-species` or `single_hit_novelty: {enabled: false}` in a YAML config), reads with `taxonomic_call = "Known Species"`, `ambiguity_scope = "unambiguous"` and `novelty_index >= novelty_known_max` (effective threshold) are called Novel Species after Stage 2 (nucleotide mode only). Posteriors and entropy are unchanged; the boolean column `single_hit_novel_species` records which reads the rule changed.
+
+In the same leave-one-out benchmark, applied on top of the clade-novelty rule, novel-species recall rose from 0.695 / 0.588 / 0.632 to 0.801 / 0.621 / 0.746 (Francisellaceae / Lactobacillaceae / Enterobacteriaceae), Novel Species precision rose slightly, novel-versus-known precision was unchanged (>= 0.989), and control false-novel reads rose by 0-6 of about 5,000-6,000. Details: [CLADE_NOVELTY_VALIDATION.md](CLADE_NOVELTY_VALIDATION.md#single-hit-novelty-rule).
+
+### 10.7 Interpretation
 
 The MAP category and the legacy cascade often agree away from boundaries, but they are not equivalent (Section 2.5). Near boundaries the posteriors show uncertainty that the hard thresholds do not.
 

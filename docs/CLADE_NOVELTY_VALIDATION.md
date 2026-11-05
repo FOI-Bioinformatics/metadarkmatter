@@ -106,6 +106,33 @@ Observations:
   whose reads have median novelty 16.9%; the benchmark's genus truth is
   itself uncertain at that distance.
 
+## Single-hit novelty rule
+
+A second Stage 2 rule (`single_hit_novel_species`, on by default) addresses
+reads with no competing reference. At U = 0 the Bayesian Known / Novel
+Species boundary lies near N = 6.2%, so single-reference reads at 4-6%
+novelty were called Known Species. The rule calls `Known Species` reads with
+`ambiguity_scope = "unambiguous"` and `novelty_index >= novelty_known_max`
+(4%) Novel Species. It was evaluated on the same per-read benchmark results,
+applied on top of the clade-novelty rule; thresholds 4.5 and 5 gave smaller
+gains with similar costs.
+
+| Metric | Francisellaceae | Lactobacillaceae | Enterobacteriaceae |
+|---|---|---|---|
+| Novel-species recall, nearest ANI 80-94% | 0.695 -> 0.801 | 0.588 -> 0.621 | 0.632 -> 0.746 |
+| Novel Species precision | 0.917 -> 0.928 | 0.926 -> 0.927 | 0.936 -> 0.946 |
+| Any-novel recall | 0.517 -> 0.609 | 0.852 -> 0.881 | 0.656 -> 0.783 |
+| Any-novel precision | 0.989 -> 0.989 | 0.994 -> 0.994 | 0.994 -> 0.993 |
+| Novel-genus reads called Novel Species | 0.323 -> 0.325 | 0.216 -> 0.222 | 0.398 -> 0.401 |
+| Control false-novel reads | 22 -> 28 / 4787 | 14 -> 14 / 6315 | 20 -> 26 / 6393 |
+
+On the real Francisellaceae MMseqs2 data, reads from the held-out species
+F. salimarina called Novel Species rose from 56.0% to 61.8%, while reads
+from the in-database F. tularensis stayed at 94% Known Species. Simulated
+reads have a 0.5% error rate; with noisier reads, or strains of a reference
+species that are 97-98% ANI to it, more known reads exceed 4% novelty, so
+the false-novel cost is expected to be higher on such data.
+
 ## Limitations
 
 - Simulated reads with uniform substitution errors and no indels; one read
@@ -121,7 +148,7 @@ Observations:
 The rule improved novel-species recall in all three families, including the
 two held-out families, without a measurable loss in novel-versus-known
 precision, which meets the held-out-family requirement in CLAUDE.md
-("Calibration: diagnostic only"). It is therefore **on by default**.
+("Calibration: diagnostic only"). It is therefore **on by default**, as is the single-hit novelty rule above.
 `--no-clade-novel-species` (or `clade_novelty: {enabled: false}` in a YAML
 config) reproduces the previous classification exactly. Re-run the benchmark
 with `--compare-clade-rule` when changing the rule's thresholds.
