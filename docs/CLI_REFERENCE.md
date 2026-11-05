@@ -123,7 +123,9 @@ Run BLASTN competitive alignment for ANI-weighted placement.
 
 | Option | Short | Type | Description |
 |--------|-------|------|-------------|
-| `--query` | `-q` | PATH | Query reads file (FASTA/FASTQ) |
+| `--query` | `-q` | PATH | Single-end query reads (FASTA/FASTQ). Use this OR `--query-1`/`--query-2` |
+| `--query-1` | `-1` | PATH | Forward (R1) reads for paired-end input (gzip OK) |
+| `--query-2` | `-2` | PATH | Reverse reads for paired-end input (gzip OK) |
 | `--database` | `-d` | PATH | BLAST database prefix |
 | `--output` | `-o` | PATH | Output file for BLAST results |
 
@@ -143,6 +145,8 @@ Run BLASTN competitive alignment for ANI-weighted placement.
 | `--quiet` | `-q` | FLAG | False | Suppress progress output |
 | `--dry-run` | | FLAG | False | Show commands without executing (the global `--dry-run` is also honoured) |
 
+Paired-end input (`--query-1`/`--query-2`) aligns both mates in one BLAST run and writes one combined output file. As with `mmseqs2 search`, each mate ID receives a `/1` or `/2` suffix unless it already ends in that suffix, so mates are classified as separate reads; R1 records precede R2 records, and every read's hits are contiguous, so the output can be classified with `--streaming`. Both mates must have the same format (FASTA or FASTQ).
+
 Gzipped queries are decompressed to a temporary file before BLASTN runs; FASTQ input is converted to FASTA. The query format is detected from the first record, so gzipped FASTA is not mistaken for FASTQ. Multi-volume databases and database prefixes containing dots are accepted.
 
 #### Examples
@@ -151,6 +155,15 @@ Gzipped queries are decompressed to a temporary file before BLASTN runs; FASTQ i
 ```bash
 metadarkmatter blast align \
     --query extracted_reads.fasta \
+    --database blastdb/pangenome \
+    --output sample.blast.tsv.gz
+```
+
+**Paired-end alignment (both mates, one output)**
+```bash
+metadarkmatter blast align \
+    --query-1 extracted_R1.fastq.gz \
+    --query-2 extracted_R2.fastq.gz \
     --database blastdb/pangenome \
     --output sample.blast.tsv.gz
 ```
@@ -1285,9 +1298,10 @@ Run the complete pipeline from reads (or extracted reads) to an HTML report.
 | `--genomes` | `-g` | PATH | - | Pre-downloaded reference genomes dir (skips download). |
 | `--kraken-output` |  | PATH | - | Pre-computed .kraken file (skips kraken classify). |
 | `--extracted-reads-1` |  | PATH | - | Pre-extracted family R1 reads (skips both kraken steps). |
-| `--extracted-reads-2` |  | PATH | - | Pre-extracted family R2 reads (paired-end; used by --aligner mmseqs2 only). |
+| `--extracted-reads-2` |  | PATH | - | Pre-extracted family R2 reads (paired-end; both aligners align both mates). |
 | `--output-dir` | `-o` | PATH | - | Root output directory for the run (required unless set in --config). |
 | `--aligner` |  | CHOICE | - | Aligner for the alignment step [default: blast]. Choices: blast, mmseqs2. |
+| `--ani-backend` |  | TEXT | - | ANI backend: auto, fastani or skani [default: auto, or the --config value]. |
 | `--no-report` |  | FLAG | off | Skip the HTML report step. |
 | `--from` |  | CHOICE | - | Resume from this step (earlier outputs must already exist). Choices: download, kraken-classify, kraken-extract, makedb, align, ani, classify, report. |
 | `--force` |  | FLAG | off | Re-run every step even if its outputs already exist. |
@@ -1297,9 +1311,56 @@ Run the complete pipeline from reads (or extracted reads) to an HTML report.
 
 `download genomes list` writes both the accession TSV given by `--output` and `genome_metadata.tsv` (accession, species, genus, family, representative, gtdb_taxonomy) next to it.
 
-For `run pipeline`, values in the `--config` YAML (e.g. aligner, threads, output_dir) apply unless the corresponding flag is passed explicitly. `--from STEP` re-runs that step and all later steps even when their outputs exist. The run manifest records start and finish times for each step. `--extracted-reads-2` is used only with `--aligner mmseqs2`; with `--aligner blast`, R2 reads are not aligned (BLAST is single-end) and a warning says so. Unknown keys in the `--config` YAML produce a warning.
+For `run pipeline`, values in the `--config` YAML (e.g. aligner, threads, output_dir) apply unless the corresponding flag is passed explicitly. `--from STEP` re-runs that step and all later steps even when their outputs exist. The run manifest records start and finish times for each step. With either aligner, R2 reads (`--reads-2` / `--extracted-reads-2`) are aligned together with R1 (mates get `/1` and `/2` ID suffixes). Unknown keys in the `--config` YAML produce a warning.
 
 **Checkpointing.** A step is skipped on re-run only if a completion marker (`.mdm_steps/<step>.done.json`, written after the step exits 0) exists and its fingerprint (the step's command line plus size and modification time of its input files) matches. A changed fingerprint, or a step that was interrupted, re-runs that step and every later step. The previous `run_manifest.json` is kept as `run_manifest.<timestamp>.json`.
+
+
+### `metadarkmatter run cohort`
+
+Run the pipeline over many samples that share one reference.
+
+```bash
+# samples.tsv (tab-separated; relative paths resolve against the sheet):
+# sample    reads_1         reads_2
+# S1        S1_R1.fq.gz     S1_R2.fq.gz
+# S2        S2_R1.fq.gz     S2_R2.fq.gz
+mdm run cohort --samples samples.tsv --family f__Francisellaceae --family-taxid 34064 \
+    --kraken-db db/ --output-dir results/cohort01
+```
+
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--samples` | `-s` | PATH | required | Sample sheet TSV: `sample`, `reads_1`, optional `reads_2`; or `extracted_reads_1`, optional `extracted_reads_2` (skips Kraken2). `#` lines are ignored. |
+| `--output-dir` | `-o` | PATH | required | Cohort root directory. |
+| `--family`, `--family-taxid`, `--kraken-db`, `--genomes` | | | - | As for `run pipeline`. |
+| `--aligner` | | CHOICE | blast | blast or mmseqs2. |
+| `--ani-backend` | | TEXT | auto | auto, fastani or skani. |
+| `--no-report` | | FLAG | off | Skip per-sample reports and the cohort report. |
+| `--no-sample-reports` | | FLAG | off | Skip only the per-sample HTML reports. |
+| `--from` | | CHOICE | - | Resume from this step, for the reference and for every sample. |
+| `--force` | | FLAG | off | Re-run every step. |
+| `--threads` | `-t` | INT | 8 | Threads per tool step. |
+| `--quiet` | `-q` | FLAG | off | Suppress progress output. |
+| `--dry-run` | | FLAG | off | Plan all steps for the reference and every sample without executing (global `--dry-run` also honoured). |
+
+Layout:
+
+```
+cohort01/
+  reference/               genomes, genome_metadata.tsv, blastdb/ (or mmseqs_db/), ani_matrix.csv
+  samples/<sample>/        <sample>.kraken, extraction/, <sample>.blast.tsv.gz,
+                           classifications.csv, summary.json, reports/report.html,
+                           run_manifest.json, .mdm_steps/
+  cohort_summary.tsv       one row per sample
+  cohort_report.html       multi-sample report (via `report multi`)
+  cohort_manifest.json     per-sample status
+  multi_inputs/            symlinks to each completed sample's classifications.csv
+```
+
+Sample names (sheet column `sample`, also used as the Kraken2 `--sample-name` and as file stems) must be unique, start with a letter or digit, and contain only letters, digits, `_`, `.` and `-`; names containing `_classifications`, `.kraken`, `.blast` or `.tsv` are rejected because `report multi` would alter them. All read files must exist. Samples are processed sequentially in sheet order, each with the same per-step fingerprint checkpointing as `run pipeline`, so re-running the command only redoes steps whose inputs changed. A failing reference build stops the run; a failing sample does not stop the other samples, but the command exits with status 1 and the sample is marked `failed` (with the error) in `cohort_summary.tsv`.
+
+`cohort_summary.tsv` columns: `sample`, `status` (`completed` or `failed`), `total_reads`, one count column per `taxonomic_call` category present (sorted by category name), `novel_fraction` ((Novel Species + Novel Genus) / total reads), `error`.
 
 ---
 

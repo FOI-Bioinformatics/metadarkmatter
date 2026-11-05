@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar, Literal, Self
 
 import yaml
 from pydantic import BaseModel, Field, model_validator
@@ -94,6 +94,10 @@ class PipelineConfig(BaseModel):
     output_dir: Path = Field(description="Root output directory for the run.")
     aligner: Aligner = Field(default=Aligner.BLAST, description="Aligner for the alignment step.")
     threads: int = Field(default=8, ge=1, description="Threads passed to each tool step.")
+
+    ani_backend: Literal["auto", "fastani", "skani"] = Field(
+        default="auto", description="Backend for the ANI step (auto prefers skani)."
+    )
 
     # Optional stage toggles
     compute_aai: bool = Field(default=False, description="Also compute an AAI matrix.")

@@ -14,6 +14,7 @@ from pathlib import Path
 import typer
 import yaml
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from metadarkmatter import __version__
@@ -89,6 +90,11 @@ def run_pipeline(
     no_report: bool = typer.Option(
         False, "--no-report", help="Skip the HTML report step.",
     ),
+    ani_backend: str | None = typer.Option(
+        None, "--ani-backend",
+        help="ANI backend: auto, fastani or skani [default: auto, or the --config value].",
+    ),
+
     from_step: PipelineStep | None = typer.Option(
         None, "--from", help="Resume from this step (earlier outputs must already exist).",
     ),
@@ -132,6 +138,7 @@ def run_pipeline(
         "extracted_reads_1": extracted_reads_1,
         "output_dir": output_dir,
         "aligner": aligner,
+        "ani_backend": ani_backend,
         "threads": threads,
         "report": False if no_report else None,
     }
@@ -255,6 +262,9 @@ def run_cohort(
     aligner: Aligner = typer.Option(
         Aligner.BLAST, "--aligner", help="Aligner for the alignment step.",
     ),
+    ani_backend: str = typer.Option(
+        "auto", "--ani-backend", help="ANI backend: auto, fastani or skani.",
+    ),
     no_report: bool = typer.Option(
         False, "--no-report", help="Skip per-sample reports and the cohort report.",
     ),
@@ -304,6 +314,7 @@ def run_cohort(
         "kraken_db": kraken_db,
         "genomes_dir": genomes,
         "threads": threads,
+        "ani_backend": ani_backend,
     }
     cohort = Cohort(
         sheet,
@@ -312,7 +323,7 @@ def run_cohort(
         aligner=aligner,
         dry_run=effective_dry_run,
         force=force,
-        log=lambda msg: out.print(msg),
+        log=lambda msg: out.print(escape(msg)),
         sample_reports=not (no_report or no_sample_reports),
         cohort_report=not no_report,
     )

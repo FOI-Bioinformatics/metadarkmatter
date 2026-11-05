@@ -10,6 +10,18 @@ Production-readiness and UX hardening pass.
 
 ### Added
 
+- `blast align --query-1/--query-2`: paired-end BLAST. Both mates are aligned
+  in one run into one output file with `/1` and `/2` mate ID suffixes (same
+  convention as `mmseqs2 search`; the helper now lives in
+  `core/paired_reads.py`). `run pipeline --aligner blast` aligns R2 as well
+  and no longer warns that R2 is dropped.
+- `metadarkmatter run cohort`: multi-sample runs from a sample sheet. Builds
+  the shared reference once (`reference/`), runs per-sample steps under
+  `samples/<sample>/` with the existing checkpointing, and writes
+  `cohort_summary.tsv` and `cohort_report.html` (via `report multi`). A failed
+  sample does not stop the others but the command exits non-zero.
+- `--ani-backend` for `run pipeline` / `run cohort` (`auto`, `fastani`,
+  `skani`).
 - `metadarkmatter run pipeline` — single end-to-end orchestration command
   that chains download -> kraken2 extract -> align -> ANI -> classify ->
   report. Reuses the existing subcommands as steps, with a structured output

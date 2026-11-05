@@ -305,3 +305,22 @@ def test_cli_cohort_raw_reads_need_taxid_and_kraken(tmp_path: Path):
     )
     assert res.exit_code != 0
     assert "family-taxid" in res.output.replace("\n", " ")
+
+
+def test_ani_backend_passed_only_when_not_auto(tmp_path: Path):
+    from metadarkmatter.core.pipeline import Pipeline, PipelineLayout
+    from metadarkmatter.models.pipeline_config import PipelineConfig
+
+    genomes = tmp_path / "g"
+    genomes.mkdir()
+    reads = _touch(tmp_path / "r.fq")
+    for backend, expect in (("auto", False), ("fastani", True)):
+        cfg = PipelineConfig(
+            genomes_dir=genomes, extracted_reads_1=reads, output_dir=tmp_path / "o",
+            ani_backend=backend,
+        )
+        plan = {s.step: s for s in Pipeline(cfg, PipelineLayout(root=cfg.output_dir)).plan()}
+        argv = plan[PipelineStep.ANI].argv
+        assert ("--backend" in argv) is expect
+        if expect:
+            assert argv[argv.index("--backend") + 1] == "fastani"

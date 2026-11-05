@@ -89,6 +89,7 @@ fi
     --output "$OUT_DIR/extraction/"
 # Name written by 'kraken2 extract': <sample>_taxid<taxid>_R1.fastq.gz
 EXTRACTED_R1="$OUT_DIR/extraction/${SAMPLE}_taxid${FAMILY_TAXID}_R1.fastq.gz"
+EXTRACTED_R2="$OUT_DIR/extraction/${SAMPLE}_taxid${FAMILY_TAXID}_R2.fastq.gz"
 
 echo "[4/9] Building BLAST database"
 "$MDM" blast makedb \
@@ -96,8 +97,14 @@ echo "[4/9] Building BLAST database"
     --output "$OUT_DIR/blastdb/pangenome"
 
 echo "[5/9] Aligning reads"
+# Paired input: both mates are aligned (mate IDs get /1 and /2 suffixes).
+if [[ -n "$READS_R2" ]]; then
+    QUERY_ARGS=(--query-1 "$EXTRACTED_R1" --query-2 "$EXTRACTED_R2")
+else
+    QUERY_ARGS=(--query "$EXTRACTED_R1")
+fi
 "$MDM" blast align \
-    --query "$EXTRACTED_R1" \
+    "${QUERY_ARGS[@]}" \
     --database "$OUT_DIR/blastdb/pangenome" \
     --output "$OUT_DIR/sample.blast.tsv.gz" \
     --threads "$THREADS"

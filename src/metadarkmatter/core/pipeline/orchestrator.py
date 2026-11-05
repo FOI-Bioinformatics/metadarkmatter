@@ -505,6 +505,8 @@ class Pipeline:
             "--genomes", str(genomes_dir), "--output", str(lay.ani_matrix),
             "--threads", threads,
         ]
+        if cfg.ani_backend != "auto":
+            ani_argv += ["--backend", cfg.ani_backend]
         if use_metadata:
             ani_argv += ["--metadata", str(lay.metadata_tsv), "--representatives-only"]
         steps.append(
