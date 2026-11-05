@@ -1,4 +1,4 @@
-"""Tests for the opt-in clade-novelty Stage 2 rule (``clade_novel_species``)."""
+"""Tests for the clade-novelty Stage 2 rule (``clade_novel_species``, on by default)."""
 
 from __future__ import annotations
 
@@ -102,10 +102,18 @@ class TestMask:
 
 
 class TestClassifier:
-    def test_default_off_unchanged_schema(self, tmp_path):
+    def test_on_by_default(self, tmp_path):
+        assert ScoringConfig().clade_novel_species is True
         out = VectorizedClassifier(_ani(), config=ScoringConfig()).classify_file(
             _write(tmp_path / "a.tsv")
         )
+        assert "clade_novel_species" in out.columns
+        assert _calls(out)["r_clade"] == "Novel Species"
+
+    def test_disabled_restores_previous_behaviour(self, tmp_path):
+        out = VectorizedClassifier(
+            _ani(), config=ScoringConfig(clade_novel_species=False)
+        ).classify_file(_write(tmp_path / "a.tsv"))
         assert "clade_novel_species" not in out.columns
         assert _calls(out)["r_clade"] == "Ambiguous"
 
@@ -142,6 +150,12 @@ class TestClassifier:
         out = clf.classify_file(_write(tmp_path / "a.tsv"))
         assert "clade_novel_species" not in out.columns
 
+    def test_protein_default_does_not_warn(self, caplog):
+        """The default (on) must not warn on every protein-mode run."""
+        with caplog.at_level("WARNING"):
+            VectorizedClassifier(_ani(), config=ScoringConfig(alignment_mode="protein"))
+        assert "only validated for nucleotide" not in caplog.text
+
 
 class TestConfig:
     def test_bounds_validated(self):
@@ -160,7 +174,12 @@ class TestConfig:
         assert back.clade_novelty_min == 6.0
         assert back.clade_novelty_max == 15.0
 
-    def test_cli_flag(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("flag", "expected"),
+        [([], "Novel Species"), (["--clade-novel-species"], "Novel Species"),
+         (["--no-clade-novel-species"], "Ambiguous")],
+    )
+    def test_cli_flag(self, tmp_path, flag, expected):
         aln = _write(tmp_path / "a.tsv")
         ani = tmp_path / "ani.csv"
         ani.write_text("genome,A,B\nA,100,92\nB,92,100\n")
@@ -168,9 +187,26 @@ class TestConfig:
         result = CliRunner().invoke(
             app,
             ["score", "classify", "--alignment", str(aln), "--ani", str(ani),
-             "--output", str(out), "--clade-novel-species", "-q"],
+             "--output", str(out), "-q", *flag],
         )
         assert result.exit_code == 0, result.output
         df = pl.read_csv(out)
-        assert "clade_novel_species" in df.columns
-        assert _calls(df)["r_clade"] == "Novel Species"
+        assert _calls(df)["r_clade"] == expected
+        assert ("clade_novel_species" in df.columns) == (expected == "Novel Species")
+
+    def test_no_flag_overrides_config_file(self, tmp_path):
+        """--no-clade-novel-species wins over a YAML that enables it."""
+        aln = _write(tmp_path / "a.tsv")
+        ani = tmp_path / "ani.csv"
+        ani.write_text("genome,A,B\nA,100,92\nB,92,100\n")
+        cfg = tmp_path / "c.yaml"
+        ScoringConfig(clade_novel_species=True).to_yaml(cfg)
+        out = tmp_path / "o.csv"
+        result = CliRunner().invoke(
+            app,
+            ["score", "classify", "--alignment", str(aln), "--ani", str(ani),
+             "--config", str(cfg), "--output", str(out), "-q",
+             "--no-clade-novel-species"],
+        )
+        assert result.exit_code == 0, result.output
+        assert _calls(pl.read_csv(out))["r_clade"] == "Ambiguous"

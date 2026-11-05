@@ -97,7 +97,11 @@ class VectorizedClassifier:
         self.ani_matrix = ani_matrix
         self.aai_matrix = aai_matrix
         self.config = config or ScoringConfig()
-        if self.config.clade_novel_species and self.config.alignment_mode != "nucleotide":
+        if (
+            self.config.clade_novel_species
+            and "clade_novel_species" in self.config.model_fields_set
+            and self.config.alignment_mode != "nucleotide"
+        ):
             logger.warning(
                 "clade_novel_species is only validated for nucleotide mode and "
                 "is not applied with alignment_mode=%r.",
