@@ -8,7 +8,9 @@ the ANI-weighted placement uncertainty algorithm on existing BLAST results.
 from __future__ import annotations
 
 import gzip
+import json
 import logging
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -29,18 +31,26 @@ from rich.progress import (
 )
 from rich.table import Table
 
-from metadarkmatter.cli.utils import QuietConsole, extract_sample_name
+from metadarkmatter.cli.utils import QuietConsole
 from metadarkmatter.core.ani_placement import (
     ANIMatrix,
-    VectorizedClassifier,
 )
 from metadarkmatter.core.classification.runner import (
     ClassificationRequest,
+    ClassificationRunResult,
     run_classification,
     validate_ani_genome_coverage,
 )
 from metadarkmatter.core.exceptions import ConfigurationError, MetadarkmatterError
-from metadarkmatter.core.io_utils import OutputFormat, read_dataframe, write_dataframe
+from metadarkmatter.core.io_utils import OutputFormat, read_dataframe
+from metadarkmatter.core.provenance import (
+    build_provenance,
+    provenance_path_for,
+    scan_classifications,
+    summarize_classifications,
+    write_provenance,
+)
+from metadarkmatter.core.read_export import extract_reads, normalize_read_id
 from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.models.classification import TaxonomicSummary
 from metadarkmatter.models.config import ScoringConfig
@@ -342,6 +352,59 @@ def build_classify_config(opts: _ClassifyOptions) -> tuple[ScoringConfig, list[s
         ),
     )
     return config, messages
+
+
+def _cli_command() -> list[str]:
+    """Command line recorded in provenance: program basename plus arguments."""
+    return [Path(sys.argv[0]).name, *sys.argv[1:]] if sys.argv else []
+
+
+def _build_run_provenance(
+    request: ClassificationRequest,
+    result: ClassificationRunResult,
+    *,
+    summary_path: Path | None,
+) -> dict[str, Any]:
+    """Provenance dict for one finished classification run.
+
+    ``result.config`` is used (not ``request.config``) so adaptive thresholds
+    and the inferred target family are recorded as applied.
+    """
+    table: pl.DataFrame | pl.LazyFrame
+    if result.classification_df is not None:
+        table = result.classification_df
+    else:
+        # Streaming mode: summarise the on-disk output lazily.
+        table = scan_classifications(request.output)
+    return build_provenance(
+        _cli_command(),
+        {
+            "alignment": request.alignment,
+            "ani": request.ani,
+            "metadata": request.metadata,
+            "aai": request.aai,
+            "id_mapping": request.id_mapping,
+        },
+        result.config,
+        {
+            "outputs": {
+                "classifications": str(request.output.resolve()),
+                "summary": str(summary_path.resolve()) if summary_path else None,
+            },
+            "results": summarize_classifications(table),
+        },
+    )
+
+
+def _write_summary_json(
+    summary_obj: TaxonomicSummary, path: Path, provenance: dict[str, Any] | None
+) -> None:
+    """Write the summary JSON, embedding provenance under ``"provenance"``."""
+    data = json.loads(summary_obj.model_dump_json())
+    if provenance is not None:
+        data["provenance"] = provenance
+    path.write_text(json.dumps(data, indent=2) + "\n")
+
 
 
 @app.command(name="classify")
@@ -649,6 +712,15 @@ def classify(
             "single_hit_novel_species column. See docs/METHODS.md."
         ),
     ),
+    provenance: bool = typer.Option(
+        True,
+        "--provenance/--no-provenance",
+        help=(
+            "Write <output>.provenance.json next to the classifications "
+            "(tool version, command, input SHA-256 hashes, resolved config, "
+            "result counts) and embed it in --summary. On by default."
+        ),
+    ),
     quiet: bool = typer.Option(
         False,
         "--quiet",
@@ -938,6 +1010,15 @@ def classify(
     classification_df = result.classification_df
     qc_metrics = result.qc_metrics
 
+    # Provenance is built before the summary so it can be embedded there.
+    prov_data: dict[str, Any] | None = None
+    if provenance:
+        prov_data = _build_run_provenance(
+            request,
+            result,
+            summary_path=summary if (summary and num_classified > 0) else None,
+        )
+
     # Generate summary if requested
     if summary and num_classified > 0:
         with Progress(
@@ -956,21 +1037,26 @@ def classify(
                     summary_df = read_dataframe(output)
 
                 summary_obj = _generate_summary(summary_df)
-                summary_obj.to_json(summary)
+                _write_summary_json(summary_obj, summary, prov_data)
 
                 # Display summary table (skip in quiet mode)
                 if not quiet:
                     _display_summary_table(summary_obj)
 
             except (pl.exceptions.PolarsError, ValueError, OSError) as e:
+                if prov_data is not None:
+                    prov_data["outputs"]["summary"] = None
                 console.print(f"\n[yellow]Warning: Failed to generate summary: {e}[/yellow]")
                 if verbose:
                     console.print_exception()
 
+    if prov_data is not None:
+        prov_file = provenance_path_for(output)
+        write_provenance(prov_file, prov_data)
+        out.print(f"[bold green]Provenance written to:[/bold green] {prov_file}")
+
     # Write QC metrics if requested
     if qc_output is not None and qc_metrics is not None:
-        import json
-
         qc_output.parent.mkdir(parents=True, exist_ok=True)
         qc_output.write_text(json.dumps(qc_metrics.to_dict(), indent=2))
         out.print(f"[bold green]QC metrics written to:[/bold green] {qc_output}")
@@ -1049,6 +1135,47 @@ def export_config(
     console.print("[dim]Edit the file and use with: score classify --config <path>[/dim]")
 
 
+# Alignment-file suffixes stripped (longest first) to derive a sample name.
+_ALIGNMENT_SUFFIXES: tuple[str, ...] = (
+    ".blast.tsv.gz",
+    ".mmseqs2.tsv.gz",
+    ".blast.tsv",
+    ".mmseqs2.tsv",
+    ".tsv.gz",
+    ".tsv",
+)
+
+# Default --pattern set for ``score batch``: BLAST and MMseqs2 outputs, gzipped
+# or plain.
+DEFAULT_BATCH_PATTERNS: tuple[str, ...] = (
+    "*.blast.tsv.gz",
+    "*.mmseqs2.tsv.gz",
+    "*.blast.tsv",
+    "*.mmseqs2.tsv",
+)
+
+
+def sample_name_from_alignment(path: Path) -> str:
+    """Derive a sample name by stripping a known alignment suffix.
+
+    ``s1.blast.tsv.gz`` and ``s1.mmseqs2.tsv`` both give ``s1``. Names without
+    a known suffix fall back to the file name minus its last extension.
+    """
+    name = path.name
+    for suffix in _ALIGNMENT_SUFFIXES:
+        if name.endswith(suffix) and len(name) > len(suffix):
+            return name[: -len(suffix)]
+    return path.stem
+
+
+def _find_sample_collisions(files: list[Path]) -> dict[str, list[Path]]:
+    """Return sample names claimed by more than one alignment file."""
+    by_name: dict[str, list[Path]] = {}
+    for f in files:
+        by_name.setdefault(sample_name_from_alignment(f), []).append(f)
+    return {k: v for k, v in by_name.items() if len(v) > 1}
+
+
 @app.command(name="batch")
 def batch(
     alignment_dir: Path = typer.Option(
@@ -1073,24 +1200,66 @@ def batch(
         "-o",
         help="Output directory for classification results",
     ),
-    pattern: str = typer.Option(
-        "*.blast.tsv.gz",
+    pattern: list[str] | None = typer.Option(
+        None,
         "--pattern",
         "-p",
-        help="Glob pattern for BLAST files",
+        help=(
+            "Glob pattern for alignment files; repeat to give several. Default: "
+            + ", ".join(DEFAULT_BATCH_PATTERNS)
+        ),
+    ),
+    aai: Path | None = typer.Option(
+        None,
+        "--aai",
+        help="Path to AAI matrix file (CSV) for genus-level classification",
+        exists=True,
+        dir_okay=False,
+    ),
+    metadata: Path | None = typer.Option(
+        None,
+        "--metadata",
+        "-m",
+        help="Path to genome_metadata.tsv (species aggregation, representatives, target family)",
+        exists=True,
+        dir_okay=False,
+    ),
+    genomes: Path | None = typer.Option(
+        None,
+        "--genomes",
+        "-g",
+        help="Genome FASTA directory for auto-generating ID mapping (external alignments)",
+        exists=True,
+        file_okay=False,
+    ),
+    id_mapping: Path | None = typer.Option(
+        None,
+        "--id-mapping",
+        help="Pre-computed ID mapping TSV file (alternative to --genomes)",
+        exists=True,
+        dir_okay=False,
     ),
     bitscore_threshold: float = typer.Option(
         95.0,
         "--bitscore-threshold",
         help="Percentage of top bitscore for ambiguous hits",
+        min=0,
+        max=100,
     ),
     preset: str | None = typer.Option(
         None,
         "--preset",
         help=(
-            "Use predefined threshold preset: 'gtdb-strict', 'gtdb-relaxed', "
-            "'conservative', 'literature-strict', or 'coverage-strict'"
+            "Use predefined threshold preset: "
+            + ", ".join(f"'{k}'" for k in THRESHOLD_PRESETS)
         ),
+    ),
+    config_file: Path | None = typer.Option(
+        None,
+        "--config",
+        help="Path to YAML configuration file (see: score export-config)",
+        exists=True,
+        dir_okay=False,
     ),
     alignment_mode: str = typer.Option(
         "nucleotide",
@@ -1169,6 +1338,70 @@ def batch(
             "'second' uses ANI to the second-best genome only (default)."
         ),
     ),
+    single_hit_uncertainty_threshold: float = typer.Option(
+        10.0,
+        "--single-hit-threshold",
+        help="Inferred uncertainty threshold for single-hit reads in legacy_call.",
+        min=0.0,
+        max=100.0,
+    ),
+    target_family: str | None = typer.Option(
+        None,
+        "--target-family",
+        help=(
+            "Target taxonomic family for off-target detection (e.g. "
+            "'f__Francisellaceae'). Inferred from --metadata when omitted."
+        ),
+    ),
+    family_ratio_threshold: float = typer.Option(
+        0.8,
+        "--family-ratio-threshold",
+        help="Bitscore ratio threshold for off-target detection. Default 0.8.",
+        min=0.0,
+        max=1.0,
+    ),
+    include_legacy_scores: bool = typer.Option(
+        False,
+        "--include-legacy-scores",
+        help="Include legacy sub-scores in the output.",
+    ),
+    clade_novel_species: bool | None = typer.Option(
+        None,
+        "--clade-novel-species/--no-clade-novel-species",
+        help="Toggle the clade-novelty Stage 2 rule (default from --config/--preset: on).",
+    ),
+    single_hit_novel_species: bool | None = typer.Option(
+        None,
+        "--single-hit-novel-species/--no-single-hit-novel-species",
+        help="Toggle the single-hit novelty Stage 2 rule (default from --config/--preset: on).",
+    ),
+    streaming: bool = typer.Option(
+        False,
+        "--streaming",
+        help="Use streaming mode for very large files (no species columns; no --id-mapping)",
+    ),
+    chunk_size: int = typer.Option(
+        1_000_000,
+        "--chunk-size",
+        help="Rows per streaming batch (default 1,000,000).",
+        min=100,
+        max=100_000_000,
+    ),
+    strict_ani: bool = typer.Option(
+        False,
+        "--strict-ani",
+        help="Refuse to load an ANI matrix whose forward and reverse entries disagree.",
+    ),
+    adaptive_thresholds: bool = typer.Option(
+        False,
+        "--adaptive-thresholds",
+        help="Detect the species boundary from the ANI matrix (requires scikit-learn).",
+    ),
+    provenance: bool = typer.Option(
+        True,
+        "--provenance/--no-provenance",
+        help="Write <output>.provenance.json for every sample (default: on).",
+    ),
     output_format: str = typer.Option(
         "csv",
         "--format",
@@ -1185,39 +1418,52 @@ def batch(
         0,
         "--workers",
         "-w",
-        help="Currently unused; files are processed sequentially.",
+        hidden=True,
+        help="Deprecated and ignored; samples are processed sequentially.",
         min=0,
     ),
 ) -> None:
     """
     Batch classify multiple alignment files.
 
-    Processes all alignment files (BLAST or MMseqs2) matching the pattern
-    in the input directory and writes corresponding classification results.
+    Processes every alignment file (BLAST or MMseqs2) matching the pattern(s)
+    in the input directory through the same code path as ``score classify``,
+    so each sample's output has identical columns to a single classify run
+    with the same options. Per sample it writes
+    ``<sample>_classifications.csv``, ``<sample>_summary.json`` and (unless
+    --no-provenance) ``<sample>_classifications.csv.provenance.json``.
+
+    Sample names come from the file name with ``.blast.tsv[.gz]`` /
+    ``.mmseqs2.tsv[.gz]`` / ``.tsv[.gz]`` removed; two files that map to the
+    same name are an error (narrow --pattern or rename a file).
+
+    Samples are processed one after another. The matrices and metadata are
+    re-read for each sample (they are small next to the alignments), which
+    keeps peak memory at one sample's worth and the output order deterministic.
 
     Example:
 
         metadarkmatter score batch \\
-            --alignment-dir results/blast/ \\
+            --alignment-dir results/alignments/ \\
             --ani ani_matrix.csv \\
-            --output-dir results/classifications/ \\
-            --pattern "*.tsv.gz"
+            --metadata genome_metadata.tsv \\
+            --output-dir results/classifications/
 
-        # Use Parquet for 10x smaller files:
+        # Only MMseqs2 outputs, Parquet, GTDB-compatible settings:
         metadarkmatter score batch \\
-            --alignment-dir results/blast/ \\
+            --alignment-dir results/alignments/ \\
             --ani ani_matrix.csv \\
             --output-dir results/classifications/ \\
-            --format parquet
-
-        # Use GTDB-compatible settings:
-        metadarkmatter score batch \\
-            --alignment-dir results/blast/ \\
-            --ani ani_matrix.csv \\
-            --output-dir results/classifications/ \\
-            --preset gtdb-strict
+            --pattern "*.mmseqs2.tsv.gz" --format parquet --preset gtdb-strict
     """
     console.print("\n[bold blue]Metadarkmatter Batch Classification[/bold blue]\n")
+
+    if workers:
+        console.print(
+            "[yellow]Warning: --workers is deprecated and has no effect; samples "
+            "are processed sequentially (each sample already uses all cores "
+            "through Polars).[/yellow]"
+        )
 
     # Validate format option
     output_format = output_format.lower()
@@ -1231,77 +1477,47 @@ def batch(
 
     file_ext = ".parquet" if output_format == "parquet" else ".csv"
 
-    # Find all alignment files
-    alignment_files = sorted(alignment_dir.glob(pattern))
+    # Find all alignment files (union of the patterns, deterministic order)
+    patterns = list(pattern) if pattern else list(DEFAULT_BATCH_PATTERNS)
+    alignment_files = sorted(
+        {f for pat in patterns for f in alignment_dir.glob(pat) if f.is_file()}
+    )
 
     if not alignment_files:
+        shown = ", ".join(f"'{p}'" for p in patterns)
         console.print(
-            f"[red]Error: No alignment files found matching pattern: '{pattern}'[/red]\n"
+            f"[red]Error: No alignment files found matching pattern: {shown}[/red]\n"
             f"  Directory: {alignment_dir}\n"
-            f"  Pattern: {pattern}\n\n"
+            f"  Pattern: {shown}\n\n"
             f"Suggestions:\n"
             f"  - Check if the directory contains alignment files\n"
             f"  - Try a different pattern (e.g., '*.tsv', '*.blast.tsv.gz')"
         )
         raise typer.Exit(code=1) from None
 
-    console.print(f"Found {len(alignment_files)} alignment files to process\n")
-
-    # Create output directory
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Load ANI matrix once
-    console.print("Loading ANI matrix...")
-    try:
-        ani_matrix = ANIMatrix.from_file(ani)
-        num_genomes = len(ani_matrix.genomes)
-    except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
-        console.print(f"[red]Error loading ANI matrix: {e}[/red]")
+    collisions = _find_sample_collisions(alignment_files)
+    if collisions:
+        console.print("[red]Error: several alignment files map to the same sample name:[/red]")
+        for name, files in sorted(collisions.items()):
+            console.print(f"  {name}: {', '.join(f.name for f in files)}")
+        console.print(
+            "  Narrow --pattern (for example '*.mmseqs2.tsv.gz') or rename the files "
+            "so that each sample name is unique."
+        )
         raise typer.Exit(code=1) from None
 
-    console.print(f"[green]Loaded ANI matrix for {num_genomes} genomes[/green]\n")
+    # Option combinations that would fail identically for every sample.
+    if genomes is not None and id_mapping is not None:
+        raise ConfigurationError(
+            "Cannot specify both --genomes and --id-mapping. Use one or the other."
+        )
+    if streaming and (genomes is not None or id_mapping is not None):
+        raise ConfigurationError(
+            "--id-mapping/--genomes is not supported with --streaming.",
+            suggestion="Remove --streaming, or pre-transform the alignments.",
+        )
 
-    # Early validation: check genome coverage using first BLAST file
-    if alignment_files:
-        try:
-            matched, total, coverage_pct, missing = validate_ani_genome_coverage(
-                alignment_files[0], ani_matrix
-            )
-
-            if verbose:
-                console.print(
-                    f"[dim]Genome coverage (sample): {matched}/{total} genomes in ANI matrix "
-                    f"({coverage_pct:.1f}%)[/dim]"
-                )
-
-            if total > 0 and matched == 0:
-                console.print(
-                    f"[red]Error: None of the {total} genome(s) in {alignment_files[0].name} "
-                    f"are present in the ANI matrix (0% overlap); inputs appear "
-                    f"mismatched.[/red]"
-                )
-                raise typer.Exit(code=1) from None
-
-            if coverage_pct < 50.0 and total > 0:
-                console.print(
-                    f"[yellow]Warning: Low genome coverage ({coverage_pct:.1f}%)[/yellow]\n"
-                    f"  Only {matched} of {total} genomes in BLAST files are in ANI matrix.\n"
-                    f"  This may indicate mismatched input files.\n"
-                )
-                if missing and len(missing) <= 5:
-                    console.print(f"  Missing genomes: {', '.join(sorted(missing))}\n")
-                elif missing:
-                    sample = sorted(missing)[:5]
-                    console.print(
-                        f"  Missing genomes (first 5): {', '.join(sample)}...\n"
-                    )
-        except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
-            # Always log warnings - don't silently swallow validation failures
-            logger.warning("Could not validate genome coverage: %s", e)
-            if verbose:
-                console.print(f"[dim]Warning: Could not validate genome coverage: {e}[/dim]")
-
-    # Validate alignment mode
+    # Validate alignment / uncertainty modes
     alignment_mode_lower = alignment_mode.lower()
     if alignment_mode_lower not in ("nucleotide", "protein"):
         console.print(
@@ -1309,17 +1525,6 @@ def batch(
             f"Use 'nucleotide' or 'protein'.[/red]"
         )
         raise typer.Exit(code=1) from None
-
-    if alignment_mode_lower == "protein":
-        console.print("[bold]Protein mode enabled[/bold] - using wider novelty thresholds")
-        console.print(
-            "[dim]  Known Species: N < 10%, Novel Species: 10-25%, Novel Genus: 25-40%[/dim]"
-        )
-        console.print(
-            "[dim]  Note: Ensure input is from BLASTX (DNA query vs protein DB)[/dim]"
-        )
-
-    # Validate uncertainty mode
     uncertainty_mode_lower = uncertainty_mode.lower()
     if uncertainty_mode_lower not in ("max", "second"):
         console.print(
@@ -1328,48 +1533,24 @@ def batch(
         )
         raise typer.Exit(code=1) from None
 
+    if alignment_mode_lower == "protein":
+        console.print("[bold]Protein mode enabled[/bold] - using wider novelty thresholds")
+        console.print(
+            "[dim]  Known Species: N < 10%, Novel Species: 10-25%, Novel Genus: 25-40%[/dim]"
+        )
+        console.print("[dim]  Note: Ensure input is from BLASTX (DNA query vs protein DB)[/dim]")
     if uncertainty_mode_lower == "max":
         console.print(
             "[bold]Uncertainty mode: max[/bold] - using maximum ANI to any competing genome"
         )
 
-    # Initialize configuration (preset or custom options)
-    if preset:
-        preset_lower = preset.lower()
-        if preset_lower not in THRESHOLD_PRESETS:
-            console.print(
-                f"[red]Error: Unknown preset '{preset}'. "
-                f"Available: {', '.join(THRESHOLD_PRESETS.keys())}[/red]"
-            )
-            raise typer.Exit(code=1) from None
-        config = THRESHOLD_PRESETS[preset_lower]
-        console.print(f"[dim]Using preset: {preset_lower}[/dim]")
-        # Layer explicitly-set flags onto the preset (model_copy keeps
-        # preset-only fields); previously the filter flags were dropped.
-        batch_overrides: dict[str, Any] = {}
-        flag_values: list[tuple[str, Any, Any]] = [
-            ("alignment_mode", alignment_mode_lower, "nucleotide"),
-            ("bitscore_threshold_pct", bitscore_threshold, 95.0),
-            ("min_alignment_length", min_alignment_length, 100),
-            ("min_alignment_fraction", min_alignment_fraction, 0.3),
-            ("max_evalue", max_evalue, 0.0),
-            ("min_percent_identity", min_percent_identity, 0.0),
-            ("min_bitscore", min_bitscore, 0.0),
-            ("min_read_length", min_read_length, 0),
-            ("min_query_coverage", min_query_coverage, 0.0),
-            ("coverage_weight_mode", coverage_weight_mode, "linear"),
-            ("coverage_weight_strength", coverage_weight_strength, 0.5),
-            ("uncertainty_mode", uncertainty_mode_lower, "second"),
-        ]
-        for field_name, value, default in flag_values:
-            if value != default:
-                batch_overrides[field_name] = value
-        if batch_overrides:
-            config = config.model_copy(update=batch_overrides)
-    else:
-        config = ScoringConfig(
+    console.print(f"Found {len(alignment_files)} alignment files to process\n")
+
+    # Same config resolution as 'score classify'
+    config, config_messages = build_classify_config(
+        _ClassifyOptions(
             alignment_mode=alignment_mode_lower,
-            bitscore_threshold_pct=bitscore_threshold,
+            bitscore_threshold=bitscore_threshold,
             min_alignment_length=min_alignment_length,
             min_alignment_fraction=min_alignment_fraction,
             max_evalue=max_evalue,
@@ -1380,58 +1561,80 @@ def batch(
             coverage_weight_mode=coverage_weight_mode,
             coverage_weight_strength=coverage_weight_strength,
             uncertainty_mode=uncertainty_mode_lower,
+            single_hit_uncertainty_threshold=single_hit_uncertainty_threshold,
+            target_family=target_family,
+            family_ratio_threshold=family_ratio_threshold,
+            include_legacy_scores=include_legacy_scores,
+            bayesian=False,
+            config_file=config_file,
+            preset=preset,
+            clade_novel_species=clade_novel_species,
+            single_hit_novel_species=single_hit_novel_species,
         )
+    )
+    for _msg in config_messages:
+        console.print(_msg)
 
-    # Log active filter settings
-    active_filters = []
-    if config.min_alignment_length > 0:
-        active_filters.append(f"length >= {config.min_alignment_length}bp")
-    if config.min_alignment_fraction > 0:
-        active_filters.append(f"fraction >= {config.min_alignment_fraction:.0%}")
-    if config.max_evalue > 0:
-        active_filters.append(f"evalue <= {config.max_evalue:.0e}")
-    if config.min_percent_identity > 0:
-        active_filters.append(f"identity >= {config.min_percent_identity:.1f}%")
-    if config.min_bitscore > 0:
-        active_filters.append(f"bitscore >= {config.min_bitscore:.1f}")
-    if config.min_read_length > 0:
-        active_filters.append(f"read length >= {config.min_read_length}bp")
-    if config.min_query_coverage > 0:
-        active_filters.append(f"query coverage >= {config.min_query_coverage:.1f}%")
-    if active_filters:
-        console.print(f"[dim]Alignment filters: {', '.join(active_filters)}[/dim]")
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Note: Batch mode does not currently support AAI matrix
-    vectorized = VectorizedClassifier(ani_matrix=ani_matrix, aai_matrix=None, config=config)
+    def _log(message: str) -> None:
+        # Per-sample runner chatter only with --verbose; warnings always.
+        if verbose or "arning" in message:
+            console.print(message)
 
-    # Process each file
     total_classified = 0
-    failed_files = []
+    failed_files: list[str] = []
 
     for i, alignment_file in enumerate(alignment_files, 1):
-        sample_name = extract_sample_name(alignment_file)
+        sample_name = sample_name_from_alignment(alignment_file)
         output_file = output_dir / f"{sample_name}_classifications{file_ext}"
         summary_file = output_dir / f"{sample_name}_summary.json"
 
         console.print(f"[{i}/{len(alignment_files)}] Processing {sample_name}...")
 
-        try:
-            df = vectorized.classify_file(alignment_file)
-            assert isinstance(df, pl.DataFrame)
-            num_classified = len(df)
+        request = ClassificationRequest(
+            alignment=alignment_file,
+            ani=ani,
+            output=output_file,
+            config=config,
+            output_format=output_format,
+            aai=aai,
+            metadata=metadata,
+            genomes=genomes,
+            id_mapping=id_mapping,
+            streaming=streaming,
+            chunk_size=chunk_size,
+            strict_ani=strict_ani,
+            adaptive_thresholds=adaptive_thresholds,
+        )
 
-            # Write results in specified format
-            write_dataframe(df, output_file, output_format)
+        try:
+            result = run_classification(request, log=_log, verbose=verbose)
+            num_classified = result.num_classified
+
+            prov_data: dict[str, Any] | None = None
+            if provenance:
+                prov_data = _build_run_provenance(
+                    request,
+                    result,
+                    summary_path=summary_file if num_classified > 0 else None,
+                )
+
             if num_classified > 0:
-                # Generate summary using in-memory DataFrame
-                summary_obj = _generate_summary(df)
-                summary_obj.to_json(summary_file)
+                summary_df = (
+                    result.classification_df
+                    if result.classification_df is not None
+                    else read_dataframe(output_file)
+                )
+                _write_summary_json(_generate_summary(summary_df), summary_file, prov_data)
                 console.print(f"  [green]Classified {num_classified:,} reads[/green]")
             else:
                 console.print(
                     "  [yellow]Warning: 0 reads classified (header-only output "
                     "written); check the alignment filters.[/yellow]"
                 )
+            if prov_data is not None:
+                write_provenance(provenance_path_for(output_file), prov_data)
             total_classified += num_classified
 
         except (
@@ -1637,7 +1840,10 @@ def extract_novel(
     max_uncertainty: float = typer.Option(
         2.0,
         "--max-uncertainty",
-        help="Maximum placement uncertainty (exclude ambiguous placements)",
+        help=(
+            "Maximum placement uncertainty (exclude ambiguous placements). "
+            "Reads flagged clade_novel_species are exempt."
+        ),
         min=0.0,
         max=100.0,
     ),
@@ -1651,6 +1857,41 @@ def extract_novel(
         "--min-reads",
         help="Minimum reads per genome to include in output",
         min=1,
+    ),
+    reads_1: Path | None = typer.Option(
+        None,
+        "--reads-1",
+        help=(
+            "Original FASTQ/FASTA(.gz) (the R1 file, or single-end reads) to pull "
+            "the selected reads from. Needs --fastq-out, --fasta-out or --per-lineage-dir."
+        ),
+        exists=True,
+        dir_okay=False,
+    ),
+    reads_2: Path | None = typer.Option(
+        None,
+        "--reads-2",
+        help="R2 FASTQ/FASTA(.gz). Outputs become {stem}_R1 / {stem}_R2 files.",
+        exists=True,
+        dir_okay=False,
+    ),
+    fastq_out: Path | None = typer.Option(
+        None,
+        "--fastq-out",
+        help="Write the selected reads as FASTQ (gzip if the path ends in .gz).",
+    ),
+    fasta_out: Path | None = typer.Option(
+        None,
+        "--fasta-out",
+        help="Write the selected reads as FASTA (gzip if the path ends in .gz).",
+    ),
+    per_lineage_dir: Path | None = typer.Option(
+        None,
+        "--per-lineage-dir",
+        help=(
+            "Also write one gzipped file per selected lineage (closest reference "
+            "genome) into this directory, for per-lineage assembly."
+        ),
     ),
     verbose: bool = typer.Option(
         False,
@@ -1698,8 +1939,37 @@ def extract_novel(
     The output can be used with seqtk to extract reads for assembly:
 
         seqtk subseq reads.fastq.gz novel_read_ids.txt > novel_reads.fastq
+
+    Or let this command stream the original reads itself (gzip-aware, constant
+    memory). Read IDs are matched with the /1 and /2 mate suffix removed, so
+    IDs from a paired MMseqs2 search match plain FASTQ headers; both mates of a
+    selected pair are written:
+
+        metadarkmatter score extract-novel \\
+            --classifications results.csv --output novel.csv \\
+            --reads-1 sample_R1.fastq.gz --reads-2 sample_R2.fastq.gz \\
+            --fastq-out novel.fastq.gz --per-lineage-dir novel_by_lineage/
+
+    This writes novel_R1.fastq.gz and novel_R2.fastq.gz (plus one file per
+    lineage in novel_by_lineage/).
     """
     out = QuietConsole(console, quiet=quiet)
+
+    export_requested = any(x is not None for x in (fastq_out, fasta_out, per_lineage_dir))
+    if reads_2 is not None and reads_1 is None:
+        console.print("[red]Error: --reads-2 requires --reads-1.[/red]")
+        raise typer.Exit(code=1) from None
+    if export_requested and reads_1 is None:
+        console.print(
+            "[red]Error: --fastq-out/--fasta-out/--per-lineage-dir require --reads-1.[/red]"
+        )
+        raise typer.Exit(code=1) from None
+    if reads_1 is not None and not export_requested:
+        console.print(
+            "[red]Error: --reads-1 given but no output requested; add --fastq-out, "
+            "--fasta-out or --per-lineage-dir.[/red]"
+        )
+        raise typer.Exit(code=1) from None
 
     out.print("\n[bold blue]Metadarkmatter Novel Species Extraction[/bold blue]\n")
 
@@ -1762,8 +2032,16 @@ def extract_novel(
     if min_novelty is not None:
         filter_expr = filter_expr & (pl.col("novelty_index") >= min_novelty)
         filter_desc += f", novelty >= {min_novelty}%"
-    filter_expr = filter_expr & (pl.col("placement_uncertainty") < max_uncertainty)
-    filter_desc += f", uncertainty < {max_uncertainty}%"
+    # Reads moved to Novel Species by the clade-novelty rule have high U by
+    # construction (competitors within one genus, all distant), so U does not
+    # measure doubt about their novelty; they are exempt from the cap.
+    u_ok = pl.col("placement_uncertainty") < max_uncertainty
+    if "clade_novel_species" in df.columns:
+        u_ok = u_ok | pl.col("clade_novel_species").fill_null(False)
+        filter_desc += f", uncertainty < {max_uncertainty}% (clade-rule reads exempt)"
+    else:
+        filter_desc += f", uncertainty < {max_uncertainty}%"
+    filter_expr = filter_expr & u_ok
 
     # Apply filter
     novel_df = df.filter(filter_expr)
@@ -1840,6 +2118,64 @@ def extract_novel(
         ids_df.select("read_id").write_csv(read_ids, include_header=False)
         out.print(f"[green]Read IDs written to:[/green] {read_ids}")
         out.print(f"  [dim]Use with: seqtk subseq reads.fastq.gz {read_ids} > novel.fastq[/dim]")
+
+    # Stream the original reads and write the selected records
+    if reads_1 is not None:
+        out.print("\n[bold]Step 5:[/bold] Extracting reads from FASTQ/FASTA...")
+        selected_df = novel_df
+        if group_by_genome:
+            selected_df = novel_df.filter(
+                pl.col("best_match_genome").is_in(grouped["best_match_genome"].to_list())
+            )
+        # Sorted iteration makes the lineage of a pair whose mates hit
+        # different genomes deterministic (the smallest genome name wins).
+        lineage_of: dict[str, str] = {}
+        for rid, genome in sorted(
+            zip(
+                selected_df["read_id"].to_list(),
+                selected_df["best_match_genome"].to_list(),
+                strict=True,
+            ),
+            key=lambda t: (normalize_read_id(t[0]), str(t[1])),
+        ):
+            lineage_of.setdefault(normalize_read_id(rid), str(genome))
+        wanted = set(lineage_of)
+        try:
+            report = extract_reads(
+                reads_1=reads_1,
+                reads_2=reads_2,
+                ids=wanted,
+                fastq_out=fastq_out,
+                fasta_out=fasta_out,
+                per_lineage_dir=per_lineage_dir,
+                lineage_of=lineage_of,
+            )
+        except ConfigurationError as e:
+            console.print(f"[red]Error: {e}[/red]")
+            raise typer.Exit(code=1) from None
+
+        out.print(f"  Requested read IDs:  {report.requested:,}")
+        out.print(f"  Found in reads-1:    {report.found_1:,} ({report.written_1:,} records)")
+        if report.found_2 is not None:
+            out.print(f"  Found in reads-2:    {report.found_2:,} ({report.written_2:,} records)")
+        for path_out in [*report.outputs, *report.lineage_files]:
+            if verbose:
+                out.print(f"  [dim]wrote {path_out}[/dim]")
+        for path_out in report.outputs:
+            out.print(f"[green]Reads written to:[/green] {path_out}")
+        if report.lineage_files:
+            out.print(
+                f"[green]Per-lineage files:[/green] {len(report.lineage_files)} "
+                f"in {per_lineage_dir}"
+            )
+        for label, missing in (("reads-1", report.missing), ("reads-2", report.missing_2)):
+            if missing and (label == "reads-1" or reads_2 is not None):
+                console.print(
+                    f"[yellow]Warning: {len(missing):,} of {report.requested:,} requested "
+                    f"read IDs not found in {label} (first: "
+                    f"{', '.join(missing[:5])}{'...' if len(missing) > 5 else ''}). "
+                    "Check that the reads are the files that were aligned.[/yellow]"
+                )
 
     # Summary
     out.print("\n[bold green]Extraction complete![/bold green]")

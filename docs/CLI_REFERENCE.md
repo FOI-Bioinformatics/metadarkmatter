@@ -571,6 +571,7 @@ Classify metagenomic reads from an alignment file (BLAST or MMseqs2).
 | `--clade-novel-species/--no-clade-novel-species` | | FLAG | on | Stage 2 rule (nucleotide mode, on by default; `--no-clade-novel-species` disables it): call Ambiguous/Species Boundary reads Novel Species when all competitors are within one genus and the read is at least 5% divergent from both the best and the second-best reference (and below 18.6%). Adds a `clade_novel_species` column. See METHODS.md section 10.5 and CLADE_NOVELTY_VALIDATION.md. |
 | `--single-hit-novel-species/--no-single-hit-novel-species` | | FLAG | on | Stage 2 rule (nucleotide mode, on by default): call Known Species reads with no competing reference Novel Species when their novelty is >= the Known Species threshold (`novelty_known_max`, 4%). Adds a `single_hit_novel_species` column. See METHODS.md section 10.6. |
 | `--verbose` | `-v` | FLAG | False | Enable verbose output |
+| `--provenance/--no-provenance` | | FLAG | on | Write `<output>.provenance.json` (see [Provenance sidecar](#provenance-sidecar)) and embed it under `"provenance"` in `--summary` |
 | `--quiet` | `-q` | FLAG | False | Suppress progress output (for scripting) |
 | `--target-family` | | TEXT | None | Override the target family for off-target detection. Auto-inferred from `--metadata` when omitted (e.g., `f__Francisellaceae`). |
 | `--family-ratio-threshold` | | FLOAT | 0.8 | Bitscore ratio threshold for off-target detection (0.0-1.0) |
@@ -770,11 +771,49 @@ metadarkmatter score classify \
     --qc-output sample_qc.json
 ```
 
+#### Provenance sidecar
+
+`score classify` writes `<output>.provenance.json` next to the classification
+table (for example `classifications.csv.provenance.json`; disable with
+`--no-provenance`). The `--summary` JSON also carries the same object under the
+key `"provenance"`. The classification table itself is unchanged (no extra
+columns). Schema `metadarkmatter.provenance/1`:
+
+```json
+{
+  "schema": "metadarkmatter.provenance/1",
+  "metadarkmatter_version": "0.2.0",
+  "created_utc": "2026-11-05T17:59:10Z",
+  "command": ["mdm", "score", "classify", "..."],
+  "python": "3.13.1",
+  "platform": "Linux-...",
+  "seed": 42,
+  "inputs": {
+    "alignment":  {"path": "/abs/sample.blast.tsv.gz", "size": 651400, "sha256": "..."},
+    "ani":        {"path": "...", "size": 1099, "sha256": "..."},
+    "metadata":   {"path": "...", "size": 2284, "sha256": "..."},
+    "aai": null,
+    "id_mapping": null
+  },
+  "config": {"...": "ScoringConfig as applied (adaptive thresholds and inferred target family included)"},
+  "outputs": {"classifications": "/abs/classifications.csv", "summary": "/abs/summary.json"},
+  "results": {"total_reads": 3973, "taxonomic_call_counts": {"Ambiguous": 639, "Known Species": 2205}}
+}
+```
+
+Input files are hashed by streaming, so large alignments are not loaded into
+memory. Everything except `created_utc` is identical between two runs with the
+same inputs, options and `METADARKMATTER_SEED`. A `--genomes` directory is not
+hashed (use `--id-mapping` if the mapping must be pinned).
+
 ---
 
 ### `metadarkmatter score batch`
 
-Batch classify multiple alignment files in a directory.
+Batch classify multiple alignment files in a directory. Each file goes through
+the same code path as `score classify` (`run_classification` and the same
+config builder), so for the same options a sample's table has exactly the same
+columns and values as a single `score classify` run.
 
 #### Required Options
 
@@ -786,55 +825,72 @@ Batch classify multiple alignment files in a directory.
 
 #### Optional Options
 
+Accepts the classify options below with the same meaning and defaults:
+`--aai`, `--metadata`, `--genomes`, `--id-mapping`, `--config`, `--preset`,
+`--alignment-mode`, `--target-family`, `--family-ratio-threshold`,
+`--bitscore-threshold`, `--min-alignment-length`, `--min-alignment-fraction`,
+`--max-evalue`, `--min-percent-identity`, `--min-bitscore`,
+`--min-read-length`, `--min-query-coverage`, `--coverage-weight-mode`,
+`--coverage-weight-strength`, `--uncertainty-mode`,
+`--single-hit-threshold`, `--include-legacy-scores`,
+`--clade-novel-species/--no-clade-novel-species`,
+`--single-hit-novel-species/--no-single-hit-novel-species`, `--streaming`,
+`--chunk-size`, `--strict-ani`, `--adaptive-thresholds`, `--format`,
+`--verbose`, `--provenance/--no-provenance`. Config precedence is the same as
+for classify (`--config` > flags > `--preset` > defaults). `--qc-output` and
+`--dry-run` are not available in batch.
+
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
-| `--pattern` | `-p` | TEXT | *.blast.tsv.gz | Glob pattern for alignment files |
-| `--preset` | | TEXT | None | Threshold preset (same names as `score classify`); explicitly passed flags override preset values |
-| `--alignment-mode` | | TEXT | nucleotide | 'nucleotide' or 'protein' |
-| `--bitscore-threshold` | | FLOAT | 95.0 | Percentage of top bitscore for ambiguous hits |
-| `--min-alignment-length` | | INT | 100 | Minimum alignment length in bp (0 = no filter). In `--alignment-mode protein` it is compared with the query span in nucleotides (`qend - qstart + 1`), because BLASTX/DIAMOND `length` is in amino acids. |
-| `--min-alignment-fraction` | | FLOAT | 0.3 | Minimum fraction of read aligned |
-| `--max-evalue` | | FLOAT | 0.0 | Maximum E-value (0 disables) |
-| `--min-percent-identity` | | FLOAT | 0.0 | Minimum percent identity (0 disables) |
-| `--min-bitscore` | | FLOAT | 0.0 | Minimum bitscore (0 disables) |
-| `--min-read-length` | | INT | 0 | Minimum read length in bp (0 disables) |
-| `--min-query-coverage` | | FLOAT | 0.0 | Minimum query coverage percentage (0 disables) |
-| `--coverage-weight-mode` | | TEXT | linear | Coverage weighting mode: 'linear', 'none', 'log', 'sigmoid' |
-| `--coverage-weight-strength` | | FLOAT | 0.5 | Coverage weight strength (0.0-1.0) |
-| `--uncertainty-mode` | | TEXT | second | 'second' or 'max' |
-| `--format` | `-f` | TEXT | csv | Output format: 'csv' or 'parquet' |
-| `--workers` | `-w` | INT | 0 | Number of worker processes (0 = CPU count - 1). Currently accepted but not used: files are processed sequentially |
-| `--verbose` | `-v` | FLAG | False | Enable verbose output |
+| `--pattern` | `-p` | TEXT | `*.blast.tsv.gz`, `*.mmseqs2.tsv.gz`, `*.blast.tsv`, `*.mmseqs2.tsv` | Glob pattern(s) for alignment files; repeat the option to give several |
+| `--workers` | `-w` | INT | 0 | Deprecated and ignored (hidden); a warning is printed when set |
 
-For each input file, `{sample}_classifications.csv` (or `.parquet`) and `{sample}_summary.json` are written to `--output-dir`.
+For each input file `{sample}_classifications.csv` (or `.parquet`),
+`{sample}_summary.json` and (unless `--no-provenance`)
+`{sample}_classifications.csv.provenance.json` are written to `--output-dir`.
+
+**Sample names.** The name is the file name with `.blast.tsv.gz`,
+`.mmseqs2.tsv.gz`, `.blast.tsv`, `.mmseqs2.tsv`, `.tsv.gz` or `.tsv` removed.
+If two files map to the same name (for example `s1.blast.tsv.gz` and
+`s1.mmseqs2.tsv.gz`) the command stops before processing anything and lists
+the files; narrow `--pattern` or rename a file.
+
+**Sequential processing.** Samples run one after another, in sorted file
+order. `--workers` was never implemented and is now deprecated rather than
+implemented: each sample already uses all cores through Polars, and N parallel
+processes would multiply peak memory (about 18 GB at 10M hits in vectorised
+mode) for little gain. Use `--streaming` to bound memory, or run several
+`score batch` invocations on disjoint directories.
 
 #### Examples
 
-**Basic Batch Processing**
+**Basic Batch Processing (BLAST and MMseqs2 outputs)**
 ```bash
 metadarkmatter score batch \
-    --alignment-dir ./blast_results/ \
+    --alignment-dir ./alignments/ \
     --ani genomes.ani.csv \
+    --metadata genome_metadata.tsv \
     --output-dir ./classifications/
 ```
 
-**Custom Pattern with Parquet Output**
+**Only MMseqs2 outputs, Parquet**
 ```bash
 metadarkmatter score batch \
-    --alignment-dir ./blast_results/ \
+    --alignment-dir ./alignments/ \
     --ani genomes.ani.csv \
     --output-dir ./classifications/ \
-    --pattern "*.tsv" \
+    --pattern "*.mmseqs2.tsv.gz" \
     --format parquet
 ```
 
-**With Coverage Weighting**
+**Streaming mode for large samples**
 ```bash
 metadarkmatter score batch \
-    --alignment-dir ./blast_results/ \
+    --alignment-dir ./alignments/ \
     --ani genomes.ani.csv \
+    --metadata genome_metadata.tsv \
     --output-dir ./classifications/ \
-    --coverage-weight-mode linear
+    --streaming --chunk-size 500000
 ```
 
 ---
@@ -859,11 +915,44 @@ Extract candidate novel species or genera from classification results.
 | `--read-ids` | `-r` | PATH | - | Output path for read IDs only (for seqtk extraction) |
 | `--category` | `-t` | TEXT | all | Category to extract: 'species', 'genus', or 'all' (both) |
 | `--min-novelty` |  | FLOAT | - | Minimum novelty index threshold (overrides category defaults) |
-| `--max-uncertainty` |  | FLOAT | 2.0 | Maximum placement uncertainty (exclude ambiguous placements) |
+| `--max-uncertainty` |  | FLOAT | 2.0 | Maximum placement uncertainty (exclude ambiguous placements). Reads flagged `clade_novel_species` are exempt: their U reflects distant within-genus competitors, not uncertain novelty. |
 | `--group-by-genome/--no-group` |  | FLAG | on | Group results by closest reference genome (default: group) |
 | `--min-reads` |  | INT | 1 | Minimum reads per genome to include in output |
+| `--reads-1` |  | PATH | - | Original FASTQ/FASTA(.gz) (R1 or single-end) to extract the selected reads from; needs an output below |
+| `--reads-2` |  | PATH | - | R2 FASTQ/FASTA(.gz); outputs become `{stem}_R1` / `{stem}_R2` |
+| `--fastq-out` |  | PATH | - | Write selected reads as FASTQ (gzip if the path ends in `.gz`) |
+| `--fasta-out` |  | PATH | - | Write selected reads as FASTA (gzip if `.gz`; FASTQ input is converted) |
+| `--per-lineage-dir` |  | PATH | - | Also write one gzipped file per selected lineage (closest reference genome) |
 | `--verbose` | `-v` | FLAG | off | Enable verbose output |
 | `--quiet` | `-q` | FLAG | off | Suppress progress output |
+
+#### Exporting the selected reads
+
+With `--reads-1` the command streams the original reads once (gzip handled
+transparently, memory bounded by the set of IDs, not by the FASTQ) and writes
+the records whose ID was selected. The selection is the same as for
+`--read-ids` (including the `--min-reads` lineage filter).
+
+- **ID matching.** Only the first whitespace-delimited token of each header
+  is used and a trailing `/1` or `/2` is removed on both sides. IDs classified
+  from a paired MMseqs2 search (which appends `/1` and `/2`) therefore match
+  FASTQ headers with or without the suffix.
+- **Pairs.** A pair is written when either mate's ID is selected, so
+  `{stem}_R1` and `{stem}_R2` stay in sync. With `--fastq-out novel.fastq.gz`
+  and `--reads-2` the files are `novel_R1.fastq.gz` and `novel_R2.fastq.gz`.
+- **Per lineage.** `--per-lineage-dir` writes `{genome}.fastq.gz` (or
+  `{genome}_R1/_R2.fastq.gz`) per selected `best_match_genome`; a read whose
+  mates hit different genomes goes to the alphabetically first one.
+- **Report.** The command prints requested versus found IDs per input file and
+  warns about missing IDs (usually a sign that the reads are not the files that
+  were aligned). `--fastq-out` requires FASTQ input.
+
+```bash
+metadarkmatter score extract-novel \
+    --classifications classifications.csv --output novel.csv \
+    --reads-1 sample_R1.fastq.gz --reads-2 sample_R2.fastq.gz \
+    --fastq-out novel/novel.fastq.gz --per-lineage-dir novel/by_lineage/
+```
 
 ### `metadarkmatter score sensitivity`
 
