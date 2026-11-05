@@ -97,6 +97,12 @@ class VectorizedClassifier:
         self.ani_matrix = ani_matrix
         self.aai_matrix = aai_matrix
         self.config = config or ScoringConfig()
+        if self.config.clade_novel_species and self.config.alignment_mode != "nucleotide":
+            logger.warning(
+                "clade_novel_species is only validated for nucleotide mode and "
+                "is not applied with alignment_mode=%r.",
+                self.config.alignment_mode,
+            )
         if representative_mapping:
             # Null/blank representatives fall back to the genome itself so
             # competitors do not vanish through a null representative.
@@ -456,10 +462,20 @@ class VectorizedClassifier:
         "in_family_novelty_index": pl.Float64,
     }
 
+    @property
+    def _clade_rule_active(self) -> bool:
+        """Clade-novelty rule enabled and applicable (nucleotide mode only)."""
+        return (
+            self.config.clade_novel_species
+            and self.config.alignment_mode == "nucleotide"
+        )
+
     def _output_schema(self) -> dict[str, Any]:
         schema = dict(self._empty_dataframe().schema)
         if self.config.target_family is not None:
             schema.update(self._FAMILY_OUTPUT_SCHEMA)
+        if self._clade_rule_active:
+            schema["clade_novel_species"] = pl.Boolean()
         return schema
 
     def _conform_output(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -1054,6 +1070,17 @@ class VectorizedClassifier:
         # The legacy threshold cascade is preserved as legacy_call for comparison.
         result = self._bayesian.classify_primary(result)
 
+        # Optional clade-novelty refinement (nucleotide mode only): a read
+        # divergent from every competing reference of one genus is a novel
+        # species even when its placement among them is ambiguous.
+        if self._clade_rule_active:
+            from metadarkmatter.core.classification.bayesian import (
+                apply_clade_novelty_rule,
+            )
+            result = apply_clade_novelty_rule(
+                result, self.config.clade_novelty_min, self.config.clade_novelty_max
+            )
+
         # Compute legacy_call using the hard threshold cascade for side-by-side comparison
         from metadarkmatter.core.classification.thresholds import apply_legacy_thresholds
         result = apply_legacy_thresholds(result, self.config)
@@ -1151,6 +1178,8 @@ class VectorizedClassifier:
 
         # Add inferred uncertainty columns
         base_columns.extend(["inferred_uncertainty", "uncertainty_type"])
+        if self._clade_rule_active:
+            base_columns.append("clade_novel_species")
 
         # Optionally include legacy sub-scores
         if self.config.include_legacy_scores:

@@ -282,6 +282,70 @@ def apply_stage2_refinement(
     return refined
 
 
+# Stage 1 calls the clade-novelty rule may refine. Both express "placement
+# among the competing references is uncertain", not "the read is known".
+_CLADE_RULE_SOURCE_CALLS = ("Ambiguous", "Species Boundary")
+_CLADE_RULE_SCOPES = ("within_species", "within_genus")
+
+
+def clade_novel_species_mask(
+    novelty_min: float,
+    novelty_max: float,
+) -> pl.Expr:
+    """Boolean expression selecting reads for the clade-novelty rule.
+
+    Placement uncertainty U measures how unsure we are about WHICH reference
+    a read belongs to. When the competing references are close relatives of
+    one another (one genus), U is high even if the read is clearly divergent
+    from every one of them. Such a read is a novel species whose exact
+    placement within the clade is uncertain, not an ambiguous known species.
+
+    A read is selected when all of the following hold:
+        - taxonomic_call is "Ambiguous" or "Species Boundary"
+        - ambiguity_scope is "within_species" or "within_genus" (competitors
+          span one genus; across_genera reads stay Conserved Region)
+        - novelty_index >= novelty_min (divergent from the best reference)
+        - 100 - second_hit_identity >= novelty_min (divergent from the best
+          competing reference as well; second_hit_identity is the maximum
+          identity to any other reference)
+        - novelty_index < novelty_max (genus-level divergence is left to the
+          genus categories)
+
+    Requires the columns taxonomic_call, ambiguity_scope, novelty_index and
+    second_hit_identity. Reads without a second hit are never selected.
+    """
+    return (
+        pl.col("taxonomic_call").is_in(list(_CLADE_RULE_SOURCE_CALLS))
+        & pl.col("ambiguity_scope").is_in(list(_CLADE_RULE_SCOPES))
+        & pl.col("second_hit_identity").is_not_null()
+        & (pl.col("novelty_index") >= novelty_min)
+        & ((100.0 - pl.col("second_hit_identity")) >= novelty_min)
+        & (pl.col("novelty_index") < novelty_max)
+    ).fill_null(False)
+
+
+def apply_clade_novelty_rule(
+    df: pl.DataFrame,
+    novelty_min: float,
+    novelty_max: float,
+) -> pl.DataFrame:
+    """Apply the clade-novelty Stage 2 rule to a classified frame.
+
+    Sets taxonomic_call to "Novel Species" for reads selected by
+    :func:`clade_novel_species_mask` and adds a boolean
+    ``clade_novel_species`` column recording which reads were changed.
+    Posterior columns, entropy, placement_uncertainty and ambiguity_scope are
+    left untouched, so the placement ambiguity remains visible.
+    """
+    mask = clade_novel_species_mask(novelty_min, novelty_max)
+    return df.with_columns(mask.alias("clade_novel_species")).with_columns(
+        pl.when(pl.col("clade_novel_species"))
+        .then(pl.lit("Novel Species"))
+        .otherwise(pl.col("taxonomic_call"))
+        .alias("taxonomic_call")
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main classifier
 # ---------------------------------------------------------------------------
