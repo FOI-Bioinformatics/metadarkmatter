@@ -417,13 +417,14 @@ class ReferenceMixin(_ReportBase):
             )
         )
         bar_fig.update_layout(
-            title="Top 20 Species by Read Count",
+            title=f"Top {len(species_counts)} Species by Read Count",
             xaxis_title="Number of Reads",
             yaxis_title="",
             template="plotly_white",
             height=max(400, 30 * len(species_counts)),
-            margin={"l": 300, "r": 40, "t": 60, "b": 60},
+            margin={"l": 40, "r": 40, "t": 60, "b": 60},
         )
+        bar_fig.update_yaxes(automargin=True)
         species_bar_id = "plot-species-bar"
         self._register_plot(species_bar_id, bar_fig)
 

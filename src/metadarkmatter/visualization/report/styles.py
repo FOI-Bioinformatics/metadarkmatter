@@ -948,7 +948,7 @@ body {
 /* Plot Containers */
 .plot-row {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr));
     gap: 1.5rem;
     margin-bottom: 1.5rem;
 }
@@ -963,6 +963,17 @@ body {
 
 .plot-container.full-width {
     grid-column: 1 / -1;
+}
+
+.plot-container {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.plotly-chart,
+.plotly-chart .js-plotly-plot,
+.plotly-chart .plot-container.plotly {
+    max-width: 100%;
 }
 
 .plot-title {
@@ -2717,7 +2728,7 @@ body {
 
 .plot-row {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr));
     gap: 1.5rem;
     margin-bottom: 1.5rem;
 }
@@ -2732,6 +2743,17 @@ body {
 
 .plot-container.full-width {
     grid-column: 1 / -1;
+}
+
+.plot-container {
+    min-width: 0;
+    max-width: 100%;
+}
+
+.plotly-chart,
+.plotly-chart .js-plotly-plot,
+.plotly-chart .plot-container.plotly {
+    max-width: 100%;
 }
 
 .plot-title {
@@ -4222,6 +4244,42 @@ BORDERLINE_ANALYSIS_CSS: str = """
 """
 
 
+# Rules shared by both themes (appended after the theme stylesheet)
+COMMON_CSS: str = """
+.data-note {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border-left: 3px solid var(--warning-color);
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius-md);
+    line-height: 1.5;
+    margin: 0 0 1rem 0;
+}
+
+
+.data-table-clear {
+    margin-left: auto;
+}
+
+/* Narrow screens: let card grids and stat rows wrap instead of overflowing */
+.data-stats {
+    flex-wrap: wrap;
+}
+
+.metric-box {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+    .metric-grid {
+        grid-template-columns: 1fr;
+    }
+}
+"""
+
+
 def get_css_styles(theme: str = "light") -> str:
     """
     Get CSS styles for specified theme.
@@ -4233,4 +4291,11 @@ def get_css_styles(theme: str = "light") -> str:
         CSS stylesheet string
     """
     base_theme = DARK_THEME if theme.lower() == "dark" else LIGHT_THEME
-    return base_theme + NOVEL_SECTION_CSS + METHODS_SECTION_CSS + PHYLOGENY_STYLES + BORDERLINE_ANALYSIS_CSS
+    return (
+        base_theme
+        + COMMON_CSS
+        + NOVEL_SECTION_CSS
+        + METHODS_SECTION_CSS
+        + PHYLOGENY_STYLES
+        + BORDERLINE_ANALYSIS_CSS
+    )

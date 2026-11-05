@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 import plotly.graph_objects as go
 
 from metadarkmatter.visualization.plots.base import (
+    DIVERSITY_COLORS,
     SEQUENTIAL_PALETTE,
     TAXONOMY_COLORS,
     BasePlot,
@@ -20,6 +21,43 @@ from metadarkmatter.visualization.plots.base import (
 
 if TYPE_CHECKING:
     import polars as pl
+
+
+# (label, summary key) for every classification category, in display order.
+# The first four are always shown; the rest only when present in some sample.
+CATEGORY_SUMMARY_KEYS: list[tuple[str, str]] = [
+    ("Known Species", "known_species"),
+    ("Novel Species", "novel_species"),
+    ("Novel Genus", "novel_genus"),
+    ("Conserved Region", "conserved_regions"),
+    ("Species Boundary", "species_boundary"),
+    ("Ambiguous", "ambiguous"),
+    ("Ambiguous Within Genus", "ambiguous_within_genus"),
+    ("Unclassified", "unclassified"),
+    ("Off-target", "off_target"),
+    ("Other", "other"),
+]
+_ALWAYS_SHOWN = 4
+
+_EXTRA_COLORS: dict[str, str] = {"Other": "#bdc3c7"}
+
+
+def present_categories(summaries: dict[str, dict[str, Any]]) -> list[tuple[str, str]]:
+    """Return ``(label, key)`` for categories to plot, so bars sum to 100%.
+
+    The four core categories are always included; the others appear when at
+    least one sample has reads in them.
+    """
+    result = []
+    for i, (label, key) in enumerate(CATEGORY_SUMMARY_KEYS):
+        if i < _ALWAYS_SHOWN or any(s.get(key, 0) > 0 for s in summaries.values()):
+            result.append((label, key))
+    return result
+
+
+def category_color(label: str) -> str:
+    """Color for a category label (taxonomy palette, then diversity palette)."""
+    return TAXONOMY_COLORS.get(label) or DIVERSITY_COLORS.get(label) or _EXTRA_COLORS.get(label, "#808080")
 
 
 class MultiSampleBarChart(BasePlot):
@@ -59,15 +97,11 @@ class MultiSampleBarChart(BasePlot):
     def create_figure(self) -> go.Figure:
         """Create multi-sample comparison bar chart."""
         sample_names = list(self.summaries.keys())
-        categories = ["Known Species", "Novel Species", "Novel Genus", "Conserved Region"]
+        categories = present_categories(self.summaries)
 
         fig = go.Figure()
 
-        for category in categories:
-            key = category.lower().replace(" ", "_")
-            if key == "conserved_region":
-                key = "conserved_regions"
-
+        for category, key in categories:
             values = []
             for sample in sample_names:
                 summary = self.summaries[sample]
@@ -84,8 +118,13 @@ class MultiSampleBarChart(BasePlot):
                     name=category,
                     x=sample_names,
                     y=values,
-                    marker_color=TAXONOMY_COLORS[category],
-                    text=[f"{v:.1f}%" if self.normalize else f"{v:,}" for v in values],
+                    marker_color=category_color(category),
+                    text=[
+                        (f"{v:.1f}%" if self.normalize else f"{v:,}")
+                        if not (self.stacked and self.normalize and v < 2)
+                        else ""
+                        for v in values
+                    ],
                     textposition="inside" if self.stacked else "outside",
                     hovertemplate=(
                         f"<b>{category}</b><br>"
@@ -272,7 +311,8 @@ class MultiSampleHeatmap(BasePlot):
     def create_figure(self) -> go.Figure:
         """Create sample classification heatmap."""
         sample_names = list(self.summaries.keys())
-        categories = ["Known Species", "Novel Species", "Novel Genus", "Conserved Region"]
+        category_keys = present_categories(self.summaries)
+        categories = [label for label, _ in category_keys]
 
         # Build matrix of percentages
         z_data = []
@@ -280,10 +320,7 @@ class MultiSampleHeatmap(BasePlot):
             summary = self.summaries[sample]
             total = summary.get("total_reads", 1)
             row = []
-            for category in categories:
-                key = category.lower().replace(" ", "_")
-                if key == "conserved_region":
-                    key = "conserved_regions"
+            for _label, key in category_keys:
                 count = summary.get(key, 0)
                 pct = count / total * 100 if total > 0 else 0
                 row.append(pct)

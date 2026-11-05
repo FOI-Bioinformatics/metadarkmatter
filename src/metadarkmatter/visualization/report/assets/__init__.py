@@ -84,6 +84,11 @@ def get_plotly_script_tag(mode: str) -> str:
     return f"<script>\n{get_plotlyjs()}\n</script>"
 
 
+def is_d3_vendored() -> bool:
+    """Return True when a vendored copy of D3 is available for inlining."""
+    return (_ASSETS_DIR / D3_FILENAME).is_file()
+
+
 def get_d3_script_tag(mode: str) -> str:
     """Return a ``<script>`` block providing D3 v7.
 

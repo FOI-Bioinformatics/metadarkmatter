@@ -382,6 +382,21 @@ def generate_report(
     out.print(f"  [green]Report saved to {output}[/green]")
     out.print(f"  [dim]File size: {file_size_mb:.1f} MB[/dim]")
 
+    # Offline mode promises a self-contained file, but the phylogenetic tree
+    # needs D3, which is only inlined when vendored. Say so instead of
+    # silently falling back to the CDN.
+    if report_mode == "offline" and ani_df is not None and not no_phylogeny:
+        from metadarkmatter.visualization.report.assets import D3_CDN_URL, is_d3_vendored
+
+        if not is_d3_vendored():
+            console.print(
+                "[yellow]Warning: --report-mode offline, but D3 is not vendored, so the "
+                "phylogenetic tree loads D3 from "
+                f"{D3_CDN_URL} and needs network access when the report is opened. "
+                "Run 'mdm report vendor-d3' once for a fully offline tree "
+                "(or pass --no-phylogeny).[/yellow]"
+            )
+
     # Summary
     out.print("\n[bold green]Report generation complete![/bold green]")
     out.print("\n[bold]Report contents:[/bold]")

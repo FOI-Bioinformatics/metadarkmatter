@@ -29,9 +29,12 @@ from metadarkmatter.visualization.report.templates import (
     BAYESIAN_INTERPRETATION_TEMPLATE,
     COLLAPSIBLE_PANEL_TEMPLATE,
     CONFIDENCE_SUMMARY_TEMPLATE,
+    DISCOVERY_CARD_TEMPLATE,
+    DISCOVERY_INTRO_TEXT,
     ENHANCED_SCORING_SUMMARY_TEMPLATE,
     ENHANCED_SCORING_UNCERTAINTY_TYPES_TEMPLATE,
-    KPI_CARD_TEMPLATE,
+    HIGH_PRIORITY_CARD_TEMPLATE,
+    KPI_CARD_TITLED_TEMPLATE,
     KPI_STRIP_TEMPLATE,
     PLOT_CONTAINER_SIMPLE_TEMPLATE,
     PLOT_CONTAINER_TEMPLATE,
@@ -57,26 +60,33 @@ class ClassificationMixin(_ReportBase):
 
         # 1. Metric Strip (KPI-style)
         kpi_cards = []
-        kpi_cards.append(KPI_CARD_TEMPLATE.format(
+        kpi_cards.append(KPI_CARD_TITLED_TEMPLATE.format(
             color_class="accent",
             value=f"{s.mean_novelty_index:.1f}",
             label="Mean Novelty",
+            title=f"Mean novelty index: {s.mean_novelty_index:.3f} over {s.total_reads:,} reads",
         ))
-        kpi_cards.append(KPI_CARD_TEMPLATE.format(
+        kpi_cards.append(KPI_CARD_TITLED_TEMPLATE.format(
             color_class="accent",
             value=f"{s.mean_placement_uncertainty:.1f}",
             label="Mean Uncertainty",
+            title=f"Mean placement uncertainty: {s.mean_placement_uncertainty:.3f} over {s.total_reads:,} reads",
         ))
         if s.has_bayesian:
-            kpi_cards.append(KPI_CARD_TEMPLATE.format(
+            kpi_cards.append(KPI_CARD_TITLED_TEMPLATE.format(
                 color_class="accent",
                 value=f"{s.mean_posterior_entropy:.2f}",
                 label="Mean Entropy",
+                title=f"Mean posterior entropy: {s.mean_posterior_entropy:.3f} bits",
             ))
-            kpi_cards.append(KPI_CARD_TEMPLATE.format(
+            kpi_cards.append(KPI_CARD_TITLED_TEMPLATE.format(
                 color_class="known",
                 value=f"{s.high_confidence_pct:.0f}%",
                 label="High Confidence",
+                title=(
+                    f"{s.high_confidence_count:,} of {s.total_reads:,} reads "
+                    f"({s.high_confidence_pct:.1f}%) with entropy < 1.0"
+                ),
             ))
         kpi_html = KPI_STRIP_TEMPLATE.format(cards="\n".join(kpi_cards))
 
@@ -196,6 +206,22 @@ class ClassificationMixin(_ReportBase):
         """Build the merged Bayesian / enhanced-scoring summary cards."""
         s = self.summary
         parts: list[str] = []
+        # Discovery scores exist only with --include-legacy-scores; hide the
+        # discovery cards (rather than showing "0.0 for 0 novel reads") otherwise.
+        has_discovery = s.mean_discovery_score is not None
+        discovery_card = (
+            DISCOVERY_CARD_TEMPLATE.format(
+                mean_discovery_score=s.mean_discovery_score or 0.0,
+                novel_count=s.novel_with_discovery_score,
+            )
+            if has_discovery
+            else ""
+        )
+        high_priority_card = (
+            HIGH_PRIORITY_CARD_TEMPLATE.format(high_priority_count=s.high_priority_discoveries)
+            if has_discovery
+            else ""
+        )
         # --- Merged summary cards ---
         if s.has_bayesian:
             summary_html = CONFIDENCE_SUMMARY_TEMPLATE.format(
@@ -207,8 +233,8 @@ class ClassificationMixin(_ReportBase):
                 total_reads=s.total_reads,
                 single_hit_pct=s.single_hit_pct,
                 single_hit_count=s.single_hit_count,
-                mean_discovery_score=s.mean_discovery_score or 0.0,
-                novel_count=s.novel_with_discovery_score,
+                discovery_card=discovery_card,
+                discovery_intro=DISCOVERY_INTRO_TEXT if has_discovery else "",
                 boundary_pct=s.boundary_pct,
                 boundary_count=s.boundary_count,
             )
@@ -221,9 +247,8 @@ class ClassificationMixin(_ReportBase):
                 single_hit_count=s.single_hit_count,
                 total_reads=s.total_reads,
                 mean_inferred_uncertainty=s.mean_inferred_uncertainty or 0.0,
-                high_priority_count=s.high_priority_discoveries,
-                mean_discovery_score=s.mean_discovery_score or 0.0,
-                novel_count=s.novel_with_discovery_score,
+                high_priority_card=high_priority_card,
+                discovery_card=discovery_card,
             )
             parts.append(summary_html)
 

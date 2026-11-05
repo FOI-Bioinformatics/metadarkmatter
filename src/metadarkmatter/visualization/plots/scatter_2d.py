@@ -17,6 +17,7 @@ from metadarkmatter.visualization.plots.base import (
     BasePlot,
     PlotConfig,
     ThresholdConfig,
+    place_legend_below,
     subsample_dataframe,
 )
 
@@ -238,15 +239,6 @@ class NoveltyUncertaintyScatter(BasePlot):
         fig.update_layout(
             xaxis_title="Novelty Index (100 - % Identity)",
             yaxis_title="Placement Uncertainty (100 - ANI)",
-            legend={
-                "yanchor": "top",
-                "y": 0.99,
-                "xanchor": "right",
-                "x": 0.99,
-                "bgcolor": "rgba(255, 255, 255, 0.8)",
-                "bordercolor": "#ddd",
-                "borderwidth": 1,
-            },
             showlegend=self.show_legend,
             **self.config.to_layout_dict(self.title),
         )
@@ -258,7 +250,11 @@ class NoveltyUncertaintyScatter(BasePlot):
         fig.update_xaxes(range=[0, max_novelty])
         fig.update_yaxes(range=[0, max_uncertainty])
 
-        return self._apply_config(fig)
+        fig = self._apply_config(fig)
+        # Legend outside the plot area so it never covers data points
+        if self.show_legend:
+            place_legend_below(fig)
+        return fig
 
     def _add_classification_regions(self, fig: go.Figure) -> None:
         """Add shaded regions showing classification boundaries."""
@@ -521,15 +517,6 @@ class ConfidenceNoveltyScatter(BasePlot):
         fig.update_layout(
             xaxis_title="Novelty Index (100 - % Identity)",
             yaxis_title="Confidence Score (%)",
-            legend={
-                "yanchor": "top",
-                "y": 0.99,
-                "xanchor": "right",
-                "x": 0.99,
-                "bgcolor": "rgba(255, 255, 255, 0.8)",
-                "bordercolor": "#ddd",
-                "borderwidth": 1,
-            },
             showlegend=self.show_legend,
             **self.config.to_layout_dict(self.title),
         )
@@ -540,7 +527,11 @@ class ConfidenceNoveltyScatter(BasePlot):
         fig.update_xaxes(range=[0, max_novelty])
         fig.update_yaxes(range=[0, 105])
 
-        return self._apply_config(fig)
+        fig = self._apply_config(fig)
+        # Legend outside the plot area so it never covers data points
+        if self.show_legend:
+            place_legend_below(fig)
+        return fig
 
 
 class NoveltyUncertaintyDensity(BasePlot):

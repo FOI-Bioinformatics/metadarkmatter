@@ -309,6 +309,57 @@ class BasePlot(ABC):
 # Utility Functions
 # =============================================================================
 
+def add_threshold_lines_with_legend(
+    fig: go.Figure,
+    thresholds: list[tuple[float, str, str]] | list[tuple[float, str, str, str]],
+) -> None:
+    """Draw vertical threshold lines and label them in a legend below the plot.
+
+    Annotation text placed at the top of each line overlaps when thresholds
+    are close together (or coincide), so labels go into a horizontal legend
+    instead. Lines at the same x value are merged into one legend entry. Call
+    :func:`place_legend_below` after the final layout/config is applied (the
+    config resets the margins).
+
+    Args:
+        fig: Plotly figure to modify.
+        thresholds: ``(x_value, label, color)`` or
+            ``(x_value, label, color, dash)`` tuples.
+    """
+    merged: dict[tuple[float, str, str], list[str]] = {}
+    for item in thresholds:
+        value, label, color = item[0], item[1], item[2]
+        dash = item[3] if len(item) == 4 else "dash"
+        labels = merged.setdefault((value, color, dash), [])
+        if label not in labels:
+            labels.append(label)
+
+    for (value, color, dash), labels in merged.items():
+        fig.add_vline(x=value, line_dash=dash, line_color=color, opacity=0.8)
+        name = " / ".join(labels)
+        if f"{value:g}" not in name:
+            name += f" ({value:g})"
+        fig.add_trace(
+            go.Scatter(
+                x=[None],
+                y=[None],
+                mode="lines",
+                line={"color": color, "dash": dash, "width": 2},
+                name=name,
+                hoverinfo="skip",
+            )
+        )
+
+
+def place_legend_below(fig: go.Figure) -> None:
+    """Put the legend in a horizontal row below the plot area."""
+    fig.update_layout(
+        showlegend=True,
+        legend={"orientation": "h", "x": 0, "xanchor": "left", "y": -0.25, "yanchor": "top"},
+        margin={"b": 130},
+    )
+
+
 def get_taxonomy_color(classification: str) -> str:
     """Get color for a taxonomic classification category."""
     return TAXONOMY_COLORS.get(classification, "#808080")
