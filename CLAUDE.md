@@ -364,7 +364,10 @@ Novel Species -> Novel Genus at N ~ 18.6, Novel Genus -> Unclassified at
 N ~ 27.6; at N = 1, Species Boundary wins from U ~ 3.8 and Ambiguous
 from U ~ 5.5. Protein mode (U = 0): ~11.3 / ~25.1 / ~40.4. Single-hit
 reads: the inferred uncertainty only enters `legacy_call`;
-`taxonomic_call` uses `placement_uncertainty` (0 for single-hit reads).
+`taxonomic_call` uses `placement_uncertainty` (0 for single-hit reads),
+and the single-hit novelty rule (on by default, nucleotide mode) moves
+single-reference reads with N >= novelty_known_max from Known Species to
+Novel Species, so for those reads the effective boundary is 4%.
 In protein mode `get_effective_thresholds()` returns the fixed protein
 constants, so custom/YAML/adaptive novelty thresholds do not apply there.
 
@@ -427,10 +430,11 @@ Where `min = 1 - strength`, `max = 1 + strength`, `strength` defaults to 0.5.
 - Prior modulation: identity_gap_boost (2.0x) and single_hit_boost (1.5x) for Ambiguous prior
 - Shannon entropy as confidence metric (0 = confident, 2.585 = uniform over 6 categories)
 - `confidence_score = (1 - entropy / log2(6)) * 100` (0-100 scale)
-- Output columns: taxonomic_call (Bayesian MAP), legacy_call (hard thresholds), 6 posterior columns, posterior_entropy, confidence_score, clade_novel_species (nucleotide mode)
+- Output columns: taxonomic_call (Bayesian MAP), legacy_call (hard thresholds), 6 posterior columns, posterior_entropy, confidence_score, clade_novel_species and single_hit_novel_species (nucleotide mode)
 - `--config` loads YAML config; `score export-config` generates editable YAML
 - `--include-legacy-scores` adds old sub-scores (alignment_quality, etc.)
 - Clade-novelty rule (on by default; `--no-clade-novel-species`, `ScoringConfig.clade_novel_species`, YAML `clade_novelty`): Ambiguous/Species Boundary reads whose competitors are within one genus and that are >= 5% divergent from both the best and second-best reference (N < 18.6) become Novel Species; adds a `clade_novel_species` column. Nucleotide mode only; turning it off reproduces the previous calls. Implemented in `bayesian.apply_clade_novelty_rule`, validated in `docs/CLADE_NOVELTY_VALIDATION.md`
+- Single-hit novelty rule (on by default; `--no-single-hit-novel-species`, `ScoringConfig.single_hit_novel_species`, YAML `single_hit_novelty`): Known Species reads with no competing reference (`ambiguity_scope = unambiguous`) and N >= novelty_known_max become Novel Species; adds a `single_hit_novel_species` column. Nucleotide mode only. `bayesian.apply_single_hit_novelty_rule`, same validation doc
 - `--bayesian` flag deprecated (always-on); numeric flags deprecated when `--config` used
 - Key files: `core/classification/bayesian.py`, `models/config.py` (YAML methods), `cli/score.py` (export-config)
 

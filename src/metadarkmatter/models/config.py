@@ -318,6 +318,21 @@ class ScoringConfig(BaseModel):
         ),
     )
 
+    # Single-hit novelty refinement (on by default, nucleotide mode). With no
+    # competing reference, U is 0 and the Bayesian Known/Novel Species
+    # boundary sits near N = 6.2 rather than at novelty_known_max (4%), so
+    # single-reference reads at 4-6% novelty were called Known Species.
+    single_hit_novel_species: bool = Field(
+        default=True,
+        description=(
+            "Stage 2 rule: call Known Species reads with no competing reference "
+            "(ambiguity_scope 'unambiguous') Novel Species when their novelty is "
+            ">= novelty_known_max. Nucleotide mode only. Validated with "
+            "scripts/benchmark_leave_one_out.py on three families "
+            "(docs/CLADE_NOVELTY_VALIDATION.md)."
+        ),
+    )
+
     # Confidence threshold for quality flagging
     # Reads with confidence_score below this threshold are flagged as low_confidence
     # without affecting the classification category
@@ -900,6 +915,8 @@ def _flatten_yaml_config(raw: dict[str, Any]) -> dict[str, Any]:
     _map_if_present(clade, "enabled", flat, "clade_novel_species")
     _map_if_present(clade, "novelty_min", flat, "clade_novelty_min")
     _map_if_present(clade, "novelty_max", flat, "clade_novelty_max")
+    single_hit = raw.get("single_hit_novelty", {})
+    _map_if_present(single_hit, "enabled", flat, "single_hit_novel_species")
 
     # Output section
     output_sec = raw.get("output", {})
@@ -1010,6 +1027,9 @@ def _build_yaml_structure(config: ScoringConfig) -> dict[str, Any]:
             "enabled": config.clade_novel_species,
             "novelty_min": config.clade_novelty_min,
             "novelty_max": config.clade_novelty_max,
+        },
+        "single_hit_novelty": {
+            "enabled": config.single_hit_novel_species,
         },
         "output": {
             "include_legacy_scores": config.include_legacy_scores,

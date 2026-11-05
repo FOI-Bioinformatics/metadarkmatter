@@ -46,6 +46,15 @@ Production-readiness and UX hardening pass.
   precision unchanged (>= 0.989); see docs/CLADE_NOVELTY_VALIDATION.md.
 - `scripts/benchmark_leave_one_out.py`: leave-one-out novelty benchmark that
   compares ScoringConfigs on any genome set.
+- Single-hit novelty rule, on by default (`--no-single-hit-novel-species`,
+  `ScoringConfig.single_hit_novel_species`, YAML `single_hit_novelty`): reads
+  with no competing reference were called Known Species up to N ~ 6.2%
+  because of where the Bayesian boundary lies at U = 0; reads with
+  N >= `novelty_known_max` (4%) are now Novel Species and flagged in a
+  `single_hit_novel_species` column. Leave-one-out novel-species recall
+  rose by 3-11 points per family with novel-versus-known precision
+  unchanged (docs/CLADE_NOVELTY_VALIDATION.md). Changes default
+  nucleotide-mode output.
 
 ### Changed
 

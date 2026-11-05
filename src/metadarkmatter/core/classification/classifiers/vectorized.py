@@ -474,12 +474,22 @@ class VectorizedClassifier:
             and self.config.alignment_mode == "nucleotide"
         )
 
+    @property
+    def _single_hit_rule_active(self) -> bool:
+        """Single-hit novelty rule enabled and applicable (nucleotide mode only)."""
+        return (
+            self.config.single_hit_novel_species
+            and self.config.alignment_mode == "nucleotide"
+        )
+
     def _output_schema(self) -> dict[str, Any]:
         schema = dict(self._empty_dataframe().schema)
         if self.config.target_family is not None:
             schema.update(self._FAMILY_OUTPUT_SCHEMA)
         if self._clade_rule_active:
             schema["clade_novel_species"] = pl.Boolean()
+        if self._single_hit_rule_active:
+            schema["single_hit_novel_species"] = pl.Boolean()
         return schema
 
     def _conform_output(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -1085,6 +1095,15 @@ class VectorizedClassifier:
                 result, self.config.clade_novelty_min, self.config.clade_novelty_max
             )
 
+        # Optional single-hit novelty refinement (nucleotide mode only): with
+        # no competing reference the Bayesian Known boundary sits near 6.2%,
+        # above the configured Known Species novelty threshold.
+        if self._single_hit_rule_active:
+            from metadarkmatter.core.classification.bayesian import (
+                apply_single_hit_novelty_rule,
+            )
+            result = apply_single_hit_novelty_rule(result, eff["novelty_known_max"])
+
         # Compute legacy_call using the hard threshold cascade for side-by-side comparison
         from metadarkmatter.core.classification.thresholds import apply_legacy_thresholds
         result = apply_legacy_thresholds(result, self.config)
@@ -1184,6 +1203,8 @@ class VectorizedClassifier:
         base_columns.extend(["inferred_uncertainty", "uncertainty_type"])
         if self._clade_rule_active:
             base_columns.append("clade_novel_species")
+        if self._single_hit_rule_active:
+            base_columns.append("single_hit_novel_species")
 
         # Optionally include legacy sub-scores
         if self.config.include_legacy_scores:

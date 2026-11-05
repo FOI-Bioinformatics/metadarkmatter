@@ -187,6 +187,7 @@ class _ClassifyOptions:
     config_file: Path | None
     preset: str | None
     clade_novel_species: bool | None = None
+    single_hit_novel_species: bool | None = None
 
 
 def _is_gzip(path: Path) -> bool:
@@ -239,6 +240,8 @@ def _explicit_flag_overrides(opts: _ClassifyOptions) -> dict[str, Any]:
         overrides["include_legacy_scores"] = True
     if opts.clade_novel_species is not None:
         overrides["clade_novel_species"] = opts.clade_novel_species
+    if opts.single_hit_novel_species is not None:
+        overrides["single_hit_novel_species"] = opts.single_hit_novel_species
     return overrides
 
 
@@ -330,6 +333,11 @@ def build_classify_config(opts: _ClassifyOptions) -> tuple[ScoringConfig, list[s
         **(
             {"clade_novel_species": opts.clade_novel_species}
             if opts.clade_novel_species is not None
+            else {}
+        ),
+        **(
+            {"single_hit_novel_species": opts.single_hit_novel_species}
+            if opts.single_hit_novel_species is not None
             else {}
         ),
     )
@@ -631,6 +639,16 @@ def classify(
             "Default comes from --config/--preset (on). See docs/METHODS.md."
         ),
     ),
+    single_hit_novel_species: bool | None = typer.Option(
+        None,
+        "--single-hit-novel-species/--no-single-hit-novel-species",
+        help=(
+            "Stage 2 rule (nucleotide mode, on by default): call Known Species "
+            "reads with no competing reference Novel Species when their novelty "
+            "is >= the Known Species threshold (4%%). Adds a "
+            "single_hit_novel_species column. See docs/METHODS.md."
+        ),
+    ),
     quiet: bool = typer.Option(
         False,
         "--quiet",
@@ -848,6 +866,7 @@ def classify(
             config_file=config_file,
             preset=preset,
             clade_novel_species=clade_novel_species,
+            single_hit_novel_species=single_hit_novel_species,
         )
     )
     for _msg in config_messages:
