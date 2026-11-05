@@ -65,9 +65,10 @@ conda activate metadarkmatter
 
 `mdm run pipeline` chains the whole workflow (download -> extract -> align ->
 ANI -> classify -> report) with per-step checkpointing, `--from` resume, and a
-`run_manifest.json` (with per-step start/finish times). Re-running skips steps
-whose outputs already exist; `--from STEP` re-runs that step and all later
-ones; add `--dry-run` to preview the plan without executing. With
+`run_manifest.json` (with per-step start/finish times). Re-running skips a
+step only when it completed successfully before and its command and input
+files are unchanged; otherwise that step and all later ones re-run.
+`--from STEP` re-runs that step and all later ones; add `--dry-run` to preview the plan without executing. With
 `--config run.yaml`, YAML values apply unless the corresponding flag is
 passed explicitly. For paired-end MMseqs2 alignment of pre-extracted reads,
 add `--extracted-reads-2` with `--aligner mmseqs2`.
