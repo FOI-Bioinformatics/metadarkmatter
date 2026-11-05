@@ -63,6 +63,9 @@ Report Python version, dependency versions, external tool paths/versions, and th
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
 | `--kraken-db` | | PATH | - | Optionally validate a Kraken2 database directory |
+| `--strict` | | FLAG | off | Exit non-zero if a required tool or package is missing (blastn, makeblastdb, kraken2, skani or fastANI, core Python packages) or `--kraken-db` is invalid. Without it, doctor reports problems and exits 0. |
+
+Optional tools are listed with the command that needs them: bowtie2/bowtie2-build and samtools (`map reads`, `visualize recruitment`), prodigal (`proteins predict`).
 
 ---
 
@@ -355,13 +358,17 @@ Compute ANI matrix from reference genomes.
 | `--sensitivity` | `-s` | CHOICE | sensitive | Sensitivity preset: default (standard), sensitive (captures distant genomes) Choices: default, sensitive, custom. |
 | `--min-af` |  | FLOAT | - | Minimum aligned fraction (0-100). Lower = more distant comparisons. Default: 15 (default mode), 5 (sensitive mode) |
 | `--screen` |  | FLOAT | - | Pre-filter threshold for ANI (0-100). Lower = attempt more comparisons. Default: 80 (default mode), 50 (sensitive mode). Only applies to skani. |
+| `--skani-mode` |  | CHOICE | default | skani sensitivity mode: default, medium (`-c 70`) or slow (`-c 30`). More sensitive modes detect more distant pairs but are slower. Only applies to skani. |
+| `--skani-c` |  | INT | - | skani compression factor (`-c`); overrides `--skani-mode`. Only applies to skani. |
 | `--threads` | `-t` | INT | 4 | Number of threads for parallel execution |
 | `--genome-pattern` | `-p` | TEXT | *.fna | Glob pattern for genome files |
 | `--verbose` | `-v` | FLAG | off | Enable verbose output |
 | `--quiet` | `-q` | FLAG | off | Suppress progress output |
 | `--dry-run` |  | FLAG | off | Show commands without executing |
 
-With `--backend auto`, skani is used when it is on `PATH`, otherwise fastANI. `--representatives-only` requires `--metadata` and is honoured by both backends. Matrix values are written on a 0-100 scale.
+With `--backend auto`, skani is used when it is on `PATH`, otherwise fastANI. `--representatives-only` requires `--metadata` and is honoured by both backends. Matrix values are written on a 0-100 scale. fastANI asymmetric pairs are averaged.
+
+skani reports nothing for pairs it does not detect (written as 0 = not computed). When more than 20% of genome pairs are undetected, `ani compute` prints a warning with the count. On a 10-genome Francisellaceae set, skani left 22 of 45 pairs undetected (also with `--skani-mode slow`) while fastANI computed all of them (lowest 78%); undetected pairs are treated as 70% ANI during classification, so prefer `--backend fastani` when many pairs are missing.
 
 ### `metadarkmatter ani validate`
 
@@ -550,7 +557,7 @@ Classify metagenomic reads from an alignment file (BLAST or MMseqs2).
 | `--preset` | | TEXT | None | Threshold preset: `default`, `gtdb-strict`, `gtdb-relaxed`, `conservative`, `literature-strict`, `coverage-strict`, `adaptive`. Explicitly passed flags override preset values |
 | `--alignment-mode` | | TEXT | nucleotide | Alignment type: 'nucleotide' for BLASTN/MMseqs2, 'protein' for BLASTX |
 | `--bitscore-threshold` | | FLOAT | 95.0 | Percentage of top bitscore for ambiguous hits (0-100) |
-| `--min-alignment-length` | | INT | 100 | Minimum alignment length in bp (0 = no filter) |
+| `--min-alignment-length` | | INT | 100 | Minimum alignment length in bp (0 = no filter). In `--alignment-mode protein` it is compared with the query span in nucleotides (`qend - qstart + 1`), because BLASTX/DIAMOND `length` is in amino acids. |
 | `--min-alignment-fraction` | | FLOAT | 0.3 | Minimum fraction of the read aligned (uses `qlen` when present); 0.5 is GTDB-compatible |
 | `--max-evalue` | | FLOAT | 0.0 | Maximum E-value for hit filtering (0 disables) |
 | `--min-percent-identity` | | FLOAT | 0.0 | Minimum percent identity for hit filtering (0 disables) |
@@ -783,7 +790,7 @@ Batch classify multiple alignment files in a directory.
 | `--preset` | | TEXT | None | Threshold preset (same names as `score classify`); explicitly passed flags override preset values |
 | `--alignment-mode` | | TEXT | nucleotide | 'nucleotide' or 'protein' |
 | `--bitscore-threshold` | | FLOAT | 95.0 | Percentage of top bitscore for ambiguous hits |
-| `--min-alignment-length` | | INT | 100 | Minimum alignment length in bp (0 = no filter) |
+| `--min-alignment-length` | | INT | 100 | Minimum alignment length in bp (0 = no filter). In `--alignment-mode protein` it is compared with the query span in nucleotides (`qend - qstart + 1`), because BLASTX/DIAMOND `length` is in amino acids. |
 | `--min-alignment-fraction` | | FLOAT | 0.3 | Minimum fraction of read aligned |
 | `--max-evalue` | | FLOAT | 0.0 | Maximum E-value (0 disables) |
 | `--min-percent-identity` | | FLOAT | 0.0 | Minimum percent identity (0 disables) |
@@ -956,7 +963,10 @@ Validate an ID mapping file and optionally check coverage against a BLAST result
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
 | `--blast` | `-b` | PATH | None | BLAST TSV file to check mapping coverage |
+| `--min-coverage` | | FLOAT | None | With `--blast`: exit non-zero when the percentage of subject IDs covered by the mapping (or already in `accession|contig` form) is below this value |
 | `--quiet` | `-q` | FLAG | False | Suppress progress output |
+
+A contig ID mapped to two different accessions is an error (exit 1, conflicts listed). Subject IDs already in the standardized `accession|contig` form count as covered; NCBI-style `ref|ID|` IDs are looked up by their bare ID.
 
 #### Examples
 
@@ -1011,7 +1021,7 @@ Positional argument: `TAXON`
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
 | `--output` | `-o` | PATH | - | Output TSV file for accession list (required) |
-| `--reps-only/--all-genomes` |  | FLAG | on | Only include representative genomes (default) or all genomes |
+| `--reps-only/--all-genomes` |  | FLAG | on | Only include representative genomes (default) or all genomes. With `--all-genomes`, each species gets exactly one representative in `genome_metadata.tsv` (the GTDB representative, or the first accession in sorted order when none was returned, with a warning). |
 | `--include-metadata` |  | FLAG | off | Include additional metadata columns (genome_size, etc.) |
 | `--verbose` | `-v` | FLAG | off | Show detailed breakdown by genus |
 | `--quiet` | `-q` | FLAG | off | Suppress progress output |
@@ -1032,6 +1042,7 @@ Download genome FASTAs from NCBI using accession list.
 | `--verbose` | `-v` | FLAG | off | Show detailed progress |
 | `--quiet` | `-q` | FLAG | off | Suppress progress output |
 | `--dry-run` |  | FLAG | off | Show what would be downloaded without making requests |
+| `--require-all` |  | FLAG | off | Exit non-zero if any genome could not be downloaded (failures are listed in `download_failures.tsv`); by default partial downloads exit 0 with a summary |
 
 ### `metadarkmatter proteins predict`
 
@@ -1097,7 +1108,7 @@ Validate ANI matrix format and values.
 
 ### `metadarkmatter validate blast`
 
-Validate BLAST tabular output format (outfmt 6).
+Validate BLAST tabular output format (outfmt 6). Accepts 12, 13 (+qlen) or 14 (+qlen, qcov) columns, as `score classify` does; all sampled lines must have the same column count.
 
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
@@ -1195,7 +1206,9 @@ Run the complete pipeline from reads (or extracted reads) to an HTML report.
 
 `download genomes list` writes both the accession TSV given by `--output` and `genome_metadata.tsv` (accession, species, genus, family, representative, gtdb_taxonomy) next to it.
 
-For `run pipeline`, values in the `--config` YAML (e.g. aligner, threads, output_dir) apply unless the corresponding flag is passed explicitly. `--from STEP` re-runs that step and all later steps even when their outputs exist. The run manifest records start and finish times for each step. `--extracted-reads-2` is used only with `--aligner mmseqs2`.
+For `run pipeline`, values in the `--config` YAML (e.g. aligner, threads, output_dir) apply unless the corresponding flag is passed explicitly. `--from STEP` re-runs that step and all later steps even when their outputs exist. The run manifest records start and finish times for each step. `--extracted-reads-2` is used only with `--aligner mmseqs2`; with `--aligner blast`, R2 reads are not aligned (BLAST is single-end) and a warning says so. Unknown keys in the `--config` YAML produce a warning.
+
+**Checkpointing.** A step is skipped on re-run only if a completion marker (`.mdm_steps/<step>.done.json`, written after the step exits 0) exists and its fingerprint (the step's command line plus size and modification time of its input files) matches. A changed fingerprint, or a step that was interrupted, re-runs that step and every later step. The previous `run_manifest.json` is kept as `run_manifest.<timestamp>.json`.
 
 ---
 

@@ -125,6 +125,38 @@ Production-readiness and UX hardening pass.
     no longer refers to a non-existent flag, and `score batch --workers` is
     marked as unused. The `pyproject.toml` repository URL now points at
     FOI-Bioinformatics/metadarkmatter.
+- Fixes from the second 2026-11 audit round:
+  - Protein mode (`--alignment-mode protein`) classified 0 reads with the
+    default filters: `min_alignment_length` (100) was compared with BLASTX
+    alignment length in amino acids. It now uses the query span in
+    nucleotides. A run that classifies 0 reads writes a header-only file and
+    warns (stale outputs were left in place).
+  - Subject IDs without an `{accession}|` prefix made every read Known
+    Species with no warning; this is now an error pointing to `--id-mapping`,
+    as is 0% overlap between hit genomes and the ANI matrix. Hit genomes
+    missing from the ANI matrix are reported with a count.
+  - Blank metadata representatives, duplicate accessions, NaN/NA ANI cells
+    and single-genome matrices are handled; non-finite N/U give Unclassified.
+  - `validate blast` and `validate classifications` rejected the pipeline's
+    own outputs. `score batch` exits 1 when a file fails; `score sensitivity`
+    labels its output `legacy_call`; `score extract-novel` option fixes;
+    `score evaluate` tolerates unlabelled reads.
+  - `run pipeline` re-ran nothing when inputs changed and treated
+    interrupted steps as done; steps now carry a fingerprint and a
+    completion marker. BLAST with R2 reads warns.
+  - Report: the Diversity Classification sunburst was blank whenever there
+    were no off-target reads; the Methods panel now describes the Bayesian
+    call; ANI pair counts and missing-ANI display corrected; the phylogeny
+    tree and the Novel Diversity tab now share one set of clusters (they
+    used the same IDs for different clusters); cluster uncertainty is the
+    measured value (was a fabricated estimate for single-hit reads);
+    multi-sample report shows all categories offline; mobile layout.
+  - `ani compute` warns when many genome pairs are undetected (skani left
+    49% of a 10-genome set undetected) and adds `--skani-mode`/`--skani-c`;
+    fastANI asymmetric pairs are averaged; recruitment identity uses the NM
+    tag; Bowtie2, KrakenTools and skani argument fixes; `map reads` reuses
+    an existing index. New flags: `download genomes fetch --require-all`,
+    `doctor --strict`, `util validate-mapping --min-coverage`.
 
 - Streaming classification (`score classify --streaming` / `stream_to_file`)
   silently bypassed the alignment-quality filters (`min_alignment_length`,

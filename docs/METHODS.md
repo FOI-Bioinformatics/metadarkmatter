@@ -77,7 +77,7 @@ Where:
 
 Before the best hit is chosen, hits are filtered (`_apply_alignment_filters` in `core/classification/classifiers/vectorized.py`):
 - Reverse-strand coordinates (`qstart > qend`, as reported by MMseqs2/DIAMOND) are normalised to `qstart = min(qstart, qend)`, `qend = max(qstart, qend)`.
-- `length >= min_alignment_length` (default 100 bp).
+- `length >= min_alignment_length` (default 100 bp). In protein mode the query span in nucleotides (`qend - qstart + 1`) is compared instead, because BLASTX/DIAMOND report `length` in amino acids.
 - Alignment fraction `(qend - qstart + 1) / read_length >= min_alignment_fraction` (default 0.3), where `read_length = qlen` when the alignment file provides it, otherwise `qend` is used as a proxy (12-column input).
 - Optional E-value, identity, bitscore, read-length and query-coverage filters (all disabled by default).
 
