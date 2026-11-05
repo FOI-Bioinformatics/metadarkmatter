@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 
 from metadarkmatter.cli.main import app
 from metadarkmatter.core.paired_reads import combine_mates
+from metadarkmatter.external.base import ExternalTool
 
 runner = CliRunner()
 
@@ -82,6 +83,11 @@ def test_align_paired_dry_run_describes_combination(tmp_path: Path):
 )
 def test_paired_align_with_real_blastn(tmp_path: Path):
     import random
+
+    # Other tests in this worker may have mocked the resolver or cached a
+    # "not found" result; this test needs the real executables.
+    ExternalTool.reset_executable_resolver()
+    ExternalTool.clear_cache()
 
     rng = random.Random(7)
     genome = "".join(rng.choice("ACGT") for _ in range(3000))
