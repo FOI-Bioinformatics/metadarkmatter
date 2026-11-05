@@ -32,6 +32,18 @@ Production-readiness and UX hardening pass.
 - Unit tests for the previously untested `core/ani_matrix_builder.py`, the
   pipeline orchestrator, and the centralized error handler.
 
+- Opt-in clade-novelty rule (`score classify --clade-novel-species`,
+  `ScoringConfig.clade_novel_species`, YAML `clade_novelty`): reads called
+  Ambiguous or Species Boundary because their competitors are close
+  relatives within one genus, but that are at least 5% divergent from both
+  the best and the second-best reference, are called Novel Species. Off by
+  default. In a leave-one-out benchmark on Francisellaceae,
+  Lactobacillaceae and Enterobacteriaceae it raised read-level
+  novel-species recall from 0.47-0.52 to 0.59-0.70 with novel-versus-known
+  precision unchanged (>= 0.989); see docs/CLADE_NOVELTY_VALIDATION.md.
+- `scripts/benchmark_leave_one_out.py`: leave-one-out novelty benchmark that
+  compares ScoringConfigs on any genome set.
+
 ### Changed
 
 - mypy is now **blocking** in CI. `strict` stays on with a documented set of
