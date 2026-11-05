@@ -373,6 +373,7 @@ CLUSTER_CSV_HEADER: list[str] = [
     "nearest_species", "nearest_genus", "nearest_family", "closest_known_taxon",
     "estimated_ani", "mean_novelty_index", "mean_placement_uncertainty", "confidence",
     "phylogenetic_context", "neighborhood_context", "placement_support",
+    "novel_species_reads", "novel_genus_reads", "contributing_genomes", "grouping",
 ]
 
 
@@ -388,6 +389,9 @@ def clusters_csv(clusters: list[Any]) -> tuple[list[str], list[list[Any]]]:
             c.confidence, c.phylogenetic_context,
             nbr.phylogenetic_context if nbr is not None else None,
             round(nbr.placement_support, 1) if nbr is not None else None,
+            getattr(c, "novel_species_reads", None), getattr(c, "novel_genus_reads", None),
+            ";".join(getattr(c, "contributing_genomes", None) or []),
+            getattr(c, "grouping", None),
         ])
     return CLUSTER_CSV_HEADER, rows
 

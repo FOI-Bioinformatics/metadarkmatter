@@ -63,7 +63,8 @@ class NovelMixin(_ReportBase):
             )
 
             analyzer = build_report_analyzer(
-                self.df, self.genome_metadata, self.ani_matrix
+                self.df, self.genome_metadata, self.ani_matrix,
+                grouping=self.config.cluster_grouping,
             )
             ani_matrix_obj = analyzer._ani_matrix
             clusters = analyzer.cluster_novel_reads()
@@ -139,6 +140,7 @@ class NovelMixin(_ReportBase):
         content_parts.append(
             self._build_novel_kpi_strip(clusters, genus_boundary_result)
         )
+        content_parts.append(self._grouping_note(analyzer.grouping))
 
         if unplaced_ids:
             content_parts.append(
@@ -206,7 +208,7 @@ class NovelMixin(_ReportBase):
             + csv_export_button(
                 "novel-clusters",
                 csv_export_payload("novel_clusters.csv", header, rows),
-                label="Download cluster table (CSV)",
+                label="Download lineage group table (CSV)",
             )
             + "</div>"
         )
@@ -219,6 +221,37 @@ class NovelMixin(_ReportBase):
             active_class="",
             section_title="Novel Diversity",
             content=content,
+        )
+
+    @staticmethod
+    def _grouping_note(grouping: str | None) -> str:
+        """Explain how novel reads were grouped, and what a group is not."""
+        method = {
+            "genus": (
+                "by the GTDB genus of each read's nearest reference; within a genus, "
+                "references below 80% ANI to each other are kept apart"
+            ),
+            "reference": (
+                "by nearest reference genome, because no genus information was "
+                "available (pass --metadata to group by genus). Reads of one novel "
+                "organism that spread over several equidistant references are split "
+                "across groups"
+            ),
+            "legacy": (
+                "by ANI neighbourhood of the nearest reference, 5% novelty band and "
+                "call (legacy method)"
+            ),
+        }.get(grouping or "", "")
+        if not method:
+            return ""
+        return (
+            '<div class="novel-note" style="margin:12px 0;padding:10px 14px;'
+            'border-left:3px solid #64748b;"><p><strong>Grouping:</strong> novel reads '
+            f"are grouped {method}. A group is a candidate lineage, not a confirmed "
+            "single organism: novel species of one genus that hit the same reference, "
+            "or a novel genus whose reads hit an existing genus, fall in one group. "
+            "Group IDs use the majority call of their reads (NSP_ Novel Species, "
+            "NGN_ Novel Genus).</p></div>"
         )
 
     @staticmethod
@@ -246,7 +279,7 @@ class NovelMixin(_ReportBase):
         novel_kpi_cards = []
         cluster_count = len(clusters) if clusters else 0
         novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
-            color_class="accent", value=str(cluster_count), label="Clusters",
+            color_class="accent", value=str(cluster_count), label="Novel lineage groups",
         ))
         novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
             color_class="novel", value=str(self.summary.novel_species), label="Novel Species (reads)",

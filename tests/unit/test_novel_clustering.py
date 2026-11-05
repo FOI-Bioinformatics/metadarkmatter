@@ -390,6 +390,7 @@ class TestNovelDiversityAnalyzer:
     def test_novelty_band_calculation(self, classification_df_with_novel):
         """Novelty bands should group reads correctly."""
         analyzer = NovelDiversityAnalyzer(
+            grouping="legacy",
             classifications=classification_df_with_novel,
             novelty_band_size=5.0,
             min_cluster_size=1,
@@ -907,13 +908,13 @@ class TestGenomeNeighborhoods:
 
         # Without ANI: 2 clusters (one per genome)
         analyzer_no_ani = NovelDiversityAnalyzer(
-            df, min_cluster_size=3,
+            df, grouping="legacy", min_cluster_size=3,
         )
         clusters_no_ani = analyzer_no_ani.cluster_novel_reads()
 
         # With ANI: 1 cluster (merged neighborhood)
         analyzer_with_ani = NovelDiversityAnalyzer(
-            df, ani_matrix=ani_matrix, min_cluster_size=3,
+            df, grouping="legacy", ani_matrix=ani_matrix, min_cluster_size=3,
         )
         clusters_with_ani = analyzer_with_ani.cluster_novel_reads()
 
@@ -933,7 +934,7 @@ class TestGenomeNeighborhoods:
         })
 
         analyzer = NovelDiversityAnalyzer(
-            df, ani_matrix=ani_matrix, min_cluster_size=3,
+            df, grouping="legacy", ani_matrix=ani_matrix, min_cluster_size=3,
         )
         clusters = analyzer.cluster_novel_reads()
 
@@ -950,7 +951,7 @@ class TestGenomeNeighborhoods:
         })
 
         analyzer = NovelDiversityAnalyzer(
-            df, ani_matrix=ani_matrix, min_cluster_size=3,
+            df, grouping="legacy", ani_matrix=ani_matrix, min_cluster_size=3,
         )
         clusters = analyzer.cluster_novel_reads()
 
@@ -968,7 +969,7 @@ class TestGenomeNeighborhoods:
         })
 
         analyzer = NovelDiversityAnalyzer(
-            df, min_cluster_size=3,
+            df, grouping="legacy", min_cluster_size=3,
         )
         clusters = analyzer.cluster_novel_reads()
 
@@ -995,7 +996,7 @@ class TestAdjacentBandMerging:
         })
 
         analyzer = NovelDiversityAnalyzer(
-            df, min_cluster_size=3,
+            df, grouping="legacy", min_cluster_size=3,
         )
         clusters = analyzer.cluster_novel_reads()
 
@@ -1014,7 +1015,7 @@ class TestAdjacentBandMerging:
         })
 
         analyzer = NovelDiversityAnalyzer(
-            df, min_cluster_size=3,
+            df, grouping="legacy", min_cluster_size=3,
         )
         clusters = analyzer.cluster_novel_reads()
 
@@ -1032,7 +1033,7 @@ class TestAdjacentBandMerging:
         })
 
         analyzer = NovelDiversityAnalyzer(
-            df, min_cluster_size=3,
+            df, grouping="legacy", min_cluster_size=3,
         )
         clusters = analyzer.cluster_novel_reads()
 

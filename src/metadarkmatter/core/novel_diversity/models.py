@@ -164,6 +164,22 @@ class NovelCluster(BaseModel):
         default=None,
         description="Phylogenetic neighborhood profile (computed post-clustering)"
     )
+    grouping: str | None = Field(
+        default=None,
+        description=(
+            "How reads were grouped: 'genus' (GTDB genus of the nearest "
+            "reference), 'reference' (nearest reference) or 'legacy' "
+            "(reference neighbourhood x novelty band x call)"
+        ),
+    )
+    novel_species_reads: int | None = Field(
+        default=None, ge=0,
+        description="Reads in this group called Novel Species (genus/reference grouping)",
+    )
+    novel_genus_reads: int | None = Field(
+        default=None, ge=0,
+        description="Reads in this group called Novel Genus (genus/reference grouping)",
+    )
 
     model_config = {"frozen": True}
 
@@ -258,6 +274,11 @@ class NovelCluster(BaseModel):
             result["mean_bayesian_confidence"] = round(self.mean_bayesian_confidence, 1)
         if self.contributing_genomes:
             result["contributing_genomes_count"] = len(self.contributing_genomes)
+        if self.grouping is not None:
+            result["grouping"] = self.grouping
+        if self.novel_species_reads is not None:
+            result["novel_species_reads"] = self.novel_species_reads
+            result["novel_genus_reads"] = self.novel_genus_reads
         return result
 
 

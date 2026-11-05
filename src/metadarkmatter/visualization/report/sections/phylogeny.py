@@ -106,7 +106,10 @@ class PhylogenyMixin(_ReportBase):
             )
             from metadarkmatter.core.phylogeny.tree_builder import count_missing_pairs
 
-            analyzer = build_report_analyzer(self.df, self.genome_metadata, self.ani_matrix)
+            analyzer = build_report_analyzer(
+                self.df, self.genome_metadata, self.ani_matrix,
+                grouping=self.config.cluster_grouping,
+            )
             novel_clusters = [
                 from_diversity_cluster(c) for c in analyzer.cluster_novel_reads()
             ]

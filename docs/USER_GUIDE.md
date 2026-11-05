@@ -282,7 +282,7 @@ metadarkmatter report generate \
 **Report tabs:**
 - **Summary**: Metric cards, diversity bar, key findings, top species (with metadata), and a collapsible **Run information** panel (version, input files, key classification settings, ANI completeness, measured vs inferred uncertainty counts). The panel reads `<classifications>.provenance.json` written by `score classify` (auto-detected, or `--provenance PATH`); without it the panel says provenance was not available and shows only values derived from the data
 - **Classification**: Novelty/uncertainty scatter and distributions, confidence analysis including a `taxonomic_call` x `legacy_call` comparison table (counts, totals, agreement %). The Bayesian boundaries differ from the legacy thresholds, so some disagreement near category boundaries is expected
-- **Novel Diversity**: Novel clusters (CSV download) and their phylogenetic context (shown only when novel reads exist)
+- **Novel Diversity**: Novel lineage groups (novel reads grouped by the GTDB genus of their nearest reference; `--cluster-grouping` selects the method), with CSV download and phylogenetic context (shown only when novel reads exist)
 - **Reference**: Top-20 species (or genomes, without metadata) stacked by classification, a sortable per-species breakdown table, ANI/AAI heatmaps (hierarchically clustered, with `--ani`/`--aai`), phylogenetic tree panel, recruitment plots
 - **Data**: Interactive classification table (search, sort, filters, paging, column toggles, TSV export of all filtered rows)
 

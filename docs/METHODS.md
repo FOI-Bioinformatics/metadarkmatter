@@ -487,9 +487,27 @@ confidence_pts = (identity_confidence + placement_confidence) / 2 × 0.3
 
 ### 4.1 Clustering Algorithm
 
-Reads classified as Novel Species or Novel Genus are grouped into clusters representing putative novel organisms.
+Reads classified as Novel Species or Novel Genus are grouped into **novel lineage groups**. A group is a candidate lineage for follow-up (assembly, binning), not a confirmed single organism. Hit genomes are first mapped to their species representative (`representative` column of the metadata). The grouping method is set by `--cluster-grouping` (`report generate`) or `--grouping` (`report summarize`):
 
-**Clustering key:**
+| Method | Group key | Used when |
+|---|---|---|
+| `genus` | GTDB genus of the nearest reference, split within the genus by single linkage at ANI >= 80% (`genome_neighborhood_threshold`) | default (`auto`) when the metadata gives genus names |
+| `reference` | nearest reference (species representative) | default (`auto`) without genus information; a warning is printed |
+| `legacy` | (ANI neighbourhood of the nearest reference, 5% novelty band, call) | on request; the previous default |
+
+**Rationale.** Reads of one novel organism usually spread over several equidistant references of the same genus (in the Enterobacteriaceae benchmark, reads of a held-out *Klebsiella aerogenes* were split about evenly over three *Klebsiella* references). Grouping by nearest reference therefore splits one organism into several groups. The legacy method merges references by single linkage at 80% ANI across the whole reference set, which in dense families chains genera together (all five held-out Enterobacteriaceae genomes fell into four groups with a majority-source purity of 0.26). Genus grouping keeps the merging inside one genus; the within-genus 80% ANI split keeps distant lineages of one genus apart. ANI-only genus boundaries were not used because they differ between families (see [NOVEL_LINEAGE_GROUPING.md](NOVEL_LINEAGE_GROUPING.md)).
+
+**Genus and reference grouping:**
+
+1. Filter to novel reads (`taxonomic_call ∈ {"Novel Species", "Novel Genus"}`)
+2. Assign each read the group key of its nearest reference; references without a genus form their own group
+3. Groups are not split by novelty band or by call. The group's call is the majority call of its reads (Novel Species on a tie); `novel_species_reads` and `novel_genus_reads` give the split
+4. `nearest_genome` is the reference with the most reads in the group (ties by accession); `contributing_genomes` lists all
+5. Filter groups with `read_count ≥ min_cluster_size` (default: 3), sort by read count and assign IDs (`NSP_001`... or `NGN_001`... by majority call)
+
+**Known limitations.** Novel species of one genus whose reads hit the same reference fall in one group (in the Lactobacillaceae benchmark, held-out *L. acidophilus* and *L. helveticus* both hit the same *Lactobacillus* reference). A novel genus whose reads hit an existing genus is pooled with it. Read-level novelty is too variable to separate these cases.
+
+**Legacy grouping** (`--cluster-grouping legacy`):
 
 ```
 cluster_key = (representative_genome, novelty_band, taxonomic_call)
@@ -500,9 +518,9 @@ Where:
 - `novelty_band` = floor(novelty_index / 5) × 5 (5% intervals: 5-10%, 10-15%, etc.)
 - `taxonomic_call` = "Novel Species" or "Novel Genus" (the Bayesian `taxonomic_call`)
 
-**Algorithm steps** (`core/novel_diversity/clustering.py`):
+Steps (`core/novel_diversity/clustering.py`):
 
-1. Filter to novel reads only (`taxonomic_call ∈ {"Novel Species", "Novel Genus"}`)
+1. Filter to novel reads only
 2. Compute novelty band and effective uncertainty (Section 4.3) for each read
 3. Map genomes to neighborhood representatives
 4. Group by clustering key
