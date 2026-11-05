@@ -167,6 +167,8 @@ class TestScoreClassifyOptions:
         temp_dir,
     ):
         """Test classify with metadata file."""
+        # subject IDs must be {accession}|{contig}
+        temp_blast_file.write_text(temp_blast_file.read_text().replace("_ASM", "|ASM"))
         output = temp_dir / "output.csv"
         result = cli_runner.invoke(
             app,
@@ -194,6 +196,8 @@ class TestScoreClassifyOptions:
         temp_dir,
     ):
         """Test classify with preset configuration."""
+        # subject IDs must be {accession}|{contig}
+        temp_blast_file.write_text(temp_blast_file.read_text().replace("_ASM", "|ASM"))
         output = temp_dir / "output.csv"
         result = cli_runner.invoke(
             app,
@@ -612,7 +616,7 @@ class TestClassifyCommandMainFlow:
             for g_idx, genome in enumerate(genomes):
                 blast_rows.append({
                     "qseqid": f"read_{read_idx:03d}",
-                    "sseqid": f"{genome}_ASM_genomic",
+                    "sseqid": f"{genome}|ASM_genomic",
                     "pident": 98.5 - g_idx * 5,
                     "length": 150,
                     "mismatch": 2 + g_idx * 3,
@@ -1070,7 +1074,7 @@ class TestClassifyErrorHandling:
             for g_idx, genome in enumerate(genomes):
                 blast_rows.append({
                     "qseqid": f"read_{read_idx:03d}",
-                    "sseqid": f"{genome}_ASM_genomic",
+                    "sseqid": f"{genome}|ASM_genomic",
                     "pident": 98.5 - g_idx * 5,
                     "length": 150,
                     "mismatch": 2,
@@ -1245,7 +1249,7 @@ class TestBatchCommand:
                 for g_idx, genome in enumerate(genomes):
                     blast_rows.append({
                         "qseqid": f"read_{read_idx:03d}",
-                        "sseqid": f"{genome}_ASM_genomic",
+                        "sseqid": f"{genome}|ASM_genomic",
                         "pident": 98.5 - g_idx * 5,
                         "length": 150,
                         "mismatch": 2,
@@ -1713,7 +1717,7 @@ class TestClassifyWithAdaptiveThresholds:
             for g_idx, genome in enumerate(genomes):
                 blast_rows.append({
                     "qseqid": f"read_{read_idx:03d}",
-                    "sseqid": f"{genome}_ASM_genomic",
+                    "sseqid": f"{genome}|ASM_genomic",
                     "pident": 98.5 - g_idx * 5,
                     "length": 150,
                     "mismatch": 2,
@@ -1800,7 +1804,7 @@ class TestClassifyWithSummaryAndQC:
             for g_idx, genome in enumerate(genomes):
                 blast_rows.append({
                     "qseqid": f"read_{read_idx:03d}",
-                    "sseqid": f"{genome}_ASM_genomic",
+                    "sseqid": f"{genome}|ASM_genomic",
                     "pident": 98.5 - g_idx * 5,
                     "length": 150,
                     "mismatch": 2 + g_idx * 3,
@@ -2034,7 +2038,7 @@ class TestYamlConfigRoundTrip:
             for g_idx, genome in enumerate(genomes):
                 blast_rows.append({
                     "qseqid": f"read_{read_idx:03d}",
-                    "sseqid": f"{genome}_ASM_genomic",
+                    "sseqid": f"{genome}|ASM_genomic",
                     "pident": 98.5 - g_idx * 5,
                     "length": 150,
                     "mismatch": 2,

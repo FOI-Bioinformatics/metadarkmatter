@@ -572,9 +572,10 @@ class BayesianClassifier:
         n_reads = df.height
         bay = self.config.bayesian
 
-        # Extract input arrays and sanitize NaN/inf values.
-        # Reads with invalid metrics get clamped to 0, which places them
-        # far from category centers and yields near-uniform posteriors.
+        # Extract input arrays. Non-finite novelty/uncertainty values are
+        # replaced by 0 only to keep the arithmetic finite; those reads are
+        # forced to Unclassified with uniform posteriors below (they must
+        # never be pulled into the Known Species centre).
         novelty = df["novelty_index"].to_numpy().astype(np.float64)
         uncertainty = df["placement_uncertainty"].to_numpy().astype(np.float64)
         invalid_mask = ~np.isfinite(novelty) | ~np.isfinite(uncertainty)
@@ -582,7 +583,7 @@ class BayesianClassifier:
             n_invalid = int(invalid_mask.sum())
             logger.warning(
                 "Bayesian classifier: %d reads have NaN/inf novelty or "
-                "uncertainty values; clamping to 0.",
+                "uncertainty values; classifying them as Unclassified.",
                 n_invalid,
             )
             novelty = np.where(np.isfinite(novelty), novelty, 0.0)
@@ -638,7 +639,11 @@ class BayesianClassifier:
         posteriors[zero_mask.squeeze(axis=1)] = 1.0 / _N_CATEGORIES_6
 
         # --- MAP classification ---
+        if invalid_mask.any():
+            posteriors[invalid_mask] = 1.0 / _N_CATEGORIES_6
         map_indices = np.argmax(posteriors, axis=1)
+        if invalid_mask.any():
+            map_indices[invalid_mask] = _CATEGORY_NAMES_6.index("Unclassified")
         category_array = np.array(_CATEGORY_NAMES_6)
         map_cats = category_array[map_indices].tolist()
 

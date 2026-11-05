@@ -26,6 +26,7 @@ import polars as pl
 
 from metadarkmatter.core.aai_matrix_builder import AAIMatrix
 from metadarkmatter.core.ani_placement import ANIMatrix, VectorizedClassifier
+from metadarkmatter.core.constants import UNKNOWN_GENOME
 from metadarkmatter.core.exceptions import ConfigurationError
 from metadarkmatter.core.id_mapping import ContigIdMapping
 from metadarkmatter.core.io_utils import OutputFormat, write_dataframe
@@ -99,6 +100,35 @@ def validate_ani_genome_coverage(
     return matched_count, total_genomes, coverage_pct, missing
 
 
+def sample_unknown_genome_fraction(
+    blast_path: Path, sample_rows: int = 10000
+) -> tuple[int, int]:
+    """Return (sampled_rows, rows_whose_subject_id_has_no_accession_prefix).
+
+    A subject ID without the ``{accession}|{contig}`` form maps to genome
+    "unknown" and cannot be looked up in the ANI matrix.
+    """
+    parser = StreamingBlastParser(blast_path)
+    sample_df = pl.scan_csv(
+        blast_path,
+        separator="\t",
+        has_header=False,
+        new_columns=parser.column_names,
+        n_rows=sample_rows,
+    ).with_columns(extract_genome_name_expr()).collect()
+    n_rows = sample_df.height
+    n_unknown = int((sample_df["genome_name"] == UNKNOWN_GENOME).sum()) if n_rows else 0
+    return n_rows, n_unknown
+
+
+_HEADER_HELP = (
+    "Subject IDs must have the {accession}|{contig_id} form (as produced by "
+    "'mdm blast makedb' / 'mdm mmseqs2 makedb'). For externally generated "
+    "alignments run 'mdm util generate-mapping --genomes <dir> --output "
+    "id_mapping.tsv' and pass --id-mapping id_mapping.tsv."
+)
+
+
 def finalize_classification(
     classification_df: pl.DataFrame | None,
     genome_metadata: Any,
@@ -125,8 +155,9 @@ def finalize_classification(
         classification_df = genome_metadata.join_classifications(classification_df)
 
     num_classified = len(classification_df)
-    if num_classified > 0:
-        write_dataframe(classification_df, output, output_format)
+    # Always write (a header-only, full-schema file when nothing was
+    # classified) so stale outputs from earlier runs are never left behind.
+    write_dataframe(classification_df, output, output_format)
 
     return num_classified
 
@@ -349,6 +380,31 @@ def run_classification(
                     f"({coverage_pct:.1f}%)[/dim]"
                 )
 
+        if contig_mapping is None:
+            n_sample, n_unknown = sample_unknown_genome_fraction(request.alignment)
+            if n_sample > 0 and n_unknown / n_sample > 0.05:
+                raise ConfigurationError(
+                    f"{n_unknown:,} of {n_sample:,} sampled alignment rows "
+                    f"({100.0 * n_unknown / n_sample:.1f}%) have subject IDs without "
+                    "an accession prefix and would all map to genome 'unknown'.",
+                    suggestion=_HEADER_HELP,
+                )
+            if n_sample > 0 and total == 0 and not representative_mapping:
+                raise ConfigurationError(
+                    "No genomes from the alignment could be matched (0 genomes found).",
+                    suggestion=_HEADER_HELP,
+                )
+            if total > 0 and matched == 0:
+                raise ConfigurationError(
+                    f"None of the {total} genome(s) in the alignment are present in the "
+                    "ANI matrix (0% overlap); the inputs appear to be mismatched.",
+                    suggestion=(
+                        "Check that the ANI matrix row/column labels are genome "
+                        "accessions matching the alignment subject IDs "
+                        "({accession}|{contig_id})."
+                    ),
+                )
+
         if coverage_pct < 50.0 and total > 0:
             log(
                 f"[yellow]Warning: Low genome coverage ({coverage_pct:.1f}%)[/yellow]\n"
@@ -360,6 +416,8 @@ def run_classification(
             elif missing:
                 sample = sorted(missing)[:5]
                 log(f"  Missing genomes (first 5): {', '.join(sample)}...\n")
+    except ConfigurationError:
+        raise
     except (FileNotFoundError, ValueError, pl.exceptions.PolarsError, OSError) as e:
         # Always log warnings - don't silently swallow validation failures
         logger.warning("Could not validate genome coverage: %s", e)
@@ -423,7 +481,27 @@ def run_classification(
             classification_df, None, request.output, request.output_format
         )
 
-    log(f"[green]Classified {num_classified:,} reads[/green]\n")
+    missing_genomes: set[str] = vectorized.missing_ani_genomes
+    if missing_genomes:
+        n_reads_aff = len(vectorized.missing_ani_reads)
+        msg = (
+            f"{len(missing_genomes)} hit genome(s) (or their representatives) are absent "
+            f"from the ANI matrix; {n_reads_aff:,} read(s) with competing hits to them "
+            "get placement uncertainty 100."
+        )
+        logger.warning(msg)
+        log(f"[yellow]Warning: {msg}[/yellow]\n")
+
+    if num_classified == 0:
+        msg = (
+            "0 reads were classified. All alignments may have been removed by the "
+            "alignment filters (see the filter summary above) or the alignment file "
+            "is empty. An empty (header-only) output was written."
+        )
+        logger.warning(msg)
+        log(f"[yellow]Warning: {msg}[/yellow]\n")
+    else:
+        log(f"[green]Classified {num_classified:,} reads[/green]\n")
 
     return ClassificationRunResult(
         num_classified=num_classified,

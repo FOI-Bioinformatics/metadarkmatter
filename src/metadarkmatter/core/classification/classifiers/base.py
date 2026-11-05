@@ -135,12 +135,12 @@ class ANIWeightedClassifier:
         # Find second-best hit (to a DIFFERENT genome)
         second_hit_identity: float | None = None
         identity_gap: float | None = None
-        for hit in blast_result.hits:
-            if hit.genome_name != best_genome:
-                second_hit_identity = hit.pident
-                # Clamp to 0 - secondary hit can have higher identity than top bitscore hit
-                identity_gap = max(0.0, top_hit_identity - second_hit_identity)
-                break
+        # (best pident among hits to other genomes, as in VectorizedClassifier)
+        other_pidents = [h.pident for h in blast_result.hits if h.genome_name != best_genome]
+        if other_pidents:
+            second_hit_identity = max(other_pidents)
+            # Clamp to 0 - secondary hit can have higher identity than top bitscore hit
+            identity_gap = max(0.0, top_hit_identity - second_hit_identity)
 
         # Calculate placement uncertainty and count ambiguous hits in single pass
         # Uses iterator with early termination for efficiency
@@ -155,6 +155,23 @@ class ANIWeightedClassifier:
             ambiguous_hits_iter = blast_result.iter_ambiguous_hits(
                 self.config.bitscore_threshold_pct
             )
+
+        # Order competing hits like VectorizedClassifier: weighted bitscore
+        # desc, then pident desc, then genome name asc, so the "second"
+        # genome is the same one the CLI classifier picks.
+        use_weights = self.config.coverage_weight_mode != "none" and read_length is not None
+        wmode = self.config.coverage_weight_mode
+        wstrength = self.config.coverage_weight_strength
+
+        def _order_key(h: Any) -> tuple[float, float, str]:
+            score = (
+                h.calculate_weighted_score(read_length, wmode, wstrength)
+                if use_weights
+                else h.bitscore
+            )
+            return (-score, -h.pident, h.genome_name)
+
+        ambiguous_hits_iter = iter(sorted(ambiguous_hits_iter, key=_order_key))
 
         placement_uncertainty, num_ambiguous_hits = self._calculate_placement_uncertainty(
             best_genome,

@@ -97,7 +97,18 @@ class VectorizedClassifier:
         self.ani_matrix = ani_matrix
         self.aai_matrix = aai_matrix
         self.config = config or ScoringConfig()
+        if representative_mapping:
+            # Null/blank representatives fall back to the genome itself so
+            # competitors do not vanish through a null representative.
+            representative_mapping = {
+                k: (v if isinstance(v, str) and v.strip() else k)
+                for k, v in representative_mapping.items()
+            }
         self.representative_mapping = representative_mapping
+        # Diagnostics: hit genomes (or representatives) absent from the ANI
+        # matrix and reads whose competitor ANI lookup failed (U defaults to 100).
+        self.missing_ani_genomes: set[str] = set()
+        self.missing_ani_reads: set[str] = set()
 
         # Store effective thresholds based on alignment mode
         self._effective_thresholds = self.config.get_effective_thresholds()
@@ -217,6 +228,15 @@ class VectorizedClassifier:
             ]),
         ])
 
+    def _record_missing_ani(self, secondary_with_ani: pl.DataFrame) -> None:
+        """Accumulate stats on hit genomes/reads with ANI pairs missing."""
+        known = set(self.ani_matrix.genomes)
+        hit_reps = set(secondary_with_ani["representative_genome"].unique().to_list())
+        hit_reps |= set(secondary_with_ani["best_representative"].unique().to_list())
+        self.missing_ani_genomes |= {g for g in hit_reps if g not in known}
+        unresolved = secondary_with_ani.filter(pl.col("ani").is_null())
+        self.missing_ani_reads |= set(unresolved["qseqid"].unique().to_list())
+
     def _coverage_weight_expr(
         self,
         coverage_col: pl.Expr,
@@ -310,8 +330,23 @@ class VectorizedClassifier:
                 pl.max_horizontal("qstart", "qend").alias("qend"),
             )
 
+        n_before = df.height
+        filter_counts: list[tuple[str, int]] = []
+
+        def _record(name: str, frame: pl.DataFrame, before: int) -> None:
+            if frame.height < before:
+                filter_counts.append((name, before - frame.height))
+
         if cfg.min_alignment_length > 0:
-            df = df.filter(pl.col("length") >= cfg.min_alignment_length)
+            # BLASTX/DIAMOND report `length` in amino acids; in protein mode
+            # compare against the aligned query span in nucleotides instead.
+            if cfg.alignment_mode == "protein":
+                len_expr = (pl.col("qend") - pl.col("qstart") + 1)
+            else:
+                len_expr = pl.col("length")
+            h = df.height
+            df = df.filter(len_expr >= cfg.min_alignment_length)
+            _record(f"min_alignment_length={cfg.min_alignment_length}", df, h)
 
         # Alignment fraction = aligned query span / read length. Use qlen
         # when the 13/14-column format provides it; only fall back to the
@@ -323,23 +358,31 @@ class VectorizedClassifier:
                 if "qlen" in df.columns
                 else pl.col("qend")
             )
+            h = df.height
             df = df.with_columns([
                 ((pl.col("qend") - pl.col("qstart") + 1) / read_len).alias("_approx_af")
             ]).filter(
                 pl.col("_approx_af") >= cfg.min_alignment_fraction
             ).drop("_approx_af")
+            _record(f"min_alignment_fraction={cfg.min_alignment_fraction}", df, h)
 
         # E-value filter
         if cfg.max_evalue > 0:
+            h = df.height
             df = df.filter(pl.col("evalue") <= cfg.max_evalue)
+            _record(f"max_evalue={cfg.max_evalue}", df, h)
 
         # Percent identity filter
         if cfg.min_percent_identity > 0:
+            h = df.height
             df = df.filter(pl.col("pident") >= cfg.min_percent_identity)
+            _record(f"min_percent_identity={cfg.min_percent_identity}", df, h)
 
         # Bitscore filter
         if cfg.min_bitscore > 0:
+            h = df.height
             df = df.filter(pl.col("bitscore") >= cfg.min_bitscore)
+            _record(f"min_bitscore={cfg.min_bitscore}", df, h)
 
         # Read length and query coverage filters
         if cfg.min_read_length > 0 or cfg.min_query_coverage > 0:
@@ -354,9 +397,12 @@ class VectorizedClassifier:
                 df = df.with_columns(pl.col("qend").alias("_read_length"))
 
             if cfg.min_read_length > 0:
+                h = df.height
                 df = df.filter(pl.col("_read_length") >= cfg.min_read_length)
+                _record(f"min_read_length={cfg.min_read_length}", df, h)
 
             if cfg.min_query_coverage > 0:
+                h = df.height
                 df = df.with_columns(
                     ((pl.col("qend") - pl.col("qstart") + 1)
                      / pl.col("_read_length") * 100.0)
@@ -365,8 +411,19 @@ class VectorizedClassifier:
                 ).filter(
                     pl.col("_query_cov") >= cfg.min_query_coverage
                 ).drop("_query_cov")
+                _record(f"min_query_coverage={cfg.min_query_coverage}", df, h)
 
             df = df.drop("_read_length")
+
+        if n_before > 0 and df.height == 0:
+            logger.warning(
+                "All %d alignment rows were removed by the alignment filters "
+                "(rows removed per filter: %s). Relax or disable the responsible "
+                "filter(s); note that in protein mode min_alignment_length is "
+                "compared against the query span in nucleotides.",
+                n_before,
+                ", ".join(f"{k}: {v}" for k, v in filter_counts) or "none",
+            )
 
         return df
 
@@ -778,13 +835,17 @@ class VectorizedClassifier:
         secondary = ambiguous.filter(pl.col("representative_genome") != pl.col("best_representative"))
 
         # Join with ANI lookup using representative genomes (use pre-computed symmetric table)
-        if not secondary.is_empty() and not self._ani_lookup.is_empty():
+        if not secondary.is_empty():
             secondary_with_ani = secondary.join(
                 self._ani_lookup_symmetric,
                 left_on=["best_representative", "representative_genome"],
                 right_on=["genome1", "genome2"],
                 how="left",
             )
+
+            # Track hit genomes / reads whose ANI pair is absent from the
+            # matrix (they silently get U=100); reported by the runner.
+            self._record_missing_ani(secondary_with_ani)
 
             # Max ANI per read (for genome-level placement uncertainty - "max" mode)
             max_ani_per_read = (

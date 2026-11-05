@@ -53,7 +53,7 @@ def test_sensitivity_tsv_output_long_format(
     )
     assert result.exit_code == 0, result.output
     df = pl.read_csv(out_tsv, separator="\t")
-    expected_cols = {"novelty_known_max", "uncertainty_known_max", "taxonomic_call", "count"}
+    expected_cols = {"novelty_known_max", "uncertainty_known_max", "legacy_call", "count"}
     assert set(df.columns) == expected_cols
     # 3 threshold points * 7 categories = 21 rows
     assert len(df) == 21
@@ -78,7 +78,9 @@ def test_sensitivity_json_output_keys(
     )
     assert result.exit_code == 0, result.output
     payload = json.loads(out_json.read_text())
-    assert set(payload.keys()) == {"counts", "novelty_thresholds", "uncertainty_thresholds"}
+    assert set(payload.keys()) == {
+        "category_column", "note", "counts", "novelty_thresholds", "uncertainty_thresholds"
+    }
     assert len(payload["novelty_thresholds"]) == 4
     assert len(payload["uncertainty_thresholds"]) == 4
     for counts in payload["counts"].values():

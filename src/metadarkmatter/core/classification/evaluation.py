@@ -13,10 +13,13 @@ programmatic API.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import numpy as np
 import polars as pl
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -75,6 +78,18 @@ def evaluate_classifications(
     if truth_column not in df.columns:
         msg = f"truth column '{truth_column}' missing"
         raise ValueError(msg)
+
+    # Rows without a ground-truth label (or prediction) cannot be scored and
+    # would make the category sort fail on None; drop them with a warning.
+    n_unlabelled = df.filter(
+        pl.col(truth_column).is_null() | pl.col(prediction_column).is_null()
+    ).height
+    if n_unlabelled:
+        logger.warning(
+            "Dropping %d row(s) with null truth or prediction labels before evaluation.",
+            n_unlabelled,
+        )
+        df = df.drop_nulls([truth_column, prediction_column])
 
     n_rows = len(df)
     if n_rows == 0:
