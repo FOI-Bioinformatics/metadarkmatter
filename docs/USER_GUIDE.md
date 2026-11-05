@@ -337,6 +337,24 @@ Use read IDs to extract sequences:
 seqtk subseq reads.fastq novel_reads.txt > novel_reads.fastq
 ```
 
+Or let `extract-novel` write the reads itself. It streams the original
+FASTQ/FASTA (gzip is handled), matches IDs with the `/1` `/2` mate suffix
+removed (so IDs from a paired MMseqs2 search match plain FASTQ headers), and
+writes both mates of each selected pair:
+
+```bash
+metadarkmatter score extract-novel \
+    --classifications classifications.csv \
+    --output novel_candidates.csv \
+    --reads-1 sample_R1.fastq.gz --reads-2 sample_R2.fastq.gz \
+    --fastq-out novel/novel.fastq.gz \
+    --per-lineage-dir novel/by_lineage/
+```
+
+This produces `novel/novel_R1.fastq.gz`, `novel/novel_R2.fastq.gz` and one
+file per candidate lineage for per-lineage assembly. The command reports how
+many requested IDs were found and warns about missing ones.
+
 ### Batch Processing
 
 Process multiple samples with shared ANI matrix:
@@ -348,7 +366,25 @@ metadarkmatter score batch \
     --output-dir classifications/
 ```
 
-By default processes all files matching `*.blast.tsv.gz` in the directory (change with `--pattern`).
+By default processes all BLAST and MMseqs2 outputs in the directory
+(`*.blast.tsv.gz`, `*.mmseqs2.tsv.gz` and their uncompressed forms; change
+with `--pattern`, which can be repeated). `score batch` accepts the same
+options as `score classify` (`--metadata`, `--id-mapping`/`--genomes`,
+`--config`, `--target-family`, `--aai`, `--streaming`, ...) and produces the
+same columns. Sample names are the file names without `.blast.tsv.gz` /
+`.mmseqs2.tsv.gz` / `.tsv`; two files with the same sample name (for example
+`s1.blast.tsv.gz` and `s1.mmseqs2.tsv.gz`) are an error, so use `--pattern` to
+choose one aligner.
+
+### Provenance
+
+Every `score classify` (and every sample in `score batch`) writes
+`<output>.provenance.json` next to the classification table: tool version,
+command line, SHA-256 and size of each input file, the resolved scoring
+configuration, the random seed and the per-category read counts. The same
+object is embedded in the `--summary` JSON under `"provenance"`. Pass
+`--no-provenance` to skip it. See the schema in
+[CLI_REFERENCE.md](CLI_REFERENCE.md#provenance-sidecar).
 
 ---
 

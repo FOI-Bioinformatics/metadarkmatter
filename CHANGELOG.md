@@ -55,9 +55,32 @@ Production-readiness and UX hardening pass.
   rose by 3-11 points per family with novel-versus-known precision
   unchanged (docs/CLADE_NOVELTY_VALIDATION.md). Changes default
   nucleotide-mode output.
+- Provenance sidecar: `score classify` writes `<output>.provenance.json`
+  (schema `metadarkmatter.provenance/1`: version, command, seed, input paths
+  with size and streamed SHA-256, resolved `ScoringConfig`, output paths and
+  per-category counts) and embeds it under `"provenance"` in `--summary`;
+  `score batch` writes one per sample. Opt out with `--no-provenance`. New
+  module `core/provenance.py`. Classification tables are unchanged.
+- `score extract-novel --reads-1/--reads-2 --fastq-out/--fasta-out`: stream the
+  original FASTQ/FASTA (gzip-aware) and write the reads selected as novel,
+  matching IDs with `/1` `/2` mate suffixes normalised, writing `{stem}_R1` /
+  `{stem}_R2` for paired input; `--per-lineage-dir` writes one file per
+  lineage. Reports requested versus found IDs and warns about missing ones.
+  New module `core/read_export.py`.
 
 ### Changed
 
+- `score batch` now runs each sample through the same runner and config
+  builder as `score classify`, so it supports `--metadata`,
+  `--id-mapping`/`--genomes`, `--target-family`, `--config`, `--aai`,
+  `--streaming`/`--chunk-size`, `--clade-novel-species` and the other classify
+  options, and its tables have the same columns as classify. The default
+  `--pattern` now covers `*.blast.tsv.gz`, `*.mmseqs2.tsv.gz` and the
+  uncompressed forms (`--pattern` may be repeated). Sample names are derived by
+  stripping `.blast.tsv.gz` / `.mmseqs2.tsv.gz` / `.tsv(.gz)`; files that map
+  to the same sample name are now an error instead of silently overwriting each
+  other. `--workers` is deprecated (it was never implemented): it is hidden,
+  ignored and prints a warning.
 - mypy is now **blocking** in CI. `strict` stays on with a documented set of
   deferred error codes (mostly Polars-expression operator typing and untyped
   third-party libraries); the enforced core catches signature/return/overload
