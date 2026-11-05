@@ -22,6 +22,7 @@ REPORT_BASE_TEMPLATE: str = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
     <header class="report-header">
         <h1>{title}</h1>
         <div class="metadata">
@@ -31,11 +32,13 @@ REPORT_BASE_TEMPLATE: str = '''<!DOCTYPE html>
         </div>
     </header>
 
-    <nav class="tab-navigation">
+    <nav class="tab-navigation" aria-label="Report sections">
+        <div class="tab-list" role="tablist" aria-label="Report sections">
 {navigation}
+        </div>
     </nav>
 
-    <main class="report-content">
+    <main class="report-content" id="main-content">
 {content}
     </main>
 
@@ -60,7 +63,7 @@ REPORT_BASE_TEMPLATE: str = '''<!DOCTYPE html>
 # =============================================================================
 
 TAB_SECTION_TEMPLATE: str = '''
-<section id="{tab_id}" class="tab-section {active_class}">
+<section id="{tab_id}" class="tab-section {active_class}" role="tabpanel" aria-labelledby="tab-{tab_id}" tabindex="0">
     <h2 class="section-title">{section_title}</h2>
     {content}
 </section>
@@ -373,11 +376,14 @@ PLOT_CONTAINER_SIMPLE_TEMPLATE: str = '''
 
 COLLAPSIBLE_PANEL_TEMPLATE: str = '''
 <div class="collapsible-panel {default_state}" id="panel-{panel_id}">
-    <div class="collapsible-header" onclick="togglePanel('{panel_id}')">
-        <span class="collapsible-chevron">&#9654;</span>
+    <button type="button" class="collapsible-header" id="panel-header-{panel_id}"
+            aria-expanded="false" aria-controls="panel-body-{panel_id}"
+            onclick="togglePanel('{panel_id}')">
+        <span class="collapsible-chevron" aria-hidden="true">&#9654;</span>
         {title}
-    </div>
-    <div class="collapsible-body">
+    </button>
+    <div class="collapsible-body" id="panel-body-{panel_id}" role="region"
+         aria-labelledby="panel-header-{panel_id}">
         <div class="collapsible-content">
             {content}
         </div>
@@ -810,22 +816,77 @@ ENHANCED_SCORING_UNCERTAINTY_TYPES_TEMPLATE: str = '''
 # =============================================================================
 
 TAB_NAVIGATION_JS: str = '''
-// Tab navigation
-function showTab(tabId) {
-    document.querySelectorAll('.tab-section').forEach(s => s.classList.remove('active'));
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.getElementById(tabId).classList.add('active');
-    // Find the button that matches this tab
-    document.querySelectorAll('.tab-btn').forEach(b => {
-        if (b.getAttribute('onclick').indexOf(tabId) !== -1) b.classList.add('active');
-    });
-    window.dispatchEvent(new Event('resize'));
+// Tab navigation (WAI-ARIA tabs pattern with URL hash deep links)
+function mdmTabs() {
+    return Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
 }
+
+function showTab(tabId, opts) {
+    var target = document.getElementById(tabId);
+    if (!target || !target.classList.contains('tab-section')) return false;
+    document.querySelectorAll('.tab-section').forEach(function(s) { s.classList.remove('active'); });
+    target.classList.add('active');
+    mdmTabs().forEach(function(b) {
+        var on = b.getAttribute('aria-controls') === tabId;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+        b.setAttribute('tabindex', on ? '0' : '-1');
+    });
+    if (!opts || !opts.noHash) {
+        try { history.replaceState(null, '', '#' + tabId); }
+        catch (e) { /* file:// or sandboxed frame: ignore */ }
+    }
+    window.dispatchEvent(new Event('resize'));
+    return false;
+}
+
+function mdmTabFromHash() {
+    var id = (location.hash || '').replace(/^#/, '');
+    if (id) {
+        var el = document.getElementById(id);
+        if (el && el.classList.contains('tab-section')) { showTab(id, {noHash: true}); }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    mdmTabs().forEach(function(b) {
+        b.addEventListener('click', function() { showTab(b.getAttribute('aria-controls')); });
+        b.addEventListener('keydown', function(e) {
+            var tabs = mdmTabs();
+            var i = tabs.indexOf(b);
+            var next = -1;
+            if (e.key === 'ArrowRight') next = (i + 1) % tabs.length;
+            else if (e.key === 'ArrowLeft') next = (i - 1 + tabs.length) % tabs.length;
+            else if (e.key === 'Home') next = 0;
+            else if (e.key === 'End') next = tabs.length - 1;
+            else if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                showTab(b.getAttribute('aria-controls'));
+                return;
+            }
+            if (next >= 0) {
+                e.preventDefault();
+                tabs[next].focus();
+                showTab(tabs[next].getAttribute('aria-controls'));
+            }
+        });
+    });
+    mdmTabFromHash();
+    window.addEventListener('hashchange', mdmTabFromHash);
+    // Keep aria-expanded in sync with panels that start open.
+    document.querySelectorAll('.collapsible-panel').forEach(function(p) {
+        var h = p.querySelector('.collapsible-header');
+        if (h) h.setAttribute('aria-expanded', p.classList.contains('open') ? 'true' : 'false');
+    });
+});
 
 // Collapsible panel toggle
 function togglePanel(panelId) {
     var panel = document.getElementById('panel-' + panelId);
-    panel.classList.toggle('open');
+    if (!panel) return;
+    var open = panel.classList.toggle('open');
+    var h = panel.querySelector('.collapsible-header');
+    if (h) h.setAttribute('aria-expanded', open ? 'true' : 'false');
     window.dispatchEvent(new Event('resize'));
 }
 '''
@@ -1548,6 +1609,11 @@ def get_cell_class(classification: str) -> str:
         "Novel Species": "cell-novel-species",
         "Novel Genus": "cell-novel-genus",
         "Conserved Region": "cell-conserved",
+        "Species Boundary": "cell-boundary",
+        "Ambiguous": "cell-ambiguous",
+        "Ambiguous Within Genus": "cell-ambiguous-wg",
+        "Unclassified": "cell-unclassified",
+        "Off-target": "cell-off-target",
     }
     return class_map.get(classification, "")
 

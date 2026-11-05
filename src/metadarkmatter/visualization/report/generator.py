@@ -249,9 +249,12 @@ class ReportGenerator(
             active_class = " active" if is_active else ""
             safe_tab_id = html.escape(tab_id, quote=True)
             safe_label = html.escape(label)
+            selected = "true" if is_active else "false"
+            tabindex = "0" if is_active else "-1"
             nav_items.append(
-                f'        <button class="tab-btn{active_class}" '
-                f"onclick=\"showTab('{safe_tab_id}')\">{safe_label}</button>"
+                f'            <button type="button" role="tab" class="tab-btn{active_class}" '
+                f'id="tab-{safe_tab_id}" aria-controls="{safe_tab_id}" '
+                f'aria-selected="{selected}" tabindex="{tabindex}">{safe_label}</button>'
             )
 
         return "\n".join(nav_items)

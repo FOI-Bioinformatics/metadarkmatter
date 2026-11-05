@@ -4280,6 +4280,220 @@ COMMON_CSS: str = """
 """
 
 
+# =============================================================================
+# Accessibility, colourblind-safe palette and shared widgets
+# =============================================================================
+
+# Okabe-Ito categorical colours (see plots/base.py). Fill colours are used for
+# bars/dots/borders; the "-text" variants are darker (light theme) so category
+# names keep >= 4.5:1 contrast when used as text.
+PALETTE_LIGHT: str = """
+:root {
+    --success-color: #009E73;
+    --warning-color: #E69F00;
+    --danger-color:  #D55E00;
+    --info-color:    #999999;
+    --offtarget-color: #F0E442;
+    --text-muted:    #5b6270;
+    --cat-known: #009E73;
+    --cat-novel-species: #E69F00;
+    --cat-novel-genus: #D55E00;
+    --cat-species-boundary: #56B4E9;
+    --cat-ambiguous: #CC79A7;
+    --cat-ambiguous-wg: #0072B2;
+    --cat-conserved: #999999;
+    --cat-unclassified: #4D4D4D;
+    --cat-off-target: #F0E442;
+    --cat-known-text: #00755a;
+    --cat-novel-species-text: #8a5a00;
+    --cat-novel-genus-text: #b04a00;
+    --cat-species-boundary-text: #1a6e9e;
+    --cat-ambiguous-text: #9c3d78;
+    --cat-ambiguous-wg-text: #0072B2;
+    --cat-conserved-text: #5f6368;
+    --cat-unclassified-text: #4D4D4D;
+    --cat-off-target-text: #6f6500;
+    --focus-ring: #1d4ed8;
+}
+"""
+
+PALETTE_DARK: str = """
+:root {
+    --success-color: #009E73;
+    --warning-color: #E69F00;
+    --danger-color:  #D55E00;
+    --info-color:    #999999;
+    --offtarget-color: #F0E442;
+    --text-muted:    #94a3b8;
+    --cat-known: #009E73;
+    --cat-novel-species: #E69F00;
+    --cat-novel-genus: #D55E00;
+    --cat-species-boundary: #56B4E9;
+    --cat-ambiguous: #CC79A7;
+    --cat-ambiguous-wg: #0072B2;
+    --cat-conserved: #999999;
+    --cat-unclassified: #bdbdbd;
+    --cat-off-target: #F0E442;
+    --cat-known-text: #2fd3a5;
+    --cat-novel-species-text: #f2b632;
+    --cat-novel-genus-text: #ff8a3d;
+    --cat-species-boundary-text: #7cc7f0;
+    --cat-ambiguous-text: #e3a0c6;
+    --cat-ambiguous-wg-text: #6db3e8;
+    --cat-conserved-text: #b0b0b0;
+    --cat-unclassified-text: #cfcfcf;
+    --cat-off-target-text: #F0E442;
+    --focus-ring: #93c5fd;
+}
+"""
+
+ACCESSIBILITY_CSS: str = """
+/* ---- Skip link, focus, buttons-as-headers ---- */
+.skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+    background: var(--bg-card);
+    color: var(--text-primary);
+    padding: 0.5rem 1rem;
+    z-index: 1000;
+}
+.skip-link:focus { left: 0.5rem; top: 0.5rem; }
+
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.tab-section:focus { outline: none; }
+
+.tab-list { display: flex; flex-wrap: wrap; justify-content: center; }
+.tab-btn { font-family: inherit; }
+.tab-btn.active { border-bottom-width: 3px; }
+
+button.collapsible-header {
+    width: 100%;
+    border: none;
+    border-radius: 0;
+    text-align: left;
+    font-family: inherit;
+    margin: 0;
+}
+.collapsible-body { visibility: hidden; transition: max-height 0.3s ease, visibility 0s linear 0.3s; }
+.collapsible-panel.open .collapsible-body {
+    visibility: visible;
+    max-height: 60000px;
+    transition: max-height 0.3s ease, visibility 0s;
+}
+
+/* ---- Category colours (text uses the darker "-text" variants) ---- */
+.cell-known, .cat-known { color: var(--cat-known-text) !important; }
+.cell-novel-species, .cat-novel-species { color: var(--cat-novel-species-text) !important; }
+.cell-novel-genus, .cat-novel-genus { color: var(--cat-novel-genus-text) !important; }
+.cell-boundary, .cat-boundary { color: var(--cat-species-boundary-text) !important; }
+.cell-ambiguous, .cat-ambiguous { color: var(--cat-ambiguous-text) !important; }
+.cell-ambiguous-wg { color: var(--cat-ambiguous-wg-text) !important; }
+.cell-conserved { color: var(--cat-conserved-text) !important; }
+.cell-unclassified, .cat-unclassified { color: var(--cat-unclassified-text) !important; }
+.cell-off-target { color: var(--cat-off-target-text) !important; }
+.data-table td[class^="cell-"], .data-table td[class*=" cell-"] { font-weight: 600; }
+
+.cat-grid-cell.species-boundary { border-left-color: var(--cat-species-boundary); }
+.cat-grid-cell.ambiguous { border-left-color: var(--cat-ambiguous); }
+.cat-grid-cell.ambiguous-wg { border-left-color: var(--cat-ambiguous-wg); }
+.cat-grid-cell.conserved { border-left-color: var(--cat-conserved); }
+.cat-grid-cell.unclassified { border-left-color: var(--cat-unclassified); }
+.cat-grid-cell.off-target { border-left-color: var(--cat-off-target); }
+.diversity-card.off-target .diversity-pct { color: var(--cat-off-target-text); }
+.data-stat.off-target { border-left: 3px solid var(--cat-off-target); }
+.novel-metric.species .novel-metric-value { color: var(--cat-novel-species-text); }
+.novel-metric.genus .novel-metric-value { color: var(--cat-novel-genus-text); }
+.novel-metric.confidence .novel-metric-value { color: var(--cat-known-text); }
+
+.filter-chip.species-boundary.active { background: var(--cat-species-boundary); border-color: var(--cat-species-boundary); color: #10202b; }
+.filter-chip.ambiguous.active { background: var(--cat-ambiguous); border-color: var(--cat-ambiguous); color: #1f1020; }
+.filter-chip.ambiguous-wg.active { background: var(--cat-ambiguous-wg); border-color: var(--cat-ambiguous-wg); color: #ffffff; }
+.filter-chip.conserved.active { background: var(--cat-conserved); border-color: var(--cat-conserved); color: #111111; }
+.filter-chip.unclassified.active { background: var(--cat-unclassified); border-color: var(--cat-unclassified); color: #ffffff; }
+.filter-chip.off-target.active { background: var(--cat-off-target); border-color: var(--cat-off-target); color: #1a1a1a; }
+.filter-chip.known.active { color: #0a1511; }
+.filter-chip.novel-species.active { color: #1a1a1a; }
+.filter-chip.novel-genus.active { color: #140a02; }
+.legend-dot.off-target, .bar-segment.off-target { box-shadow: inset 0 0 0 1px rgba(0,0,0,0.35); }
+
+/* ---- Shared small widgets: exports, run info, comparison tables ---- */
+.export-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+    margin: 0.5rem 0;
+}
+.csv-btn {
+    padding: 0.35rem 0.8rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    font-size: 0.8rem;
+    font-family: inherit;
+    cursor: pointer;
+}
+.csv-btn:hover { background: var(--bg-tertiary); }
+
+.mdm-table-wrap { overflow-x: auto; margin: 0.5rem 0 1rem; }
+table.mdm-table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.8rem;
+    background: var(--bg-card);
+}
+table.mdm-table th, table.mdm-table td {
+    border: 1px solid var(--border-color);
+    padding: 0.35rem 0.6rem;
+    text-align: right;
+    color: var(--text-primary);
+}
+table.mdm-table th:first-child, table.mdm-table td:first-child { text-align: left; }
+table.mdm-table thead th {
+    background: var(--bg-collapsible);
+    font-weight: 600;
+    vertical-align: bottom;
+}
+table.mdm-table th.sortable { cursor: pointer; user-select: none; }
+table.mdm-table th.sortable:hover { background: var(--bg-tertiary); }
+table.mdm-table th.sortable button {
+    all: unset;
+    cursor: pointer;
+    font-weight: 600;
+}
+table.mdm-table th.sortable button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+table.mdm-table td.diag { background: rgba(0, 158, 115, 0.14); font-weight: 600; }
+table.mdm-table tfoot td, table.mdm-table td.total, table.mdm-table th.total { font-weight: 600; background: var(--bg-collapsible); }
+table.mdm-table td.zero { color: var(--text-muted); }
+table.mdm-table caption { text-align: left; font-weight: 600; padding: 0.25rem 0; color: var(--text-primary); }
+
+.mdm-note { font-size: 0.8rem; color: var(--text-secondary); margin: 0.4rem 0 0.8rem; line-height: 1.5; }
+
+.run-info dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; margin: 0.4rem 0 0.9rem; font-size: 0.8rem; }
+.run-info dt { color: var(--text-secondary); font-weight: 600; }
+.run-info dd { color: var(--text-primary); overflow-wrap: anywhere; margin: 0; }
+.run-info h4 { margin: 0.8rem 0 0.2rem; font-size: 0.85rem; color: var(--text-primary); }
+.run-info code { font-size: 0.78rem; }
+
+.species-stack-legend { display: flex; flex-wrap: wrap; gap: 0.25rem 0.9rem; font-size: 0.75rem; color: var(--text-secondary); }
+.truncation-notice {
+    background: var(--bg-secondary);
+    border-left: 3px solid var(--warning-color);
+    padding: 0.6rem 0.9rem;
+    margin-bottom: 0.75rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.82rem;
+    color: var(--text-primary);
+}
+@media (max-width: 480px) {
+    .run-info dl { grid-template-columns: 1fr; }
+    .tab-btn { padding: 0.6rem 0.7rem; }
+}
+"""
+
+
 def get_css_styles(theme: str = "light") -> str:
     """
     Get CSS styles for specified theme.
@@ -4291,11 +4505,14 @@ def get_css_styles(theme: str = "light") -> str:
         CSS stylesheet string
     """
     base_theme = DARK_THEME if theme.lower() == "dark" else LIGHT_THEME
+    palette = PALETTE_DARK if theme.lower() == "dark" else PALETTE_LIGHT
     return (
         base_theme
+        + palette
         + COMMON_CSS
         + NOVEL_SECTION_CSS
         + METHODS_SECTION_CSS
         + PHYLOGENY_STYLES
         + BORDERLINE_ANALYSIS_CSS
+        + ACCESSIBILITY_CSS
     )
