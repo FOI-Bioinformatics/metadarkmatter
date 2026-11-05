@@ -662,13 +662,20 @@ class DiversitySunburstChart(BasePlot):
 
         # Add taxonomic category level (outer ring)
         for diversity_status, categories in self.DIVERSITY_HIERARCHY.items():
+            if diversity_status not in status_list:
+                # Parent ring was skipped (e.g. no off-target reads); a child
+                # with a missing parent makes plotly render a blank chart.
+                continue
             base_color = DIVERSITY_COLORS[diversity_status]
             for _i, category in enumerate(categories):
+                child_value = self.summary.get(self.CATEGORY_TO_KEY[category], 0)
+                if child_value <= 0:
+                    continue
                 cat_id = f"{diversity_status}-{category}"
                 ids.append(cat_id)
                 labels.append(category)
                 parents.append(diversity_status)
-                values.append(self.summary.get(self.CATEGORY_TO_KEY[category], 0))
+                values.append(child_value)
                 # Use taxonomy color for detailed view
                 colors.append(TAXONOMY_COLORS.get(category, base_color))
 

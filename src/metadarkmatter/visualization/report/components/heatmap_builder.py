@@ -21,6 +21,9 @@ if TYPE_CHECKING:
     import polars as pl
 
 
+NOT_COMPUTED_COLOR = "#d1d5db"
+
+
 @dataclass
 class SimilarityStats:
     """Statistics computed from a similarity matrix."""
@@ -32,6 +35,21 @@ class SimilarityStats:
     same_category_count: int  # e.g., same species for ANI
     boundary_count: int
     different_category_count: int
+    # Unordered genome pairs (upper triangle). ``total_pairs`` = n(n-1)/2;
+    # ``missing_count`` = pairs with no computed value (0 or NaN in both
+    # directions). The three category counts above cover computed pairs only.
+    total_pairs: int = 0
+    missing_count: int = 0
+
+    @property
+    def computed_pairs(self) -> int:
+        """Number of genome pairs with a computed value."""
+        return self.total_pairs - self.missing_count
+
+    @property
+    def missing_fraction(self) -> float:
+        """Fraction of genome pairs with no computed value (0-1)."""
+        return self.missing_count / self.total_pairs if self.total_pairs else 0.0
 
 
 @dataclass
@@ -98,49 +116,101 @@ AAI_HEATMAP_CONFIG = HeatmapConfig(
 )
 
 
+def compute_missing_mask(z_data: np.ndarray) -> np.ndarray:
+    """Return a boolean matrix marking pairs without a computed value.
+
+    A pair is "missing" when both ``z[i, j]`` and ``z[j, i]`` are NaN or 0
+    (the ANI tools store uncomputed pairs as 0). The result is symmetric and
+    its diagonal is False.
+    """
+    valid = ~(np.isnan(z_data) | (z_data == 0.0))
+    missing = ~(valid | valid.T)
+    np.fill_diagonal(missing, False)
+    return np.asarray(missing, dtype=bool)
+
+
 def compute_similarity_stats(
     matrix: np.ndarray,
     default_value: float,
     same_threshold: float,
     boundary_lower: float,
+    missing_mask: np.ndarray | None = None,
 ) -> SimilarityStats:
     """
     Compute statistics from a similarity matrix.
 
+    Counts unordered genome pairs (upper triangle, diagonal excluded). Pairs
+    flagged in ``missing_mask`` are reported separately as not computed and
+    excluded from the min/max/mean and category counts.
+
     Args:
         matrix: Square similarity matrix (clustered)
-        default_value: Default value for missing data
+        default_value: Default value for missing data (kept for API
+            compatibility; missing pairs are identified by ``missing_mask``)
         same_threshold: Threshold for "same category" (e.g., 95 for species, 65 for genus)
         boundary_lower: Lower boundary for boundary zone
+        missing_mask: Boolean matrix, True where the pair was not computed.
+            When omitted, every pair is treated as computed.
 
     Returns:
         SimilarityStats with computed values
     """
-    # Get non-diagonal values
-    non_diag = matrix[~np.eye(matrix.shape[0], dtype=bool)]
-    non_zero = non_diag[non_diag > default_value]
+    n = matrix.shape[0]
+    iu = np.triu_indices(n, k=1)
+    pair_values = matrix[iu]
+    if missing_mask is not None:
+        pair_missing = missing_mask[iu]
+    else:
+        pair_missing = np.zeros(pair_values.shape, dtype=bool)
+    computed = pair_values[~pair_missing]
 
-    if len(non_zero) > 0:
-        min_val = float(np.min(non_zero))
-        max_val = float(np.max(non_zero))
-        mean_val = float(np.mean(non_zero))
+    if len(computed) > 0:
+        min_val = float(np.min(computed))
+        max_val = float(np.max(computed))
+        mean_val = float(np.mean(computed))
     else:
         min_val = max_val = mean_val = 0.0
 
-    # Category counts
-    same_count = int(np.sum(non_zero >= same_threshold))
-    diff_count = int(np.sum(non_zero < boundary_lower))
-    boundary_count = int(np.sum((non_zero >= boundary_lower) & (non_zero < same_threshold)))
+    # Category counts (unordered pairs)
+    same_count = int(np.sum(computed >= same_threshold))
+    diff_count = int(np.sum(computed < boundary_lower))
+    boundary_count = int(np.sum((computed >= boundary_lower) & (computed < same_threshold)))
 
     return SimilarityStats(
-        num_genomes=matrix.shape[0],
+        num_genomes=n,
         min_value=min_val,
         max_value=max_val,
         mean_value=mean_val,
         same_category_count=same_count,
         boundary_count=boundary_count,
         different_category_count=diff_count,
+        total_pairs=int(pair_values.size),
+        missing_count=int(pair_missing.sum()),
     )
+
+
+def count_missing_pairs(matrix: pl.DataFrame) -> tuple[int, int]:
+    """Count genome pairs without a computed value in a wide matrix frame.
+
+    Returns:
+        ``(missing_pairs, total_pairs)`` over unordered pairs.
+    """
+    cols = matrix.columns
+    if "genome" in cols:
+        accessions = [str(g) for g in matrix["genome"].to_list()]
+        value_cols = [c for c in cols if c != "genome"]
+        if set(value_cols) == set(accessions) and len(value_cols) == len(accessions):
+            z = matrix.select(accessions).to_numpy()
+        else:
+            z = matrix.drop("genome").to_numpy()
+    else:
+        z = matrix.to_numpy()
+    z = z.astype(float)
+    if z.ndim != 2 or z.shape[0] != z.shape[1]:
+        return 0, 0
+    n = z.shape[0]
+    missing = compute_missing_mask(z)
+    return int(np.triu(missing, k=1).sum()), n * (n - 1) // 2
 
 
 def _build_similarity_heatmap(
@@ -179,13 +249,26 @@ def _build_similarity_heatmap(
         genome_accessions = list(matrix_cols)
         z_data = matrix.to_numpy()
 
-    # Fill missing values (NaN or zero indicate uncomputed pairs)
+    z_data = z_data.astype(float)
+
+    # Pairs with no computed value (NaN or 0 in both directions)
+    missing = compute_missing_mask(z_data)
+    # Use whichever direction has a value for one-directional matrices
+    one_dir = (np.isnan(z_data) | (z_data == 0.0)) & ~missing
+    z_data = np.where(one_dir, z_data.T, z_data)
+
+    # Fill missing values for clustering only; they are not drawn as real values
     z_filled = np.where(np.isnan(z_data) | (z_data == 0.0), config.default_value, z_data)
 
     # Hierarchical clustering
     z_clustered, genome_accessions_ordered, clustering_succeeded = (
         perform_hierarchical_clustering(z_filled, genome_accessions, config.default_value)
     )
+
+    # Reorder the missing mask to match the clustered order
+    acc_to_idx = {acc: i for i, acc in enumerate(genome_accessions)}
+    order = [acc_to_idx[acc] for acc in genome_accessions_ordered]
+    missing_ordered = missing[np.ix_(order, order)]
 
     # Create labels
     genome_labels = [
@@ -198,10 +281,17 @@ def _build_similarity_heatmap(
         default_value=config.default_value,
         same_threshold=config.same_threshold,
         boundary_lower=config.boundary_lower,
+        missing_mask=missing_ordered,
     )
 
-    # Convert to Python list for JSON serialization
-    z_list = [[float(v) for v in row] for row in z_clustered]
+    # Convert to Python list for JSON serialization; missing cells are null
+    z_list: list[list[float | None]] = [
+        [
+            None if missing_ordered[i, j] else float(v)
+            for j, v in enumerate(row)
+        ]
+        for i, row in enumerate(z_clustered)
+    ]
 
     # Create heatmap
     fig = go.Figure(
@@ -212,6 +302,7 @@ def _build_similarity_heatmap(
             colorscale=config.colorscale,
             zmin=config.zmin,
             zmax=config.zmax,
+            hoverongaps=False,
             colorbar={
                 "title": f"{config.metric_name} (%)",
                 "tickvals": config.tick_vals,
@@ -224,6 +315,30 @@ def _build_similarity_heatmap(
             ),
         )
     )
+
+    if stats.missing_count > 0:
+        # Grey overlay with its own hover text for pairs that were not computed
+        grey_z: list[list[float | None]] = [
+            [1.0 if missing_ordered[i, j] else None for j in range(len(genome_labels))]
+            for i in range(len(genome_labels))
+        ]
+        fig.add_trace(
+            go.Heatmap(
+                z=grey_z,
+                x=genome_labels,
+                y=genome_labels,
+                colorscale=[[0.0, NOT_COMPUTED_COLOR], [1.0, NOT_COMPUTED_COLOR]],
+                zmin=0,
+                zmax=1,
+                showscale=False,
+                hoverongaps=False,
+                hovertemplate=(
+                    "Genome 1: %{y}<br>"
+                    "Genome 2: %{x}<br>"
+                    f"{config.metric_name}: not computed<extra></extra>"
+                ),
+            )
+        )
 
     # Conditional title
     title = f"{config.metric_name} Matrix Heatmap"
@@ -293,6 +408,14 @@ def _build_stats_cards(stats: SimilarityStats, config: HeatmapConfig) -> str:
     Returns:
         HTML string with metric cards
     """
+    not_computed_card = ""
+    if stats.missing_count > 0:
+        not_computed_card = f"""
+        <div class="metric-card muted">
+            <div class="metric-value">{stats.missing_count:,}</div>
+            <div class="metric-label">Genome pairs not computed</div>
+            <div class="metric-subtext">{stats.missing_fraction * 100:.1f}% of {stats.total_pairs:,} pairs (drawn grey)</div>
+        </div>"""
     return f"""
     <div class="metric-cards">
         <div class="metric-card">
@@ -303,25 +426,46 @@ def _build_stats_cards(stats: SimilarityStats, config: HeatmapConfig) -> str:
         <div class="metric-card">
             <div class="metric-value">{stats.mean_value:.1f}%</div>
             <div class="metric-label">Mean {config.metric_name}</div>
-            <div class="metric-subtext">Range: {stats.min_value:.1f}% - {stats.max_value:.1f}%</div>
+            <div class="metric-subtext">Computed pairs; range {stats.min_value:.1f}% - {stats.max_value:.1f}%</div>
         </div>
         <div class="metric-card success">
-            <div class="metric-value">{stats.same_category_count}</div>
-            <div class="metric-label">Genome Pairs</div>
+            <div class="metric-value">{stats.same_category_count:,}</div>
+            <div class="metric-label">Genome pairs</div>
             <div class="metric-subtext">{config.same_label}</div>
         </div>
         <div class="metric-card warning">
-            <div class="metric-value">{stats.boundary_count}</div>
-            <div class="metric-label">Genome Pairs</div>
+            <div class="metric-value">{stats.boundary_count:,}</div>
+            <div class="metric-label">Genome pairs</div>
             <div class="metric-subtext">{config.boundary_label}</div>
         </div>
         <div class="metric-card danger">
-            <div class="metric-value">{stats.different_category_count}</div>
-            <div class="metric-label">Genome Pairs</div>
+            <div class="metric-value">{stats.different_category_count:,}</div>
+            <div class="metric-label">Genome pairs</div>
             <div class="metric-subtext">{config.different_label}</div>
-        </div>
+        </div>{not_computed_card}
     </div>
     """
+
+
+def build_missing_pairs_note(missing_count: int, total_pairs: int, metric_name: str) -> str:
+    """Build a visible note about uncomputed pairs ("" when there are none)."""
+    if missing_count <= 0 or total_pairs <= 0:
+        return ""
+    default = ANI_HEATMAP_CONFIG.default_value if metric_name == "ANI" else AAI_HEATMAP_CONFIG.default_value
+    if metric_name == "ANI":
+        consequence = (
+            f"In classification, missing pairs are treated as {default:.0f}% ANI "
+            f"(placement uncertainty U = {100 - default:.0f}%)."
+        )
+    else:
+        consequence = f"They are shown grey and are not drawn as {default:.0f}% {metric_name}."
+    return (
+        '<div class="data-note missing-pairs-note" role="note">'
+        f"<strong>{missing_count:,} of {total_pairs:,} genome pairs "
+        f"({missing_count / total_pairs * 100:.1f}%) have no computed {metric_name}</strong> "
+        f"(stored as 0 or absent) and are drawn grey. {consequence}"
+        "</div>"
+    )
 
 
 def build_ani_stats_cards(stats: SimilarityStats) -> str:
@@ -334,7 +478,7 @@ def build_ani_stats_cards(stats: SimilarityStats) -> str:
     Returns:
         HTML string with metric cards
     """
-    return _build_stats_cards(stats, ANI_HEATMAP_CONFIG)
+    return _build_stats_cards(stats, ANI_HEATMAP_CONFIG) + build_missing_pairs_note(stats.missing_count, stats.total_pairs, "ANI")
 
 
 def build_aai_stats_cards(stats: SimilarityStats) -> str:
@@ -347,7 +491,7 @@ def build_aai_stats_cards(stats: SimilarityStats) -> str:
     Returns:
         HTML string with metric cards
     """
-    return _build_stats_cards(stats, AAI_HEATMAP_CONFIG)
+    return _build_stats_cards(stats, AAI_HEATMAP_CONFIG) + build_missing_pairs_note(stats.missing_count, stats.total_pairs, "AAI")
 
 
 def build_phylogenetic_context_heatmap(

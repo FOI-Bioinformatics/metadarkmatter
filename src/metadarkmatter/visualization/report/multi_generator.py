@@ -30,7 +30,9 @@ from metadarkmatter.visualization.plots.multi_sample import (
     MultiSampleNoveltyComparison,
     MultiSampleScatterMatrix,
     MultiSampleTimeSeries,
+    present_categories,
 )
+from metadarkmatter.visualization.report.assets import get_plotly_script_tag
 from metadarkmatter.visualization.report.styles import get_css_styles
 
 # Version for report footer
@@ -80,16 +82,13 @@ MULTI_REPORT_TEMPLATE = '''<!DOCTYPE html>
 '''
 
 SAMPLE_TABLE_TEMPLATE = '''
-<div class="table-container">
+<div class="table-container" style="overflow-x: auto;">
     <table class="data-table">
         <thead>
             <tr>
                 <th>Sample</th>
                 <th>Total Reads</th>
-                <th>Known Species</th>
-                <th>Novel Species</th>
-                <th>Novel Genus</th>
-                <th>Conserved</th>
+{category_headers}
                 <th>Novel %</th>
                 <th>Mean Novelty</th>
             </tr>
@@ -100,17 +99,6 @@ SAMPLE_TABLE_TEMPLATE = '''
     </table>
 </div>
 '''
-
-SAMPLE_ROW_TEMPLATE = '''<tr>
-    <td><strong>{name}</strong></td>
-    <td>{total}</td>
-    <td class="cell-known">{known}</td>
-    <td class="cell-novel-species">{novel_sp}</td>
-    <td class="cell-novel-genus">{novel_gen}</td>
-    <td class="cell-conserved">{conserved}</td>
-    <td>{novel_pct:.1f}%</td>
-    <td>{mean_novelty:.2f}</td>
-</tr>'''
 
 PLOT_CONTAINER_TEMPLATE = '''
 <div class="plot-container full-width">
@@ -128,7 +116,8 @@ class MultiSampleConfig:
     title: str = "Multi-Sample Comparison Report"
     theme: str = "light"
     plot_config: PlotConfig | None = None
-    include_plotlyjs: str = "cdn"  # 'cdn', 'embed', or path
+    include_plotlyjs: str = "cdn"  # 'cdn' (script tag per report_mode), or 'embed' (none)
+    report_mode: str = "offline"  # 'offline' inlines plotly.js; 'cdn' links it
 
 
 class MultiSampleReportGenerator:
@@ -177,6 +166,16 @@ class MultiSampleReportGenerator:
         novel_sp = count_map.get("Novel Species", 0)
         novel_gen = count_map.get("Novel Genus", 0)
         conserved = count_map.get("Conserved Region", 0)
+        boundary = count_map.get("Species Boundary", 0)
+        ambiguous = count_map.get("Ambiguous", 0)
+        ambiguous_wg = count_map.get("Ambiguous Within Genus", 0)
+        unclassified = count_map.get("Unclassified", 0)
+        off_target = count_map.get("Off-target", 0)
+        # Any other label (or null) so that category shares always sum to 100%
+        other = total - (
+            known + novel_sp + novel_gen + conserved + boundary
+            + ambiguous + ambiguous_wg + unclassified + off_target
+        )
 
         return {
             "total_reads": total,
@@ -184,6 +183,12 @@ class MultiSampleReportGenerator:
             "novel_species": novel_sp,
             "novel_genus": novel_gen,
             "conserved_regions": conserved,
+            "species_boundary": boundary,
+            "ambiguous": ambiguous,
+            "ambiguous_within_genus": ambiguous_wg,
+            "unclassified": unclassified,
+            "off_target": off_target,
+            "other": other,
             "novel_percentage": (novel_sp + novel_gen) / total * 100 if total > 0 else 0,
             "mean_novelty_index": df["novelty_index"].mean() or 0.0,
             "mean_placement_uncertainty": df["placement_uncertainty"].mean() or 0.0,
@@ -316,11 +321,11 @@ class MultiSampleReportGenerator:
         # Build Plotly JS
         plotly_js = self._build_plotly_js()
 
-        # Build CDN script tag based on config
-        if self.config.include_plotlyjs == "cdn":
-            plotly_cdn_script = '    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>'
-        else:
+        # Same Plotly embedding as the single-sample report (inline by default)
+        if self.config.include_plotlyjs == "embed":
             plotly_cdn_script = ""
+        else:
+            plotly_cdn_script = get_plotly_script_tag(self.config.report_mode)
 
         return MULTI_REPORT_TEMPLATE.format(
             title=html.escape(self.config.title),
@@ -335,24 +340,32 @@ class MultiSampleReportGenerator:
         )
 
     def _build_summary_table(self) -> str:
-        """Build the sample summary table."""
+        """Build the sample summary table (all categories present)."""
+        categories = present_categories(self.summaries)
+        headers = "\n".join(f"                <th>{html.escape(label)}</th>" for label, _ in categories)
         rows = []
         for name, summary in self.summaries.items():
-            rows.append(SAMPLE_ROW_TEMPLATE.format(
-                name=html.escape(str(name)),
-                total=format_count(summary["total_reads"]),
-                known=format_count(summary["known_species"]),
-                novel_sp=format_count(summary["novel_species"]),
-                novel_gen=format_count(summary["novel_genus"]),
-                conserved=format_count(summary["conserved_regions"]),
-                novel_pct=summary["novel_percentage"],
-                mean_novelty=summary["mean_novelty_index"],
-            ))
+            cells = "".join(
+                f'<td title="{summary.get(key, 0):,} reads">{format_count(summary.get(key, 0))}</td>'
+                for _label, key in categories
+            )
+            rows.append(
+                "<tr>"
+                f"<td><strong>{html.escape(str(name))}</strong></td>"
+                f'<td title="{summary["total_reads"]:,} reads">{format_count(summary["total_reads"])}</td>'
+                f"{cells}"
+                f'<td>{summary["novel_percentage"]:.1f}%</td>'
+                f'<td>{summary["mean_novelty_index"]:.2f}</td>'
+                "</tr>"
+            )
 
-        return SAMPLE_TABLE_TEMPLATE.format(rows="\n".join(rows))
+        return SAMPLE_TABLE_TEMPLATE.format(
+            category_headers=headers, rows="\n".join(rows)
+        )
 
     def _register_plot(self, plot_id: str, fig: Any) -> None:
-        """Register a plot for later JS initialization."""
+        """Register a plot for later JS initialization (responsive width)."""
+        fig.update_layout(width=None, autosize=True)
         self._plot_data[plot_id] = fig.to_json()
 
     def _build_plotly_js(self) -> str:

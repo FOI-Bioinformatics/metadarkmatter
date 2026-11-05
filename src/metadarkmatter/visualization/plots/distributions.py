@@ -14,6 +14,8 @@ from metadarkmatter.visualization.plots.base import (
     BasePlot,
     PlotConfig,
     ThresholdConfig,
+    add_threshold_lines_with_legend,
+    place_legend_below,
 )
 
 if TYPE_CHECKING:
@@ -76,6 +78,7 @@ class NoveltyHistogram(BasePlot):
         hist_kwargs = {
             "x": novelty_values,
             "name": "Novelty Index",
+            "showlegend": False,
             "marker_color": "#667eea",
             "opacity": 0.75,
             "hovertemplate": "Novelty: %{x:.1f}<br>Count: %{y}<extra></extra>",
@@ -115,16 +118,7 @@ class NoveltyHistogram(BasePlot):
                 ),
             ]
 
-            for value, label, color in thresholds:
-                fig.add_vline(
-                    x=value,
-                    line_dash="dash",
-                    line_color=color,
-                    opacity=0.8,
-                    annotation_text=label,
-                    annotation_position="top",
-                    annotation_font_size=9,
-                )
+            add_threshold_lines_with_legend(fig, thresholds)
 
         # Layout
         fig.update_layout(
@@ -136,7 +130,10 @@ class NoveltyHistogram(BasePlot):
 
         fig.update_xaxes(range=[0, max(30, max(novelty_values, default=0.0) * 1.1)])
 
-        return self._apply_config(fig)
+        fig = self._apply_config(fig)
+        if self.show_thresholds:
+            place_legend_below(fig)
+        return fig
 
 
 class UncertaintyHistogram(BasePlot):
@@ -188,6 +185,7 @@ class UncertaintyHistogram(BasePlot):
         hist_kwargs = {
             "x": uncertainty_values,
             "name": "Placement Uncertainty",
+            "showlegend": False,
             "marker_color": "#764ba2",
             "opacity": 0.75,
             "hovertemplate": "Uncertainty: %{x:.1f}<br>Count: %{y}<extra></extra>",
@@ -222,16 +220,7 @@ class UncertaintyHistogram(BasePlot):
                 ),
             ]
 
-            for value, label, color in thresholds:
-                fig.add_vline(
-                    x=value,
-                    line_dash="dash",
-                    line_color=color,
-                    opacity=0.8,
-                    annotation_text=label,
-                    annotation_position="top",
-                    annotation_font_size=9,
-                )
+            add_threshold_lines_with_legend(fig, thresholds)
 
         # Layout
         fig.update_layout(
@@ -243,7 +232,10 @@ class UncertaintyHistogram(BasePlot):
 
         fig.update_xaxes(range=[0, max(20, max(uncertainty_values, default=0.0) * 1.1)])
 
-        return self._apply_config(fig)
+        fig = self._apply_config(fig)
+        if self.show_thresholds:
+            place_legend_below(fig)
+        return fig
 
 
 class IdentityHistogram(BasePlot):
@@ -292,6 +284,7 @@ class IdentityHistogram(BasePlot):
                 x=identity_values,
                 nbinsx=self.nbins,
                 name="Top Hit Identity",
+                showlegend=False,
                 marker_color="#2ecc71",
                 opacity=0.75,
                 hovertemplate="Identity: %{x:.1f}%<br>Count: %{y}<extra></extra>",
@@ -318,16 +311,7 @@ class IdentityHistogram(BasePlot):
                 ),
             ]
 
-            for value, label, color in thresholds:
-                fig.add_vline(
-                    x=value,
-                    line_dash="dash",
-                    line_color=color,
-                    opacity=0.8,
-                    annotation_text=label,
-                    annotation_position="top",
-                    annotation_font_size=9,
-                )
+            add_threshold_lines_with_legend(fig, thresholds)
 
         # Layout
         fig.update_layout(
@@ -339,7 +323,10 @@ class IdentityHistogram(BasePlot):
 
         fig.update_xaxes(range=[min(70, min(identity_values, default=100.0) - 5), 100])
 
-        return self._apply_config(fig)
+        fig = self._apply_config(fig)
+        if self.show_thresholds:
+            place_legend_below(fig)
+        return fig
 
 
 class CombinedDistributionPlot(BasePlot):

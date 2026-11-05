@@ -20,8 +20,10 @@ from metadarkmatter.visualization.report.components.heatmap_builder import (
     build_aai_stats_cards,
     build_ani_heatmap,
     build_ani_stats_cards,
+    build_missing_pairs_note,
     build_phylogenetic_context_heatmap,
     compute_similarity_stats,
+    count_missing_pairs,
 )
 
 __all__ = [
@@ -31,8 +33,10 @@ __all__ = [
     "build_ani_heatmap",
     "build_ani_stats_cards",
     "build_extended_similarity_matrix",
+    "build_missing_pairs_note",
     "build_phylogenetic_context_heatmap",
     "compute_similarity_stats",
+    "count_missing_pairs",
     "estimate_novel_to_novel_similarity",
     "estimate_novel_to_reference_similarity",
     "perform_hierarchical_clustering",

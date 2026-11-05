@@ -12,6 +12,10 @@ import polars as pl
 from metadarkmatter.visualization.plots.base import (
     format_count,
 )
+from metadarkmatter.visualization.report.components import (
+    build_missing_pairs_note,
+    count_missing_pairs,
+)
 from metadarkmatter.visualization.report.models import (
     TaxonomicSummary,
     _BayesianMetrics,
@@ -22,7 +26,7 @@ from metadarkmatter.visualization.report.sections._base import _ReportBase
 from metadarkmatter.visualization.report.templates import (
     CATEGORY_GRID_CELL,
     CATEGORY_GRID_TEMPLATE,
-    KPI_CARD_TEMPLATE,
+    KPI_CARD_TITLED_TEMPLATE,
     KPI_STRIP_TEMPLATE,
     METRIC_CARD_TEMPLATE,
     METRIC_CARDS_CONTAINER,
@@ -265,25 +269,35 @@ class SummaryMixin(_ReportBase):
         s = self.summary
         total = s.total_reads if s.total_reads > 0 else 1
 
-        # 1. KPI Strip
+        # 1. KPI Strip (exact counts in tooltips; values may be abbreviated)
+        def _kpi(color_class: str, value: str, label: str, count: int, pct: float | None = None) -> str:
+            tip = f"{label}: {count:,} reads"
+            if pct is not None:
+                tip += f" ({pct:.1f}% of {s.total_reads:,} reads)"
+            return KPI_CARD_TITLED_TEMPLATE.format(
+                color_class=color_class, value=value, label=label, title=tip
+            )
+
         kpi_cards = []
-        kpi_cards.append(KPI_CARD_TEMPLATE.format(
-            color_class="accent", value=format_count(s.total_reads), label="Total Reads"
+        kpi_cards.append(_kpi(
+            "accent", format_count(s.total_reads), "Total Reads", s.total_reads
         ))
-        kpi_cards.append(KPI_CARD_TEMPLATE.format(
-            color_class="known", value=f"{s.diversity_known_pct:.1f}%", label="Known"
+        kpi_cards.append(_kpi(
+            "known", f"{s.diversity_known_pct:.1f}%", "Known",
+            s.diversity_known, s.diversity_known_pct,
         ))
-        kpi_cards.append(KPI_CARD_TEMPLATE.format(
-            color_class="novel", value=f"{s.diversity_novel_pct:.1f}%", label="Novel"
+        kpi_cards.append(_kpi(
+            "novel", f"{s.diversity_novel_pct:.1f}%", "Novel",
+            s.diversity_novel, s.diversity_novel_pct,
         ))
-        kpi_cards.append(KPI_CARD_TEMPLATE.format(
-            color_class="uncertain", value=f"{s.diversity_uncertain_pct:.1f}%", label="Uncertain"
+        kpi_cards.append(_kpi(
+            "uncertain", f"{s.diversity_uncertain_pct:.1f}%", "Uncertain",
+            s.diversity_uncertain, s.diversity_uncertain_pct,
         ))
         if s.diversity_off_target > 0:
-            kpi_cards.append(KPI_CARD_TEMPLATE.format(
-                color_class="off-target",
-                value=f"{s.diversity_off_target_pct:.1f}%",
-                label="Off-target",
+            kpi_cards.append(_kpi(
+                "off-target", f"{s.diversity_off_target_pct:.1f}%", "Off-target",
+                s.diversity_off_target, s.diversity_off_target_pct,
             ))
         kpi_html = KPI_STRIP_TEMPLATE.format(cards="\n".join(kpi_cards))
 
@@ -352,7 +366,7 @@ class SummaryMixin(_ReportBase):
             ))
         category_html = CATEGORY_GRID_TEMPLATE.format(cells="\n".join(grid_cells))
 
-        content = kpi_html + bar_html + two_col_html + category_html
+        content = kpi_html + bar_html + self._build_ani_qc_note() + two_col_html + category_html
 
         return TAB_SECTION_TEMPLATE.format(
             tab_id="summary",
@@ -360,6 +374,13 @@ class SummaryMixin(_ReportBase):
             section_title="Summary",
             content=content,
         )
+
+    def _build_ani_qc_note(self) -> str:
+        """QC note on the Summary tab when the ANI matrix has uncomputed pairs."""
+        if self.ani_matrix is None or len(self.ani_matrix) == 0:
+            return ""
+        missing, total = count_missing_pairs(self.ani_matrix)
+        return build_missing_pairs_note(missing, total, "ANI")
 
     def _build_top_species_table(self) -> str:
         """Build a compact top species mini-table for the summary tab."""
@@ -429,12 +450,18 @@ class SummaryMixin(_ReportBase):
             if len(species_counts) > 0:
                 top_sp = species_counts["species"][0]
                 top_count = species_counts["len"][0]
-                top_pct = top_count / s.total_reads * 100 if s.total_reads > 0 else 0
+                # Same denominator as the Top Species table: off-target reads
+                # are excluded from both numerator and denominator.
+                species_total = int(species_counts["len"].sum())
+                top_pct = top_count / species_total * 100 if species_total > 0 else 0
+                denom_label = (
+                    "of on-target reads" if s.off_target > 0 else "of reads"
+                )
                 cards.append(OVERVIEW_FINDING_CARD_TEMPLATE.format(
                     card_class="species",
                     icon="S",
                     headline=f"Dominant species: {html.escape(str(top_sp))}",
-                    detail=f"{top_pct:.0f}% of reads ({top_count:,})",
+                    detail=f"{top_pct:.0f}% {denom_label} ({top_count:,} of {species_total:,})",
                     link="",
                 ))
 

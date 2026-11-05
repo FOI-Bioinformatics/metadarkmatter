@@ -10,6 +10,8 @@ import polars as pl
 from metadarkmatter.core.metadata import GenomeMetadata
 from metadarkmatter.visualization.plots.base import (
     BAYESIAN_CATEGORY_COLORS,
+    add_threshold_lines_with_legend,
+    place_legend_below,
 )
 from metadarkmatter.visualization.report.models import (
     ReportConfig,
@@ -77,7 +79,13 @@ class _ReportBase:
         return {acc: self._get_genome_label(acc) for acc in accessions}
 
     def _register_plot(self, plot_id: str, fig: go.Figure) -> None:
-        """Register a plot for later JS initialization."""
+        """Register a plot for later JS initialization.
+
+        Fixed pixel widths are dropped so every plot fills its container
+        (``autosize`` + ``responsive`` config) instead of overflowing on
+        narrow screens; heights are kept.
+        """
+        fig.update_layout(width=None, autosize=True)
         plot_json = fig.to_json()
         self._plot_data[plot_id] = plot_json
 
@@ -120,14 +128,18 @@ class _ReportBase:
         fig.add_trace(go.Histogram(
             x=data,
             nbinsx=nbins,
+            showlegend=False,
             marker_color=color,
             hovertemplate=f"{x_label}: %{{x:.2f}}<br>Count: %{{y}}<extra></extra>",
         ))
 
         if thresholds:
-            for x_val, dash, lcolor, annotation in thresholds:
-                fig.add_vline(x=x_val, line_dash=dash, line_color=lcolor,
-                              annotation_text=annotation)
+            # Labels go to a legend below the plot: top-of-line annotations
+            # overlap when thresholds are close together.
+            add_threshold_lines_with_legend(
+                fig,
+                [(x_val, annotation, lcolor, dash) for x_val, dash, lcolor, annotation in thresholds],
+            )
 
         layout_kwargs: dict[str, Any] = {
             "title": title,
@@ -140,6 +152,8 @@ class _ReportBase:
         if x_range is not None:
             layout_kwargs["xaxis"] = {"range": x_range}
         fig.update_layout(**layout_kwargs)
+        if thresholds:
+            place_legend_below(fig)
 
         self._register_plot(plot_id, fig)
         return ""
@@ -211,11 +225,12 @@ class _ReportBase:
             "yaxis_title": y_label,
             "template": "plotly_white",
             "height": height,
-            "legend": {"orientation": "h", "y": -0.15},
         }
         if y_range is not None:
             layout_kwargs["yaxis"] = {"range": y_range}
         fig.update_layout(**layout_kwargs)
+        # Legend below (outside) the plot area so it does not cover data
+        place_legend_below(fig)
 
         self._register_plot(plot_id, fig)
         return ""

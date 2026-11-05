@@ -39,6 +39,12 @@ def _fmt2(value: object) -> str:
     return "-" if num is None else f"{num:.2f}"
 
 
+def _fmt1(value: object) -> str:
+    """Format a numeric cell with one decimal; null/non-numeric -> "-"."""
+    num = _safe_float(value)
+    return "-" if num is None else f"{num:.1f}"
+
+
 class DataMixin(_ReportBase):
     """Data report-section builders."""
 
@@ -110,25 +116,40 @@ class DataMixin(_ReportBase):
             total_rows=len(table_df),
         )
 
-        # Add JavaScript to show enhanced scoring columns and guide if data available
+        # Offer optional columns only when the data behind them exists
+        # (legacy sub-scores are absent without --include-legacy-scores).
+        optional_cols = {
+            11: "uncertainty_type",
+            12: "inferred_uncertainty",
+            13: "discovery_score",
+            14: "identity_confidence",
+            15: "placement_confidence",
+            16: "legacy_call",
+            17: "confidence_score",
+        }
+        available = [
+            i for i, col in optional_cols.items()
+            if col in self.df.columns and self.df[col].drop_nulls().len() > 0
+        ]
         enhanced_js = ""
-        if self.summary.has_enhanced_scoring or self.summary.has_inferred_uncertainty:
-            enhanced_js = """
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-    // Show enhanced scoring column options
-    var divider = document.getElementById('enhancedColsDivider');
-    if (divider) divider.style.display = 'block';
-    for (var i = 11; i <= 15; i++) {
-        var label = document.getElementById('colLabel' + i);
-        if (label) label.style.display = 'block';
-    }
-    // Show enhanced guide section
-    var enhancedGuide = document.getElementById('enhancedGuide');
-    if (enhancedGuide) enhancedGuide.style.display = 'block';
-});
-</script>
-"""
+        if available:
+            enhanced_js = (
+                "\n<script>\n"
+                "document.addEventListener('DOMContentLoaded', function() {\n"
+                f"    var cols = {available!r};\n"
+                "    var divider = document.getElementById('enhancedColsDivider');\n"
+                "    if (divider) divider.style.display = 'block';\n"
+                "    cols.forEach(function(i) {\n"
+                "        var label = document.getElementById('colLabel' + i);\n"
+                "        if (label) label.style.display = 'block';\n"
+                "    });\n"
+                "    var enhancedGuide = document.getElementById('enhancedGuide');\n"
+                "    if (enhancedGuide && cols.some(function(i) { return i <= 15; })) {\n"
+                "        enhancedGuide.style.display = 'block';\n"
+                "    }\n"
+                "});\n"
+                "</script>\n"
+            )
 
         # Combine all sections
         content = (
@@ -209,6 +230,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 discovery_score=discovery_str,
                 identity_confidence=id_conf_str,
                 placement_confidence=pl_conf_str,
+                legacy_call=html.escape(str(row.get("legacy_call") or "-")),
+                confidence_score=_fmt1(row.get("confidence_score")),
             )
 
         return rows_html

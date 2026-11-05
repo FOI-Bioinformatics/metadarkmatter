@@ -97,6 +97,13 @@ KPI_CARD_TEMPLATE: str = '''
 </div>
 '''
 
+KPI_CARD_TITLED_TEMPLATE: str = '''
+<div class="kpi-card {color_class}" title="{title}">
+    <div class="kpi-value">{value}</div>
+    <div class="kpi-label">{label}</div>
+</div>
+'''
+
 TWO_COLUMN_ROW_TEMPLATE: str = '''
 <div class="two-col-row">
     <div class="col-left" style="flex: {left_flex};">
@@ -113,7 +120,7 @@ TOP_SPECIES_TABLE_TEMPLATE: str = '''
     <h4 class="card-section-title">Top Species</h4>
     <table class="mini-table">
         <thead>
-            <tr><th>Species</th><th>Reads</th><th>%</th></tr>
+            <tr><th>Species</th><th>Reads</th><th title="Share of on-target reads (off-target reads excluded)">% of on-target</th></tr>
         </thead>
         <tbody>
 {rows}
@@ -415,7 +422,7 @@ DATA_QUICK_FILTERS_TEMPLATE: str = '''
 <div class="quick-filters">
     <div class="filter-row">
         <span class="filter-label">Category:</span>
-        <button class="filter-chip active" data-filter="" onclick="quickFilter(this, '')">All</button>
+        <button class="filter-chip active" data-filter="" onclick="clearAllFilters()" title="Show all reads and reset every filter">All</button>
         <button class="filter-chip known" data-filter="Known Species" onclick="quickFilter(this, 'Known Species')">Known Species ({known_count})</button>
         <button class="filter-chip novel-species" data-filter="Novel Species" onclick="quickFilter(this, 'Novel Species')">Novel Species ({novel_species_count})</button>
         <button class="filter-chip novel-genus" data-filter="Novel Genus" onclick="quickFilter(this, 'Novel Genus')">Novel Genus ({novel_genus_count})</button>
@@ -425,6 +432,7 @@ DATA_QUICK_FILTERS_TEMPLATE: str = '''
         <button class="filter-chip conserved" data-filter="Conserved Region" onclick="quickFilter(this, 'Conserved Region')">Conserved ({conserved_count})</button>
         <button class="filter-chip unclassified" data-filter="Unclassified" onclick="quickFilter(this, 'Unclassified')">Unclassified ({unclassified_count})</button>
         {off_target_chip}
+        <button class="clear-btn data-table-clear" id="clearFiltersTop" onclick="clearAllFilters()" style="display:none;">Clear filters</button>
     </div>
     <div class="filter-row">
         <span class="filter-label">Novelty:</span>
@@ -478,6 +486,14 @@ DATA_COLUMN_GUIDE_TEMPLATE: str = '''
             <div class="guide-item">
                 <span class="guide-col">Classification</span>
                 <span class="guide-desc">Taxonomic call: Known Species, Novel Species, Novel Genus, Ambiguous, or Conserved Region</span>
+            </div>
+            <div class="guide-item">
+                <span class="guide-col">Legacy Call</span>
+                <span class="guide-desc">Call from the hard-threshold cascade, for comparison with the Bayesian Classification (optional column)</span>
+            </div>
+            <div class="guide-item">
+                <span class="guide-col">Confidence</span>
+                <span class="guide-desc">(1 - posterior entropy / log2 6) x 100; higher = one category clearly dominates (optional column)</span>
             </div>
             <div class="guide-item">
                 <span class="guide-col">Is Novel</span>
@@ -539,6 +555,8 @@ DATA_TABLE_TEMPLATE: str = '''
                         <label id="colLabel13" style="display:none;"><input type="checkbox" data-col="13" onchange="toggleColumn(13)"> Discovery Score</label>
                         <label id="colLabel14" style="display:none;"><input type="checkbox" data-col="14" onchange="toggleColumn(14)"> Identity Conf.</label>
                         <label id="colLabel15" style="display:none;"><input type="checkbox" data-col="15" onchange="toggleColumn(15)"> Placement Conf.</label>
+                        <label id="colLabel16" style="display:none;"><input type="checkbox" data-col="16" onchange="toggleColumn(16)"> Legacy Call</label>
+                        <label id="colLabel17" style="display:none;"><input type="checkbox" data-col="17" onchange="toggleColumn(17)"> Confidence Score</label>
                     </div>
                 </div>
                 <button class="export-btn" onclick="exportTableTSV()">Export TSV</button>
@@ -569,6 +587,8 @@ DATA_TABLE_TEMPLATE: str = '''
                     <th data-col="13" onclick="sortTable(13)" style="display:none;">Discovery <span class="sort-icon">-</span></th>
                     <th data-col="14" onclick="sortTable(14)" style="display:none;">Id. Conf. <span class="sort-icon">-</span></th>
                     <th data-col="15" onclick="sortTable(15)" style="display:none;">Pl. Conf. <span class="sort-icon">-</span></th>
+                    <th data-col="16" onclick="sortTable(16)" style="display:none;">Legacy Call <span class="sort-icon">-</span></th>
+                    <th data-col="17" onclick="sortTable(17)" style="display:none;">Confidence <span class="sort-icon">-</span></th>
                 </tr>
             </thead>
             <tbody id="tableBody">
@@ -604,11 +624,32 @@ TABLE_ROW_TEMPLATE: str = '''<tr class="data-row" data-class="{classification}">
     <td data-col="13" style="display:none;">{discovery_score}</td>
     <td data-col="14" style="display:none;">{identity_confidence}</td>
     <td data-col="15" style="display:none;">{placement_confidence}</td>
+    <td data-col="16" style="display:none;">{legacy_call}</td>
+    <td data-col="17" style="display:none;">{confidence_score}</td>
 </tr>'''
 
 # =============================================================================
 # Enhanced Scoring Templates
 # =============================================================================
+
+DISCOVERY_CARD_TEMPLATE: str = '''<div class="metric-box">
+            <div class="metric-title">Mean Discovery Score</div>
+            <div class="metric-value">{mean_discovery_score:.1f}</div>
+            <div class="metric-detail">For {novel_count:,} novel reads</div>
+            <div class="metric-note">Combined metric of novelty, alignment quality, and confidence</div>
+        </div>'''
+
+HIGH_PRIORITY_CARD_TEMPLATE: str = '''<div class="metric-box highlight">
+            <div class="metric-title">High-Priority Discoveries</div>
+            <div class="metric-value">{high_priority_count:,}</div>
+            <div class="metric-detail">Discovery score &gt;= 75</div>
+            <div class="metric-note">Novel reads with high confidence - prioritize for validation</div>
+        </div>'''
+
+DISCOVERY_INTRO_TEXT: str = (
+    " Discovery scores prioritize novel reads by combining novelty, "
+    "alignment quality, and confidence."
+)
 
 ENHANCED_SCORING_SUMMARY_TEMPLATE: str = '''
 <div class="enhanced-scoring-summary">
@@ -636,19 +677,9 @@ ENHANCED_SCORING_SUMMARY_TEMPLATE: str = '''
             <div class="metric-note">Estimated placement uncertainty when no competing hits exist</div>
         </div>
 
-        <div class="metric-box highlight">
-            <div class="metric-title">High-Priority Discoveries</div>
-            <div class="metric-value">{high_priority_count:,}</div>
-            <div class="metric-detail">Discovery score >= 75</div>
-            <div class="metric-note">Novel reads with high confidence - prioritize for validation</div>
-        </div>
+        {high_priority_card}
 
-        <div class="metric-box">
-            <div class="metric-title">Mean Discovery Score</div>
-            <div class="metric-value">{mean_discovery_score:.1f}</div>
-            <div class="metric-detail">For {novel_count:,} novel reads</div>
-            <div class="metric-note">Combined metric of novelty, alignment quality, and confidence</div>
-        </div>
+        {discovery_card}
     </div>
 </div>
 '''
@@ -767,9 +798,9 @@ ENHANCED_SCORING_UNCERTAINTY_TYPES_TEMPLATE: str = '''
         </div>
     </div>
     <p class="uncertainty-note">
-        <strong>Note:</strong> Single-hit reads (~{single_hit_pct:.0f}% of environmental data)
-        previously reported 0% uncertainty, which conflated "no competing hits" with
-        "confident placement". Inferred uncertainty provides a more honest estimate.
+        <strong>Note:</strong> Single-hit reads (~{single_hit_pct:.0f}% of reads) have no competing
+        hits, so placement uncertainty cannot be measured from ANI. The inferred estimate reflects that
+        "no competing hits" is not the same as "confident placement".
     </p>
 </div>
 '''
@@ -811,8 +842,8 @@ let rangeFilters = {{}}; // {{novelty: {{min: 0, max: 5}}, uncertainty: {{min: 0
 
 // Column visibility state (stored in localStorage)
 // Includes enhanced scoring columns (11-15): uncertainty_type, inferred_uncertainty, discovery_score, identity_confidence, placement_confidence
-const columnNames = ['read_id', 'best_match', 'species', 'genus', 'identity', 'novelty', 'uncertainty', 'ambiguous_hits', 'identity_gap', 'is_novel', 'classification', 'uncertainty_type', 'inferred_uncertainty', 'discovery_score', 'identity_confidence', 'placement_confidence'];
-let columnVisibility = [true, true, false, false, true, true, true, false, false, false, true, false, false, false, false, false];
+const columnNames = ['read_id', 'best_match', 'species', 'genus', 'identity', 'novelty', 'uncertainty', 'ambiguous_hits', 'identity_gap', 'is_novel', 'classification', 'uncertainty_type', 'inferred_uncertainty', 'discovery_score', 'identity_confidence', 'placement_confidence', 'legacy_call', 'confidence_score'];
+let columnVisibility = [true, true, false, false, true, true, true, false, false, false, true, false, false, false, false, false, false, false];
 
 // Column indices for range filtering
 const COL_NOVELTY = 5;
@@ -996,9 +1027,9 @@ function updateFilterStatus() {{
     }}
 
     const hasFilters = currentClassFilter || currentSearchFilter || Object.keys(rangeFilters).length > 0;
-    if (clearBtn) {{
-        clearBtn.style.display = hasFilters ? 'inline-block' : 'none';
-    }}
+    [clearBtn, document.getElementById('clearFiltersTop')].forEach(btn => {{
+        if (btn) btn.style.display = hasFilters ? 'inline-block' : 'none';
+    }});
 }}
 
 function updatePagination() {{
@@ -1137,8 +1168,8 @@ METHODS_SECTION_TEMPLATE: str = '''
             <li><a href="#methods-overview">Algorithm Overview</a></li>
             <li><a href="#methods-novelty">Novelty Index</a></li>
             <li><a href="#methods-uncertainty">Placement Uncertainty</a></li>
-            <li><a href="#methods-decision">Classification Decision Tree</a></li>
-            <li><a href="#methods-confidence">Confidence Score</a></li>
+            <li><a href="#methods-decision">Classification: Bayesian and Legacy Calls</a></li>
+            <li><a href="#methods-confidence">Posterior Entropy and Confidence Score</a></li>
             <li><a href="#methods-inferred">Inferred Uncertainty</a></li>
             <li><a href="#methods-thresholds">Threshold Summary</a></li>
             <li><a href="#methods-references">References</a></li>
@@ -1171,7 +1202,9 @@ METHODS_SECTION_TEMPLATE: str = '''
 
         <section id="methods-novelty" class="method-section">
             <h3>2. Novelty Index (N)</h3>
-            <p>The Novelty Index quantifies sequence divergence from the closest reference genome.</p>
+            <p>The Novelty Index quantifies sequence divergence from the closest reference genome.
+            The table below lists the hard thresholds of the <code>legacy_call</code> cascade; the primary
+            <code>taxonomic_call</code> uses them only to set the Bayesian model parameters (section 4).</p>
 
             <div class="formula-box">
                 <div class="formula">N = 100 - pident<sub>top</sub></div>
@@ -1232,10 +1265,16 @@ METHODS_SECTION_TEMPLATE: str = '''
             <h4>Step 2: Calculate uncertainty from ANI</h4>
             <div class="formula-box">
                 <div class="formula">
-                    U = 100 - max(ANI(G<sub>top</sub>, G<sub>i</sub>)) for all G<sub>i</sub> in secondary_genomes
+                    U = 100 - ANI(G<sub>top</sub>, G<sub>2</sub>)
+                    &nbsp;&nbsp;(default, <code>uncertainty_mode="second"</code>)
                 </div>
                 <div class="formula-legend">
-                    where G<sub>top</sub> = genome with highest bitscore hit
+                    where G<sub>top</sub> = genome with the highest-scoring hit and G<sub>2</sub> = the
+                    highest-scoring competing genome within the bitscore window. With
+                    <code>uncertainty_mode="max"</code>, U = 100 - max ANI(G<sub>top</sub>, G<sub>i</sub>)
+                    over all competing genomes. Hits to genomes sharing a species representative are
+                    collapsed first; U = 0 when no competing genome remains. ANI pairs that were not
+                    computed are treated as 70% ANI (U = 30%).
                 </div>
             </div>
 
@@ -1275,48 +1314,28 @@ METHODS_SECTION_TEMPLATE: str = '''
         </section>
 
         <section id="methods-decision" class="method-section">
-            <h3>4. Classification Decision Tree</h3>
-            <p>Classification follows a hierarchical decision tree where uncertainty takes priority over novelty:</p>
+            <h3>4. Classification: Bayesian and Legacy Calls</h3>
+            <p>Each read receives two calls. The <strong><code>taxonomic_call</code></strong> is the primary
+            call used throughout this report. The <strong><code>legacy_call</code></strong> is a
+            hard-threshold cascade kept for side-by-side comparison.</p>
 
-            <div class="decision-tree">
-                <div class="tree-node start">Read with BLAST hits</div>
-                <div class="tree-arrow">&darr;</div>
-                <div class="tree-node">Calculate N and U</div>
-                <div class="tree-arrow">&darr;</div>
-                <div class="tree-branch">
-                    <div class="tree-condition">U &ge; 5%?</div>
-                    <div class="tree-yes">&rarr; YES &rarr; <span class="cat-ambiguous">AMBIGUOUS</span></div>
-                </div>
-                <div class="tree-arrow">&darr; NO</div>
-                <div class="tree-branch">
-                    <div class="tree-condition">1.5% &le; U &lt; 5%?</div>
-                    <div class="tree-yes">&rarr; YES &rarr; <span class="cat-boundary">SPECIES BOUNDARY</span></div>
-                </div>
-                <div class="tree-arrow">&darr; NO (U &lt; 1.5%)</div>
-                <div class="tree-branch">
-                    <div class="tree-condition">N &lt; 4%?</div>
-                    <div class="tree-yes">&rarr; YES &rarr; <span class="cat-known">KNOWN SPECIES</span></div>
-                </div>
-                <div class="tree-arrow">&darr; NO</div>
-                <div class="tree-branch">
-                    <div class="tree-condition">4% &le; N &lt; 20%?</div>
-                    <div class="tree-yes">&rarr; YES &rarr; <span class="cat-novel-species">NOVEL SPECIES</span></div>
-                </div>
-                <div class="tree-arrow">&darr; NO</div>
-                <div class="tree-branch">
-                    <div class="tree-condition">20% &le; N &le; 25%?</div>
-                    <div class="tree-yes">&rarr; YES &rarr; <span class="cat-novel-genus">NOVEL GENUS</span></div>
-                </div>
-                <div class="tree-arrow">&darr; NO</div>
-                <div class="tree-node result"><span class="cat-unclassified">UNCLASSIFIED</span></div>
-            </div>
+            <h4>taxonomic_call (Bayesian MAP)</h4>
+            <p>Stage 1 models six categories (Known Species, Novel Species, Novel Genus, Species Boundary,
+            Ambiguous, Unclassified) as 2D Gaussians in (N, U) space, computes the posterior probability of
+            each category for every read, and takes the maximum a posteriori (MAP) category. Stage 2 then
+            refines the result using phylogenetic context:</p>
+            <ul>
+                <li>Ambiguous with hits spanning genera becomes Conserved Region.</li>
+                <li>Novel Genus with high genus-level uncertainty becomes Ambiguous Within Genus.</li>
+            </ul>
+            <p>Reads whose best hit lies outside the target family are reported as Off-target.</p>
 
-            <h4>Classification Categories Summary</h4>
+            <h4>legacy_call (hard thresholds)</h4>
             <table class="methods-table">
                 <thead>
                     <tr>
                         <th>Category</th>
-                        <th>Criteria</th>
+                        <th>Legacy criteria (nucleotide mode)</th>
                         <th>Biological Interpretation</th>
                     </tr>
                 </thead>
@@ -1343,55 +1362,56 @@ METHODS_SECTION_TEMPLATE: str = '''
                     </tr>
                     <tr>
                         <td><span class="cat-ambiguous">Ambiguous</span></td>
-                        <td>U &ge; 5%</td>
-                        <td>Conserved gene or highly uncertain placement</td>
+                        <td>U &ge; 5%, small identity gap between hits, or a single hit with high inferred uncertainty</td>
+                        <td>Placement cannot be resolved</td>
+                    </tr>
+                    <tr>
+                        <td><span class="cat-unclassified">Unclassified</span></td>
+                        <td>N &gt; 25% or no rule matched</td>
+                        <td>Very high divergence</td>
                     </tr>
                 </tbody>
             </table>
+
+            <div class="method-highlight">
+                <strong>The two calls are not equivalent.</strong> The thresholds above set the Gaussian
+                means and widths of the Bayesian model, but its decision boundaries lie elsewhere. In
+                nucleotide mode with U = 0 and a multi-hit read, the MAP changes from Known Species to
+                Novel Species at N &asymp; 6.2% (legacy: 4%), from Novel Species to Novel Genus at
+                N &asymp; 18.6% (legacy: 20%), and from Novel Genus to Unclassified at N &asymp; 27.6%
+                (legacy: 25%). Category counts from the two calls can therefore differ, in particular for
+                single-hit reads and reads with small identity gaps.
+            </div>
         </section>
 
         <section id="methods-confidence" class="method-section">
-            <h3>5. Confidence Score</h3>
-            <p>The confidence score (0-100) quantifies classification reliability without changing the
-            classification category.</p>
+            <h3>5. Posterior Entropy and Confidence Score</h3>
+            <p>The posterior entropy H summarizes how concentrated the six posterior probabilities of a read
+            are. It does not change the category.</p>
 
             <div class="formula-box">
-                <div class="formula">confidence = margin_score + placement_score + alignment_score</div>
+                <div class="formula">H = -&Sigma; p<sub>i</sub> &times; log<sub>2</sub>(p<sub>i</sub>)</div>
+                <div class="formula">confidence_score = (1 - H / log<sub>2</sub>(6)) &times; 100</div>
+                <div class="formula-legend">
+                    H ranges from 0 (all probability on one category) to log<sub>2</sub>(6) &asymp; 2.585
+                    (uniform posterior); confidence_score ranges from 0 to 100. Reads with H &gt; 1.5
+                    (confidence_score &lt; 42) are flagged as low confidence.
+                </div>
             </div>
 
-            <h4>Component 1: Margin from threshold boundaries (0-40 points)</h4>
-            <p>Measures how far the read is from classification boundaries. Reads near boundaries have
-            lower margin scores.</p>
-
-            <h4>Component 2: Placement certainty (0-40 points)</h4>
-            <table class="methods-table small">
-                <thead>
-                    <tr><th>Ambiguous Hits</th><th>Points</th></tr>
-                </thead>
-                <tbody>
-                    <tr><td>1</td><td>20</td></tr>
-                    <tr><td>2-3</td><td>15</td></tr>
-                    <tr><td>4-5</td><td>10</td></tr>
-                    <tr><td>6-10</td><td>5</td></tr>
-                    <tr><td>&gt;10</td><td>0</td></tr>
-                </tbody>
-            </table>
-
-            <h4>Component 3: Alignment quality (0-20 points)</h4>
-            <p>Based on top hit identity, rewarding higher identity alignments.</p>
-
-            <h4>Score Interpretation</h4>
             <table class="methods-table">
                 <thead>
-                    <tr><th>Score</th><th>Interpretation</th><th>Recommended Action</th></tr>
+                    <tr><th>Entropy H</th><th>Interpretation</th></tr>
                 </thead>
                 <tbody>
-                    <tr class="priority-high"><td>80-100</td><td>High confidence</td><td>Suitable for downstream analysis</td></tr>
-                    <tr class="priority-medium"><td>60-79</td><td>Moderate confidence</td><td>Review recommended</td></tr>
-                    <tr class="priority-low"><td>40-59</td><td>Low confidence</td><td>Manual verification needed</td></tr>
-                    <tr class="priority-uncertain"><td>&lt;40</td><td>Very low confidence</td><td>Treat with caution</td></tr>
+                    <tr class="priority-high"><td>H &lt; 0.5</td><td>Confident assignment to one category</td></tr>
+                    <tr class="priority-medium"><td>0.5 &le; H &lt; 1.0</td><td>Moderate confidence; one category dominant</td></tr>
+                    <tr class="priority-low"><td>1.0 &le; H &le; 1.5</td><td>Low confidence; several categories plausible</td></tr>
+                    <tr class="priority-uncertain"><td>H &gt; 1.5</td><td>Read lies near a classification boundary</td></tr>
                 </tbody>
             </table>
+            <p class="methods-note"><strong>Note:</strong> These bands are descriptive; the posteriors are
+            not calibrated probabilities.</p>
         </section>
 
         <section id="methods-inferred" class="method-section">
@@ -1432,14 +1452,15 @@ METHODS_SECTION_TEMPLATE: str = '''
                 </table>
             </div>
 
-            <h4>Single-Hit Classification Gating (Optional)</h4>
-            <p>When <code>--use-inferred-for-single-hits</code> is enabled, single-hit reads with high
-            inferred uncertainty are reclassified as Ambiguous. This reduces novel species overestimation
-            by acknowledging that absence of competing hits does not equal confident placement.</p>
+            <p class="methods-note"><strong>Note:</strong> The inferred value is reported in the
+            <code>inferred_uncertainty</code> column and is used by the <code>legacy_call</code> cascade
+            only. The Bayesian <code>taxonomic_call</code> uses the measured placement uncertainty, which is
+            0 for single-hit reads.</p>
         </section>
 
         <section id="methods-thresholds" class="method-section">
             <h3>7. Threshold Summary</h3>
+            <p class="methods-note">Thresholds below define the <code>legacy_call</code> cascade and the parameters of the Bayesian model (section 4).</p>
 
             <h4>Nucleotide Mode (Default)</h4>
             <table class="methods-table">
@@ -1618,7 +1639,7 @@ PHYLOTREE_JS_TEMPLATE: str = '''
     if (typeof d3 === 'undefined') {{
         var container = document.getElementById('phylogeny-container');
         if (container) {{
-            container.innerHTML = '<p style="color:#666;padding:2em;">Phylogenetic tree requires D3.js. Run \\'metadarkmatter report vendor-d3\\' to embed D3 locally, or check your internet connection.</p>';
+            container.innerHTML = '<p style="color:#666;padding:2em;">Phylogenetic tree requires D3.js, which could not be loaded (it is not embedded in this report and the CDN is unreachable). Run \\'mdm report vendor-d3\\' once and regenerate the report for a fully offline tree, or check your internet connection.</p>';
         }}
         return;
     }}
@@ -2196,8 +2217,7 @@ CONFIDENCE_SUMMARY_TEMPLATE: str = '''
         <p class="intro-text">
             Bayesian classification assigns posterior probabilities to each category.
             Posterior entropy measures overall confidence: low entropy indicates a clear
-            assignment, high entropy indicates ambiguity. Discovery scores prioritize
-            novel reads by combining novelty, alignment quality, and confidence.
+            assignment, high entropy indicates ambiguity.{discovery_intro}
         </p>
     </div>
 
@@ -2230,12 +2250,7 @@ CONFIDENCE_SUMMARY_TEMPLATE: str = '''
             <div class="metric-note">Uncertainty is inferred from novelty level</div>
         </div>
 
-        <div class="metric-box">
-            <div class="metric-title">Mean Discovery Score</div>
-            <div class="metric-value">{mean_discovery_score:.1f}</div>
-            <div class="metric-detail">For {novel_count:,} novel reads</div>
-            <div class="metric-note">Combined novelty, alignment quality, and confidence</div>
-        </div>
+        {discovery_card}
 
         <div class="metric-box">
             <div class="metric-title">Boundary Reads</div>
