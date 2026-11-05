@@ -281,6 +281,42 @@ class ScoringConfig(BaseModel):
         ),
     )
 
+    # Clade-novelty refinement (opt-in, nucleotide mode). A read whose
+    # placement among several references of one genus is ambiguous can still
+    # be confidently novel if it is divergent from EVERY competing reference:
+    # placement uncertainty answers "which reference", not "is it novel".
+    # See docs/METHODS.md (clade-novelty rule) and
+    # scripts/benchmark_leave_one_out.py for the validation.
+    clade_novel_species: bool = Field(
+        default=False,
+        description=(
+            "Stage 2 rule: call Ambiguous/Species Boundary reads Novel Species "
+            "when all competitors are within one genus and the read is at least "
+            "clade_novelty_min %% divergent from both the best and the "
+            "second-best reference (and below clade_novelty_max). Nucleotide "
+            "mode only; off by default pending multi-family validation."
+        ),
+    )
+    clade_novelty_min: float = Field(
+        default=5.0,
+        ge=0,
+        le=100,
+        description=(
+            "Minimum novelty (100 - identity) to both the best and the "
+            "second-best competing reference for the clade-novelty rule."
+        ),
+    )
+    clade_novelty_max: float = Field(
+        default=18.6,
+        ge=0,
+        le=100,
+        description=(
+            "Upper novelty bound for the clade-novelty rule (reads at or above "
+            "it are left to the genus-level categories). Default matches the "
+            "measured Bayesian Novel Species -> Novel Genus boundary at U = 0."
+        ),
+    )
+
     # Confidence threshold for quality flagging
     # Reads with confidence_score below this threshold are flagged as low_confidence
     # without affecting the classification category
@@ -528,6 +564,12 @@ class ScoringConfig(BaseModel):
 
         For continuous boundaries, novelty_known_max == novelty_novel_species_min.
         """
+        if self.clade_novelty_min >= self.clade_novelty_max:
+            msg = (
+                f"clade_novelty_min ({self.clade_novelty_min}) must be < "
+                f"clade_novelty_max ({self.clade_novelty_max})"
+            )
+            raise ValueError(msg)
         # Ensure continuous boundary between known and novel species
         # Known: N < known_max, Novel Species: N >= novel_species_min
         # They should be equal for gapless classification
@@ -852,6 +894,12 @@ def _flatten_yaml_config(raw: dict[str, Any]) -> dict[str, Any]:
     _map_if_present(fv, "target_family", flat, "target_family")
     _map_if_present(fv, "ratio_threshold", flat, "family_ratio_threshold")
 
+    # Clade-novelty refinement section
+    clade = raw.get("clade_novelty", {})
+    _map_if_present(clade, "enabled", flat, "clade_novel_species")
+    _map_if_present(clade, "novelty_min", flat, "clade_novelty_min")
+    _map_if_present(clade, "novelty_max", flat, "clade_novelty_max")
+
     # Output section
     output_sec = raw.get("output", {})
     _map_if_present(output_sec, "include_legacy_scores", flat, "include_legacy_scores")
@@ -956,6 +1004,11 @@ def _build_yaml_structure(config: ScoringConfig) -> dict[str, Any]:
         "family_validation": {
             "target_family": config.target_family,
             "ratio_threshold": config.family_ratio_threshold,
+        },
+        "clade_novelty": {
+            "enabled": config.clade_novel_species,
+            "novelty_min": config.clade_novelty_min,
+            "novelty_max": config.clade_novelty_max,
         },
         "output": {
             "include_legacy_scores": config.include_legacy_scores,
