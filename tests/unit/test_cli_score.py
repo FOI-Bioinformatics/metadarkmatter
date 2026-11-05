@@ -150,9 +150,17 @@ class TestScoreClassifyFamilyFlags:
     def test_classify_help_shows_family_flags(self, cli_runner):
         """CLI should show --target-family and --family-ratio-threshold flags."""
         result = cli_runner.invoke(app, ["score", "classify", "--help"])
+        assert result.exit_code == 0
         assert "--target-family" in result.output
-        # Typer truncates long option names in help output, so match prefix
-        assert "--family-ratio-thre" in result.output
+        # Rich truncates long option names to fit the help table, and the
+        # truncation point depends on the console width (fixed at 80 columns
+        # under GitHub Actions) and on the longest option in the table, so
+        # check the declared option instead of the rendered text.
+        from typer.main import get_command
+
+        classify_cmd = get_command(app).commands["score"].commands["classify"]
+        declared = {opt for p in classify_cmd.params for opt in p.opts}
+        assert {"--target-family", "--family-ratio-threshold"} <= declared
 
 
 class TestScoreClassifyOptions:
