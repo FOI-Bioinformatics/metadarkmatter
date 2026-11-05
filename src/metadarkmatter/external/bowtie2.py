@@ -152,8 +152,7 @@ class Bowtie2(ExternalTool):
             cmd.extend(["-1", str(reads_1)])
             cmd.extend(["-2", str(reads_2)])
         elif interleaved:
-            cmd.append("--interleaved")
-            cmd.extend(["-U", str(reads_1)])
+            cmd.extend(["--interleaved", str(reads_1)])
         else:
             cmd.extend(["-U", str(reads_1)])
 

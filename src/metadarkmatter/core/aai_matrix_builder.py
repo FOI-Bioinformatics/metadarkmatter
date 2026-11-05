@@ -94,6 +94,12 @@ class AAIMatrix:
                     j = self._genome_to_idx[genome2]
                     self._aai_array[i, j] = aai_value
 
+        # Mirror one-directional pairs (as ANIMatrix does): a 0/missing cell
+        # takes the value of the opposite direction when that is reported.
+        self._aai_array = np.where(
+            self._aai_array == 0, self._aai_array.T, self._aai_array
+        ).astype(np.float32)
+
     @classmethod
     def from_file(cls, path: Path, default_aai: float = AAI_DEFAULT_UNRELATED) -> AAIMatrix:
         """
@@ -222,17 +228,16 @@ def parse_aai_csv(path: Path) -> dict[str, dict[str, float]]:
 
     genome_names = df["genome"].to_list()
 
-    # Build nested dict
+    # Vectorized conversion: select the genome columns once and convert the
+    # whole block to a NumPy array (no per-row DataFrame filtering).
+    present = [g for g in genome_names if g in df.columns]
+    block = df.select(present).fill_null(0.0).to_numpy().astype(float)
+    col_index = {g: k for k, g in enumerate(present)}
+
     aai_dict: dict[str, dict[str, float]] = {}
-
-    for row_genome in genome_names:
-        aai_dict[row_genome] = {}
-        row = df.filter(pl.col("genome") == row_genome).drop("genome")
-
-        for col_genome in genome_names:
-            if col_genome in row.columns:
-                value = row[col_genome].item()
-                aai_dict[row_genome][col_genome] = float(value) if value is not None else 0.0
+    for r, row_genome in enumerate(genome_names):
+        values = block[r]
+        aai_dict[row_genome] = {g: float(values[col_index[g]]) for g in present}
 
     return aai_dict
 
@@ -602,6 +607,47 @@ def extract_genome_proteins(
     return count
 
 
+def split_proteins_by_genome(
+    concat_fasta: Path,
+    genomes: list[str],
+    output_dir: Path,
+) -> dict[str, int]:
+    """Split the concatenated protein FASTA into one file per genome (one pass).
+
+    Writes ``{output_dir}/{genome}.faa`` for each genome in ``genomes`` and
+    returns the number of proteins written per genome. The concatenated file
+    is read exactly once; if a genome's records are not contiguous the file is
+    reopened in append mode.
+    """
+    wanted = set(genomes)
+    counts: dict[str, int] = dict.fromkeys(genomes, 0)
+    opened: set[str] = set()
+    current: str | None = None
+    handle = None
+    try:
+        with concat_fasta.open() as in_f:
+            for line in in_f:
+                if line.startswith(">"):
+                    genome = line[1:].split("|", 1)[0] if "|" in line else None
+                    if genome != current:
+                        if handle is not None:
+                            handle.close()
+                            handle = None
+                        current = genome
+                        if genome is not None and genome in wanted:
+                            mode = "a" if genome in opened else "w"
+                            handle = (output_dir / f"{genome}.faa").open(mode)
+                            opened.add(genome)
+                    if handle is not None:
+                        counts[genome] += 1  # type: ignore[index]
+                if handle is not None:
+                    handle.write(line)
+    finally:
+        if handle is not None:
+            handle.close()
+    return counts
+
+
 def compute_aai_matrix(
     protein_dir: Path,
     output_path: Path,
@@ -682,11 +728,16 @@ def compute_aai_matrix(
 
             genomes = sorted(genome_map.keys())
 
+            # Split the concatenated FASTA once (not once per genome)
+            protein_counts = split_proteins_by_genome(
+                concat_fasta, genomes, genome_query_dir
+            )
+
             # Helper function to process a single genome
             def process_genome(genome: str, genome_index: int) -> tuple[str, int, bool]:
                 """Extract proteins and run Diamond for one genome."""
                 query_file = genome_query_dir / f"{genome}.faa"
-                n_proteins = extract_genome_proteins(concat_fasta, genome, query_file)
+                n_proteins = protein_counts.get(genome, 0)
 
                 if n_proteins == 0:
                     logger.warning("No proteins found for genome %s", genome)
@@ -701,9 +752,7 @@ def compute_aai_matrix(
                     n_proteins,
                 )
 
-                # Reduce threads per job to allow parallel processing
-                # If threads=8, use threads_per_job=2 with max_workers=4
-                threads_per_job = max(1, threads // 4)
+                # threads_per_job * max_workers <= threads (see below)
 
                 diamond.blastp(
                     query=query_file,
@@ -717,8 +766,10 @@ def compute_aai_matrix(
                 )
                 return (genome, n_proteins, True)
 
-            # Process genomes in parallel (max_workers=4 for threads=8)
-            max_workers = max(1, threads // 2)
+            # Process genomes in parallel without oversubscribing: the total
+            # thread count threads_per_job * max_workers never exceeds threads.
+            threads_per_job = max(1, threads // 4)
+            max_workers = max(1, threads // threads_per_job)
             logger.info("Processing %d genomes with %d parallel workers...", len(genomes), max_workers)
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:

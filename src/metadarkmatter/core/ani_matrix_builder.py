@@ -27,6 +27,10 @@ def parse_fastani_output(output_path: Path) -> dict[str, dict[str, float]]:
     Missing pairs are assigned a default value of 0.0 to indicate no
     reliable ANI estimate could be obtained.
 
+    FastANI is asymmetric (query->reference differs from reference->query,
+    by up to ~0.5 ANI points).  When both directions are reported they are
+    averaged; when only one is reported it is used for both.
+
     Args:
         output_path: Path to fastANI tabular output file.
 
@@ -36,6 +40,7 @@ def parse_fastani_output(output_path: Path) -> dict[str, dict[str, float]]:
     """
     ani_dict: dict[str, dict[str, float]] = defaultdict(dict)
     all_genomes: set[str] = set()
+    directional: dict[tuple[str, str], list[float]] = defaultdict(list)
 
     with output_path.open() as f:
         for line in f:
@@ -58,9 +63,24 @@ def parse_fastani_output(output_path: Path) -> dict[str, dict[str, float]]:
             all_genomes.add(query_name)
             all_genomes.add(ref_name)
 
-            # Store both directions for symmetry
-            ani_dict[query_name][ref_name] = ani_value
-            ani_dict[ref_name][query_name] = ani_value
+            if query_name == ref_name:
+                continue
+            key = (query_name, ref_name)
+            directional[key].append(ani_value)
+
+    # Average the two directions of each unordered pair (sorted for determinism)
+    seen: set[tuple[str, str]] = set()
+    for q_name, r_name in sorted(directional):
+        pair = (min(q_name, r_name), max(q_name, r_name))
+        if pair in seen:
+            continue
+        seen.add(pair)
+        values = directional.get((q_name, r_name), []) + directional.get(
+            (r_name, q_name), []
+        )
+        mean_ani = sum(values) / len(values)
+        ani_dict[q_name][r_name] = mean_ani
+        ani_dict[r_name][q_name] = mean_ani
 
     # Fill diagonal with 100.0 and missing pairs with 0.0
     for genome in all_genomes:

@@ -14,6 +14,7 @@ from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pandas as pd
 
 if TYPE_CHECKING:
@@ -28,6 +29,50 @@ class TreeMethod(StrEnum):
     NJ = "nj"
     UPGMA = "upgma"
     MASHTREE = "mashtree"
+
+
+MISSING_ANI_FALLBACK = 70.0
+"""ANI (percent) assumed for pairs that were not computed (0 or NaN).
+
+Matches the classifier's default for missing/uncomputed pairs
+(``ANIMatrix.default_ani``), so the tree and the classification treat an
+undetected pair the same way (distance 30).
+"""
+
+
+def count_missing_pairs(ani_matrix: pd.DataFrame) -> int:
+    """Count off-diagonal genome pairs whose ANI is missing (NaN or 0)."""
+    ani_matrix = _align_rows_to_columns(ani_matrix)
+    values = ani_matrix.to_numpy(dtype=float)
+    n = min(values.shape)
+    sub = values[:n, :n]
+    sub = np.where(sub > 0, sub, sub.T)
+    missing = ~(sub > 0)
+    for i in range(n):
+        missing[i, i] = False
+    return int(missing.sum() // 2)
+
+
+def _ani_to_distance(ani_matrix: pd.DataFrame) -> pd.DataFrame:
+    """Convert ANI to distance, treating 0/NaN as 'not computed' (70% ANI)."""
+    ani = ani_matrix.astype(float).copy()
+    if ani.shape[0] == ani.shape[1]:
+        # Mirror one-directional pairs (a 0/NaN cell with a value in the
+        # opposite direction is not missing).
+        mirrored = ani.T.set_axis(ani.index, axis=0).set_axis(ani.columns, axis=1)
+        ani = ani.where(ani > 0, mirrored)
+    missing = ~(ani > 0)
+    n_missing = count_missing_pairs(ani)
+    if n_missing > 0:
+        logger.warning(
+            f"{n_missing} genome pairs lack ANI values (0 or NaN); "
+            f"assuming {MISSING_ANI_FALLBACK:.0f}% ANI"
+        )
+    ani = ani.mask(missing, MISSING_ANI_FALLBACK)
+    # Diagonal is always identical to itself.
+    for i in range(min(ani.shape)):
+        ani.iloc[i, i] = 100.0
+    return (100 - ani).clip(lower=0, upper=50)
 
 
 def _align_rows_to_columns(ani_matrix: pd.DataFrame) -> pd.DataFrame:
@@ -81,8 +126,8 @@ def ani_to_newick(ani_matrix: pd.DataFrame) -> str | None:
         matrix has fewer than 3 genomes (minimum required for NJ algorithm).
 
     Note:
-        Missing ANI values (NaN) are filled with maximum distance (50),
-        representing distant genomes with no detectable ANI.
+        Missing ANI values (NaN or 0, i.e. not computed) are treated as 70%
+        ANI (distance 30), the same fallback the classifier uses.
     """
     from Bio import Phylo
     from Bio.Phylo.TreeConstruction import DistanceMatrix, DistanceTreeConstructor
@@ -96,19 +141,8 @@ def ani_to_newick(ani_matrix: pd.DataFrame) -> str | None:
 
     ani_matrix = _align_rows_to_columns(ani_matrix)
 
-    # Convert ANI (similarity) to distance: distance = 100 - ANI
-    distance_matrix = 100 - ani_matrix
-
-    # Clip distances to valid range [0, 50]
-    # Values > 100 ANI become negative distance (clip to 0)
-    # Missing ANI values or very distant genomes capped at 50
-    distance_matrix = distance_matrix.clip(lower=0, upper=50)
-
-    # Handle missing values
-    missing_count = distance_matrix.isna().sum().sum() // 2
-    if missing_count > 0:
-        logger.warning(f"{missing_count} genome pairs lack ANI values; using maximum distance (50)")
-        distance_matrix = distance_matrix.fillna(50.0)
+    # Convert ANI (similarity) to distance (100 - ANI); 0/NaN = not computed.
+    distance_matrix = _ani_to_distance(ani_matrix)
 
     # Build BioPython DistanceMatrix
     names = list(ani_matrix.columns)
@@ -149,7 +183,7 @@ def ani_to_upgma(ani_matrix: pd.DataFrame) -> str | None:
         matrix has fewer than 3 genomes.
 
     Note:
-        Missing ANI values (NaN) are filled with maximum distance (50).
+        Missing ANI values (NaN or 0) are treated as 70% ANI, as in the classifier.
     """
     from Bio import Phylo
     from Bio.Phylo.TreeConstruction import DistanceMatrix, DistanceTreeConstructor
@@ -162,13 +196,7 @@ def ani_to_upgma(ani_matrix: pd.DataFrame) -> str | None:
         return None
 
     ani_matrix = _align_rows_to_columns(ani_matrix)
-    distance_matrix = 100 - ani_matrix
-    distance_matrix = distance_matrix.clip(lower=0, upper=50)
-
-    missing_count = distance_matrix.isna().sum().sum() // 2
-    if missing_count > 0:
-        logger.warning(f"{missing_count} genome pairs lack ANI values; using maximum distance (50)")
-        distance_matrix = distance_matrix.fillna(50.0)
+    distance_matrix = _ani_to_distance(ani_matrix)
 
     names = list(ani_matrix.columns)
     matrix = _to_lower_triangular(distance_matrix)

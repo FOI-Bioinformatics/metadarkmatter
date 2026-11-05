@@ -181,7 +181,10 @@ class ExtractKrakenReads(ExternalTool):
         if isinstance(taxid, int):
             cmd.extend(["-t", str(taxid)])
         else:
-            cmd.extend(["-t", " ".join(str(t) for t in taxid)])
+            # extract_kraken_reads.py takes `-t TAXID [TAXID ...]`: one argv
+            # item per taxid (a single space-joined argument is rejected).
+            cmd.append("-t")
+            cmd.extend(str(t) for t in taxid)
 
         # Options
         if include_children:

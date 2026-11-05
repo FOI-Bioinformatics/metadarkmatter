@@ -51,6 +51,7 @@ class PhylogeneticNeighborhoodAnalyzer:
         self._ani_matrix = ani_matrix
         self._genus_map = genus_map
         self._genus_boundary = genus_boundary
+        self.unplaced_cluster_ids: list[str] = []
 
     # ------------------------------------------------------------------
     # Public API
@@ -68,7 +69,15 @@ class PhylogeneticNeighborhoodAnalyzer:
         genus_map = self._genus_map or self._infer_genus_groups()
 
         results: list[NovelCluster] = []
+        self.unplaced_cluster_ids = []
         for cluster in clusters:
+            # A genome absent from the ANI matrix (e.g. a non-representative
+            # when the matrix holds representatives only) cannot be profiled:
+            # every ANI lookup would silently use the fallback value.
+            if not self._ani_matrix.has_genome(cluster.nearest_genome):
+                self.unplaced_cluster_ids.append(cluster.cluster_id)
+                results.append(cluster)
+                continue
             nbr = self._build_neighborhood(cluster, genus_map)
             results.append(cluster.model_copy(update={"neighborhood": nbr}))
 

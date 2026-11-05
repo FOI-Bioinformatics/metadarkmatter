@@ -45,6 +45,37 @@ app = typer.Typer(
 console = Console()
 
 
+class SkaniMode(StrEnum):
+    """skani sensitivity mode (maps to skani's --medium / --slow flags)."""
+
+    DEFAULT = "default"
+    MEDIUM = "medium"
+    SLOW = "slow"
+
+
+UNDETECTED_PAIR_WARN_FRACTION = 0.20
+
+
+def count_undetected_pairs(ani_dict: dict[str, dict[str, float]]) -> tuple[int, int]:
+    """Return (zero_pairs, total_pairs) over unordered off-diagonal genome pairs.
+
+    A pair counts as undetected when no value is present or the value is 0
+    (not computed) in both directions.
+    """
+    genomes = sorted(ani_dict)
+    total = 0
+    zero = 0
+    for i, g1 in enumerate(genomes):
+        row1 = ani_dict[g1]
+        for g2 in genomes[i + 1:]:
+            total += 1
+            v12 = row1.get(g2, 0.0) or 0.0
+            v21 = ani_dict[g2].get(g1, 0.0) or 0.0
+            if v12 <= 0 and v21 <= 0:
+                zero += 1
+    return zero, total
+
+
 def _detect_backend() -> ANIBackend:
     """Auto-detect available ANI backend.
 
@@ -169,6 +200,24 @@ def compute(
         "Default: 80 (default mode), 50 (sensitive mode). Only applies to skani.",
         min=0.0,
         max=100.0,
+    ),
+    skani_mode: SkaniMode = typer.Option(
+        SkaniMode.DEFAULT,
+        "--skani-mode",
+        help=(
+            "skani sensitivity mode: default, medium (-c 70) or slow (-c 30). "
+            "More sensitive modes detect more distant pairs but are slower and "
+            "use more memory. Only applies to skani."
+        ),
+    ),
+    skani_compression_factor: int = typer.Option(
+        None,
+        "--skani-c",
+        help=(
+            "skani compression factor (-c); lower is more sensitive. "
+            "Overrides --skani-mode. Only applies to skani."
+        ),
+        min=1,
     ),
     threads: int = typer.Option(
         4,
@@ -322,6 +371,10 @@ def compute(
     out.print(f"[bold]Threads:[/bold] {threads}")
     if selected_backend == ANIBackend.SKANI:
         out.print(f"[bold]Sensitivity:[/bold] {sensitivity.value} (min_af={effective_min_af}%, screen={effective_screen}%)")
+        out.print(
+            f"[bold]skani mode:[/bold] {skani_mode.value}"
+            + (f" (-c {skani_compression_factor})" if skani_compression_factor else "")
+        )
 
     # Create output directory
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -332,6 +385,8 @@ def compute(
             out.print(
                 f"  skani triangle {genomes}/* -o <temp> --full-matrix -t {threads} "
                 f"--min-af {effective_min_af} -s {effective_screen}"
+                + (f" --{skani_mode.value}" if skani_mode != SkaniMode.DEFAULT else "")
+                + (f" -c {skani_compression_factor}" if skani_compression_factor else "")
             )
         else:
             out.print(
@@ -369,6 +424,8 @@ def compute(
                         full_matrix=True,
                         min_af=effective_min_af,
                         screen_threshold=effective_screen,
+                        compression_factor=skani_compression_factor,
+                        mode=skani_mode.value,
                     )
                 except ToolExecutionError as e:
                     console.print(f"\n[red]skani failed:[/red]\n{e.message}")
@@ -441,6 +498,24 @@ def compute(
 
                 # Parse output
                 ani_dict = parse_fastani_output(raw_output)
+
+        zero_pairs, total_pairs = count_undetected_pairs(ani_dict)
+        if total_pairs and zero_pairs / total_pairs > UNDETECTED_PAIR_WARN_FRACTION:
+            console.print(
+                f"\n[yellow]Warning: {zero_pairs} of {total_pairs} genome pairs "
+                f"({100 * zero_pairs / total_pairs:.0f}%) have no detected ANI "
+                f"(recorded as 0 = not computed; the classifier treats them as 70% ANI).[/yellow]"
+            )
+            if selected_backend == ANIBackend.SKANI:
+                console.print(
+                    "[yellow]Consider '--backend fastani' or a more sensitive skani "
+                    "mode ('--skani-mode medium' or 'slow').[/yellow]"
+                )
+            else:
+                console.print(
+                    "[yellow]These pairs are probably below the tool's detection range "
+                    "(fastANI reports ANI >= ~80%).[/yellow]"
+                )
 
         # Convert to CSV (auto-detect compression from filename)
         out.print("\n[bold]Converting to metadarkmatter format...[/bold]")

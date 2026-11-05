@@ -43,17 +43,17 @@ NOVEL_SUMMARY_TEMPLATE: str = '''
         </div>
         <div class="novel-metric species">
             <div class="novel-metric-value">{novel_species_clusters}</div>
-            <div class="novel-metric-label">Novel Species</div>
+            <div class="novel-metric-label">Novel Species clusters</div>
             <div class="novel-metric-hint">{novel_species_reads:,} reads</div>
         </div>
         <div class="novel-metric genus">
             <div class="novel-metric-value">{novel_genus_clusters}</div>
-            <div class="novel-metric-label">Novel Genus</div>
+            <div class="novel-metric-label">Novel Genus clusters</div>
             <div class="novel-metric-hint">{novel_genus_reads:,} reads</div>
         </div>
         <div class="novel-metric confidence">
             <div class="novel-metric-value">{high_confidence}</div>
-            <div class="novel-metric-label">High Confidence</div>
+            <div class="novel-metric-label">High Confidence clusters</div>
             <div class="novel-metric-hint">Priority for validation</div>
         </div>
     </div>
@@ -469,12 +469,15 @@ def build_cluster_scatter_figure(
     width: int = 800,
     height: int = 500,
     genus_boundary: float | None = None,
+    novel_species_min: float | None = None,
+    novel_genus_min: float | None = None,
 ) -> go.Figure:
     """
     Build a scatter plot of cluster quality.
 
     X-axis: Mean novelty index
-    Y-axis: Mean discovery score (or confidence level if no discovery score)
+    Y-axis: Mean discovery score if every cluster has one, else mean
+        Bayesian confidence score, else read count (log scale)
     Marker size: Read count
     Color: Confidence rating
 
@@ -485,11 +488,24 @@ def build_cluster_scatter_figure(
         genus_boundary: Optional genus boundary ANI value (e.g. 82.0).
             When provided, a vertical dashed line is drawn at the
             corresponding novelty index (100 - genus_boundary).
+        novel_species_min: Effective Novel Species novelty threshold (percent)
+            for the dotted line/label; defaults to the nucleotide default.
+        novel_genus_min: Effective Novel Genus novelty threshold (percent).
 
     Returns:
         Plotly Figure object
     """
     import plotly.graph_objects as go
+
+    from metadarkmatter.core.constants import (
+        NOVELTY_NOVEL_GENUS_MIN,
+        NOVELTY_NOVEL_SPECIES_MIN,
+    )
+
+    if novel_species_min is None:
+        novel_species_min = NOVELTY_NOVEL_SPECIES_MIN
+    if novel_genus_min is None:
+        novel_genus_min = NOVELTY_NOVEL_GENUS_MIN
 
     if not clusters:
         fig = go.Figure()
@@ -510,20 +526,31 @@ def build_cluster_scatter_figure(
 
     fig = go.Figure()
 
+    # One y metric for the whole plot (a per-trace choice would mix scales).
+    use_log_y = False
+    if all(c.mean_discovery_score is not None for c in clusters):
+        y_title = "Mean Discovery Score"
+
+        def y_of(c: NovelCluster) -> float:
+            return float(c.mean_discovery_score or 0.0)
+    elif all(c.mean_bayesian_confidence is not None for c in clusters):
+        y_title = "Mean Confidence Score"
+
+        def y_of(c: NovelCluster) -> float:
+            return float(c.mean_bayesian_confidence or 0.0)
+    else:
+        y_title = "Reads in Cluster"
+        use_log_y = True
+
+        def y_of(c: NovelCluster) -> float:
+            return float(c.read_count)
+
     for conf, color in confidence_colors.items():
         conf_clusters = [c for c in clusters if c.confidence == conf]
         if not conf_clusters:
             continue
 
-        # Y-axis: use discovery score if available, else encode confidence as number
-        if conf_clusters[0].mean_discovery_score is not None:
-            y_vals = [c.mean_discovery_score for c in conf_clusters]
-            y_title = "Mean Discovery Score"
-        else:
-            # Encode confidence as numeric
-            conf_to_num = {"High": 80, "Medium": 50, "Low": 20}
-            y_vals = [conf_to_num[c.confidence] for c in conf_clusters]
-            y_title = "Confidence Level"
+        y_vals = [y_of(c) for c in conf_clusters]
 
         # Scale marker sizes (min 10, max 50)
         max_reads = max(c.read_count for c in clusters)
@@ -570,16 +597,18 @@ def build_cluster_scatter_figure(
         },
         showlegend=True,
     )
+    if use_log_y:
+        fig.update_yaxes(type="log")
 
-    # Add novelty threshold lines
+    # Add novelty threshold lines (effective thresholds)
     fig.add_vline(
-        x=5, line_dash="dot", line_color="#94a3b8",
-        annotation_text="Novel Species (5%)",
+        x=novel_species_min, line_dash="dot", line_color="#94a3b8",
+        annotation_text=f"Novel Species ({novel_species_min:g}%)",
         annotation_position="top",
     )
     fig.add_vline(
-        x=20, line_dash="dot", line_color="#94a3b8",
-        annotation_text="Novel Genus (20%)",
+        x=novel_genus_min, line_dash="dot", line_color="#94a3b8",
+        annotation_text=f"Novel Genus ({novel_genus_min:g}%)",
         annotation_position="top",
     )
 

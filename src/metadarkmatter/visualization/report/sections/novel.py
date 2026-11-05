@@ -43,7 +43,6 @@ class NovelMixin(_ReportBase):
 
     def _build_novel_diversity_section(self) -> str:
         """Build the novel diversity tab section with cluster analysis."""
-        from metadarkmatter.core.novel_diversity import NovelDiversityAnalyzer
 
         content_parts = []
 
@@ -51,25 +50,20 @@ class NovelMixin(_ReportBase):
         # be used in KPI cards and the scatter plot later.
         genus_boundary_ani: float = 80.0
         genus_boundary_result = None  # AdaptiveGenusThreshold or None
+        genus_boundary_trusted = True
 
-        # Create analyzer and cluster novel reads
+        # Create analyzer and cluster novel reads (shared with the phylogeny
+        # tree so both use the same cluster IDs and confidence).
+        unplaced_ids: list[str] = []
         try:
-            from metadarkmatter.core.classification.ani_matrix import ANIMatrix
-
-            ani_matrix_obj = None
-            if self.ani_matrix is not None and len(self.ani_matrix) > 0:
-                try:
-                    ani_matrix_obj = ANIMatrix.from_dataframe(self.ani_matrix)
-                except Exception as e:
-                    logger.warning(f"Could not convert ANI matrix for clustering: {e}")
-
-            analyzer = NovelDiversityAnalyzer(
-                classifications=self.df,
-                metadata=self.genome_metadata,
-                ani_matrix=ani_matrix_obj,
-                novelty_band_size=5.0,
-                min_cluster_size=3,
+            from metadarkmatter.core.novel_diversity.clustering import (
+                build_report_analyzer,
             )
+
+            analyzer = build_report_analyzer(
+                self.df, self.genome_metadata, self.ani_matrix
+            )
+            ani_matrix_obj = analyzer._ani_matrix
             clusters = analyzer.cluster_novel_reads()
             summary = analyzer.get_summary()
 
@@ -98,6 +92,8 @@ class NovelMixin(_ReportBase):
                         genus_map=genus_map,
                     )
                     genus_boundary_ani = genus_boundary_result.genus_boundary
+                    if not self._genus_boundary_trusted(genus_boundary_result):
+                        genus_boundary_trusted = False
                 except Exception as e_gb:
                     logger.debug("Genus boundary detection skipped: %s", e_gb)
 
@@ -108,6 +104,7 @@ class NovelMixin(_ReportBase):
                         genus_boundary=genus_boundary_ani,
                     )
                     clusters = nbr_analyzer.analyze(clusters)
+                    unplaced_ids = list(nbr_analyzer.unplaced_cluster_ids)
                 except Exception as e_nbr:
                     logger.warning(
                         "Neighborhood analysis failed: %s", e_nbr
@@ -134,16 +131,39 @@ class NovelMixin(_ReportBase):
                 content=content,
             )
 
+        if not genus_boundary_trusted:
+            genus_boundary_result = None
+
         content_parts.append(
             self._build_novel_kpi_strip(clusters, genus_boundary_result)
         )
+
+        if unplaced_ids:
+            content_parts.append(
+                '<div class="novel-note" style="margin:12px 0;padding:10px 14px;border-left:3px solid #f59e0b;"><p><strong>Note:</strong> '
+                f"{len(unplaced_ids)} of {len(clusters)} cluster(s) have a nearest genome "
+                "that is not in the ANI matrix (for example a non-representative genome "
+                "when the matrix holds representatives only), so no phylogenetic "
+                "neighborhood could be computed for them: "
+                f"{', '.join(sorted(unplaced_ids))}.</p></div>"
+            )
 
         # Build summary section
         content_parts.append(build_novel_summary_html(summary))
 
         # Build scatter plot of cluster quality
+        from metadarkmatter.models.config import ScoringConfig
+
+        eff = ScoringConfig(
+            alignment_mode=self.config.alignment_mode
+        ).get_effective_thresholds()
         scatter_fig = build_cluster_scatter_figure(
-            clusters, width=1000, height=500, genus_boundary=genus_boundary_ani,
+            clusters, width=1000, height=500,
+            genus_boundary=(
+                genus_boundary_ani if genus_boundary_result is not None else None
+            ),
+            novel_species_min=eff["novelty_novel_species_min"],
+            novel_genus_min=eff["novelty_novel_genus_min"],
         )
         scatter_id = "plot-novel-scatter"
         self._register_plot(scatter_id, scatter_fig)
@@ -189,6 +209,23 @@ class NovelMixin(_ReportBase):
             content=content,
         )
 
+    @staticmethod
+    def _genus_boundary_trusted(result: AdaptiveGenusThreshold) -> bool:
+        """True when the adaptive GMM genus boundary can be displayed.
+
+        Not trusted when detection fell back to the default, or when it
+        diverges from the empirical inter-genus ANI midpoint by > 5 points
+        (the same condition under which detect_genus_boundary logs a warning).
+        """
+        if result.method == "fallback":
+            return False
+        rng = result.inter_genus_ani_range
+        if rng is not None:
+            midpoint = (rng[0] + rng[1]) / 2.0
+            if abs(result.genus_boundary - midpoint) > 5.0:
+                return False
+        return True
+
     def _build_novel_kpi_strip(
         self, clusters: list[NovelCluster], genus_boundary_result: AdaptiveGenusThreshold | None
     ) -> str:
@@ -200,10 +237,10 @@ class NovelMixin(_ReportBase):
             color_class="accent", value=str(cluster_count), label="Clusters",
         ))
         novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
-            color_class="novel", value=str(self.summary.novel_species), label="Novel Species",
+            color_class="novel", value=str(self.summary.novel_species), label="Novel Species (reads)",
         ))
         novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
-            color_class="novel", value=str(self.summary.novel_genus), label="Novel Genus",
+            color_class="novel", value=str(self.summary.novel_genus), label="Novel Genus (reads)",
         ))
         if self.summary.has_bayesian:
             high_conf_novel = len(self.df.filter(
@@ -211,9 +248,11 @@ class NovelMixin(_ReportBase):
                 (pl.col("posterior_entropy") < 1.0)
             ))
             novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
-                color_class="known", value=str(high_conf_novel), label="High Confidence",
+                color_class="known", value=str(high_conf_novel), label="High Confidence (reads)",
             ))
-        if genus_boundary_result is not None and genus_boundary_result.method != "fallback":
+        if genus_boundary_result is not None and self._genus_boundary_trusted(
+            genus_boundary_result
+        ):
             novel_kpi_cards.append(KPI_CARD_TEMPLATE.format(
                 color_class="accent",
                 value=f"{genus_boundary_result.genus_boundary:.0f}%",

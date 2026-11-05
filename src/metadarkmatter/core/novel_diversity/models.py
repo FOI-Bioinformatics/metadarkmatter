@@ -122,6 +122,15 @@ class NovelCluster(BaseModel):
         le=100,
         description="Average placement uncertainty of reads"
     )
+    mean_inferred_uncertainty: float | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Mean classifier-inferred uncertainty (the 'inferred_uncertainty' "
+            "column, used for single-hit reads by the legacy cascade). Reported "
+            "separately; NOT the measured placement uncertainty."
+        ),
+    )
     mean_discovery_score: float | None = Field(
         default=None,
         ge=0,
@@ -169,12 +178,21 @@ class NovelCluster(BaseModel):
     def novelty_band_label(self) -> str:
         """Human-readable novelty band label."""
         band_labels = {
-            5: "5-10% (Recently diverged)",
-            10: "10-15% (Moderately divergent)",
-            15: "15-20% (Highly divergent)",
-            20: "20-25% (Novel genus candidate)",
+            5: "Recently diverged",
+            10: "Moderately divergent",
+            15: "Highly divergent",
+            20: "Novel genus candidate",
         }
-        return band_labels.get(self.novelty_band, f"{self.novelty_band}-{self.novelty_band + 5}%")
+        # Derive from the cluster's actual novelty range (the stored
+        # ``novelty_band`` is only the lowest merged band).
+        lo = int(self.novelty_min // 5) * 5
+        hi = int(self.novelty_max // 5) * 5
+        mean_band = int(self.mean_novelty_index // 5) * 5
+        desc = band_labels.get(mean_band)
+        if lo == hi:
+            return f"{lo}-{lo + 5}% ({desc})" if desc else f"{lo}-{lo + 5}%"
+        rng = f"{lo}-{hi + 5}%"
+        return f"{rng} ({desc})" if desc else rng
 
     @computed_field
     @property
@@ -222,6 +240,11 @@ class NovelCluster(BaseModel):
             "mean_novelty": round(self.mean_novelty_index, 2),
             "novelty_range": self.novelty_range,
             "mean_uncertainty": round(self.mean_placement_uncertainty, 2),
+            "mean_inferred_uncertainty": (
+                round(self.mean_inferred_uncertainty, 2)
+                if self.mean_inferred_uncertainty is not None
+                else None
+            ),
             "mean_discovery_score": (
                 round(self.mean_discovery_score, 1)
                 if self.mean_discovery_score is not None

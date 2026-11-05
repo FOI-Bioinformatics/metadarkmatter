@@ -278,11 +278,10 @@ class TestParseSamLine:
         assert record is not None
         assert record.alignment_length == 105
 
-    def test_secondary_alignment_parsed(self):
-        """Secondary alignments (flag 256) should be parsed if mapped."""
+    def test_secondary_alignment_skipped(self):
+        """Secondary alignments (flag 256) are skipped so reads count once."""
         line = self._make_sam_line(flag=256)
-        record = parse_sam_line(line)
-        assert record is not None
+        assert parse_sam_line(line) is None
 
     def test_supplementary_and_unmapped_skipped(self):
         """Supplementary + unmapped (flag 4 set) should be skipped."""

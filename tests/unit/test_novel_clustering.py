@@ -665,75 +665,41 @@ class TestPhylogeneticContext:
         assert "genus unknown" in clusters[0].phylogenetic_context.lower()
 
 
-class TestInferredUncertainty:
-    """Tests for novelty-based uncertainty inference for single hits."""
+class TestPlacementUncertaintyReporting:
+    """Cluster uncertainty is the measured value, never a novelty-derived guess."""
 
-    def test_single_hit_uncertainty_inferred(self):
-        """Single-hit reads should have uncertainty inferred from novelty."""
-        df = pl.DataFrame({
-            "read_id": [f"read_{i:03d}" for i in range(5)],
-            "best_match_genome": ["GCF_000123456.1"] * 5,
-            "novelty_index": [10.0] * 5,  # 10% novelty
-            "placement_uncertainty": [0.0] * 5,  # Single hits have 0 uncertainty
-            "num_ambiguous_hits": [1] * 5,  # Single hits
-            "taxonomic_call": ["Novel Species"] * 5,
-        })
-        analyzer = NovelDiversityAnalyzer(df, min_cluster_size=3)
-        clusters = analyzer.cluster_novel_reads()
-
-        assert len(clusters) == 1
-        # Inferred uncertainty should be novelty * 0.4 = 10 * 0.4 = 4.0
-        assert clusters[0].mean_placement_uncertainty == pytest.approx(4.0, rel=0.1)
-
-    def test_multi_hit_uncertainty_preserved(self):
-        """Multi-hit reads should keep their actual uncertainty."""
-        df = pl.DataFrame({
+    def _df(self, unc, **extra):
+        data = {
             "read_id": [f"read_{i:03d}" for i in range(5)],
             "best_match_genome": ["GCF_000123456.1"] * 5,
             "novelty_index": [10.0] * 5,
-            "placement_uncertainty": [3.5] * 5,  # Actual uncertainty from multiple hits
-            "num_ambiguous_hits": [5] * 5,  # Multiple hits
+            "placement_uncertainty": [unc] * 5,
             "taxonomic_call": ["Novel Species"] * 5,
-        })
-        analyzer = NovelDiversityAnalyzer(df, min_cluster_size=3)
-        clusters = analyzer.cluster_novel_reads()
+        }
+        data.update(extra)
+        return pl.DataFrame(data)
 
-        assert len(clusters) == 1
-        # Should use actual uncertainty, not inferred
+    def test_single_hit_reports_real_zero(self):
+        df = self._df(0.0, num_ambiguous_hits=[1] * 5)
+        clusters = NovelDiversityAnalyzer(df, min_cluster_size=3).cluster_novel_reads()
+        assert clusters[0].mean_placement_uncertainty == pytest.approx(0.0)
+        assert clusters[0].mean_inferred_uncertainty is None
+
+    def test_multi_hit_uncertainty_preserved(self):
+        df = self._df(3.5, num_ambiguous_hits=[5] * 5)
+        clusters = NovelDiversityAnalyzer(df, min_cluster_size=3).cluster_novel_reads()
         assert clusters[0].mean_placement_uncertainty == pytest.approx(3.5, rel=0.1)
 
-    def test_inferred_uncertainty_capped(self):
-        """Inferred uncertainty should be capped at 15%."""
-        df = pl.DataFrame({
-            "read_id": [f"read_{i:03d}" for i in range(5)],
-            "best_match_genome": ["GCF_000123456.1"] * 5,
-            "novelty_index": [50.0] * 5,  # High novelty would give 20% inferred
-            "placement_uncertainty": [0.0] * 5,
-            "num_ambiguous_hits": [1] * 5,
-            "taxonomic_call": ["Novel Genus"] * 5,
-        })
-        analyzer = NovelDiversityAnalyzer(df, min_cluster_size=3)
-        clusters = analyzer.cluster_novel_reads()
+    def test_inferred_uncertainty_kept_in_separate_field(self):
+        df = self._df(0.0, inferred_uncertainty=[4.0] * 5)
+        clusters = NovelDiversityAnalyzer(df, min_cluster_size=3).cluster_novel_reads()
+        assert clusters[0].mean_placement_uncertainty == pytest.approx(0.0)
+        assert clusters[0].mean_inferred_uncertainty == pytest.approx(4.0)
 
-        assert len(clusters) == 1
-        # Should be capped at 15%, not 50 * 0.4 = 20
-        assert clusters[0].mean_placement_uncertainty == pytest.approx(15.0, rel=0.1)
-
-    def test_fallback_without_num_ambiguous_hits(self):
-        """Should infer for zero-uncertainty reads when num_ambiguous_hits missing."""
-        df = pl.DataFrame({
-            "read_id": [f"read_{i:03d}" for i in range(5)],
-            "best_match_genome": ["GCF_000123456.1"] * 5,
-            "novelty_index": [8.0] * 5,
-            "placement_uncertainty": [0.0] * 5,  # Zero uncertainty triggers inference
-            "taxonomic_call": ["Novel Species"] * 5,
-        })
-        analyzer = NovelDiversityAnalyzer(df, min_cluster_size=3)
-        clusters = analyzer.cluster_novel_reads()
-
-        assert len(clusters) == 1
-        # Inferred: 8.0 * 0.4 = 3.2
-        assert clusters[0].mean_placement_uncertainty == pytest.approx(3.2, rel=0.1)
+    def test_zero_uncertainty_without_num_ambiguous_hits_not_inferred(self):
+        df = self._df(0.0)
+        clusters = NovelDiversityAnalyzer(df, min_cluster_size=3).cluster_novel_reads()
+        assert clusters[0].mean_placement_uncertainty == pytest.approx(0.0)
 
 
 class TestSuggestedNames:

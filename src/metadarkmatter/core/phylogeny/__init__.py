@@ -8,6 +8,7 @@ novel taxon clusters on trees at estimated phylogenetic positions.
 from metadarkmatter.core.phylogeny.placement import (
     NovelCluster,
     extract_novel_clusters,
+    from_diversity_cluster,
     place_novel_clusters,
 )
 from metadarkmatter.core.phylogeny.tree_builder import (
@@ -19,6 +20,7 @@ __all__ = [
     "NovelCluster",
     "ani_to_newick",
     "extract_novel_clusters",
+    "from_diversity_cluster",
     "load_user_tree",
     "place_novel_clusters",
 ]
