@@ -38,7 +38,8 @@ This document describes the computational methods used by metadarkmatter for det
     - 10.2 [Posterior Computation](#102-posterior-computation)
     - 10.3 [Stage 2 Refinement](#103-stage-2-refinement)
     - 10.4 [Shannon Entropy and Confidence](#104-shannon-entropy-and-confidence)
-    - 10.5 [Interpretation](#105-interpretation)
+    - 10.5 [Clade-Novelty Rule (opt-in)](#105-clade-novelty-rule-opt-in)
+    - 10.6 [Interpretation](#106-interpretation)
 11. [References](#11-references)
 
 ---
@@ -871,7 +872,24 @@ For six categories, entropy ranges from 0 (all probability mass on one category)
 
 These bands are descriptive; the posteriors are not calibrated probabilities (`docs/STATISTICAL_ASSUMPTIONS.md`, sections 4 and 10).
 
-### 10.5 Interpretation
+### 10.5 Clade-Novelty Rule (opt-in)
+
+Placement uncertainty U measures how uncertain the assignment to a **particular** reference is. In a clade of close relatives (several species of one genus at 85-95% ANI to one another), U is high even for a read that is clearly divergent from every one of them, and such reads fall into Ambiguous or Species Boundary instead of Novel Species. The read is then novel whichever reference it is closest to; only its placement within the clade is uncertain.
+
+With `clade_novel_species = true` (`score classify --clade-novel-species`, YAML section `clade_novelty`), the following rule is applied after Stage 2 (nucleotide mode only; ignored with a warning in protein mode):
+
+| Condition | Value |
+|---|---|
+| `taxonomic_call` | Ambiguous or Species Boundary |
+| `ambiguity_scope` | `within_species` or `within_genus` (reads whose competitors span genera stay Conserved Region) |
+| novelty to the best reference, N | `>= clade_novelty_min` (default 5.0) and `< clade_novelty_max` (default 18.6) |
+| novelty to the best competing reference, `100 - second_hit_identity` | `>= clade_novelty_min` |
+
+Selected reads get `taxonomic_call = "Novel Species"` (and therefore `diversity_status = Novel`, `is_novel = true`). The posteriors, entropy, `placement_uncertainty` and `ambiguity_scope` are unchanged, so the placement ambiguity remains visible, and an extra boolean column `clade_novel_species` records which reads the rule changed. The defaults lie between the legacy Known Species threshold (4%) and the measured Bayesian Known/Novel Species boundary (about 6.2%), and at the measured Bayesian Novel Species/Novel Genus boundary (18.6%), both at U = 0 (Section 2.5).
+
+In a leave-one-out benchmark on three families (Francisellaceae, Lactobacillaceae, Enterobacteriaceae; `scripts/benchmark_leave_one_out.py`), the rule raised read-level novel-species recall from 0.47-0.52 to 0.59-0.70, left novel-versus-known precision at or above 0.989 and Novel Genus recall unchanged, and increased the fraction of genus-level reads called Novel Species. Details and limitations: [CLADE_NOVELTY_VALIDATION.md](CLADE_NOVELTY_VALIDATION.md). The rule is off by default.
+
+### 10.6 Interpretation
 
 The MAP category and the legacy cascade often agree away from boundaries, but they are not equivalent (Section 2.5). Near boundaries the posteriors show uncertainty that the hard thresholds do not.
 
