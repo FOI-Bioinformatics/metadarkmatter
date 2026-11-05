@@ -220,10 +220,10 @@ class TestWarnings:
         # Create BLAST with genomes mostly not in ANI matrix
         blast_path = e2e_temp_dir / "low_coverage.blast.tsv"
         blast_lines = [
-            "r1\tGCF_MISSING_001.1_genomic\t99\t150\t1\t0\t1\t150\t1\t150\t1e-50\t250",
-            "r2\tGCF_MISSING_002.1_genomic\t98\t150\t2\t0\t1\t150\t1\t150\t1e-45\t240",
-            "r3\tGCF_MISSING_003.1_genomic\t97\t150\t3\t0\t1\t150\t1\t150\t1e-40\t230",
-            "r4\tGCF_000123456.1_genomic\t99.5\t150\t0\t0\t1\t150\t1\t150\t1e-60\t280",
+            "r1\tGCF_MISSING_001.1|genomic\t99\t150\t1\t0\t1\t150\t1\t150\t1e-50\t250",
+            "r2\tGCF_MISSING_002.1|genomic\t98\t150\t2\t0\t1\t150\t1\t150\t1e-45\t240",
+            "r3\tGCF_MISSING_003.1|genomic\t97\t150\t3\t0\t1\t150\t1\t150\t1e-40\t230",
+            "r4\tGCF_000123456.1|genomic\t99.5\t150\t0\t0\t1\t150\t1\t150\t1e-60\t280",
         ]
         blast_path.write_text("\n".join(blast_lines) + "\n")
 

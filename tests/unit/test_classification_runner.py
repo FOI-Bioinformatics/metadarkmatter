@@ -145,13 +145,14 @@ def test_finalize_writes_rows(temp_dir: Path) -> None:
     assert len(pl.read_csv(output)) == 2
 
 
-def test_finalize_empty_skips_write(temp_dir: Path) -> None:
-    """An empty DataFrame returns zero and does not create the output file."""
+def test_finalize_empty_writes_header_only(temp_dir: Path) -> None:
+    """An empty DataFrame returns zero and still writes a header-only file."""
     output = temp_dir / "out.csv"
     df = pl.DataFrame({"read_id": [], "taxonomic_call": []})
 
     assert finalize_classification(df, None, output, "csv") == 0
-    assert not output.exists()
+    assert output.exists()
+    assert output.read_text().strip() == "read_id,taxonomic_call"
 
 
 def test_finalize_writes_parquet(temp_dir: Path) -> None:

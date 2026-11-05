@@ -299,7 +299,12 @@ class ScoringConfig(BaseModel):
     min_alignment_length: int = Field(
         default=100,
         ge=0,
-        description="Minimum alignment length in bp (0 = no filter)",
+        description=(
+            "Minimum alignment length in bp (0 = no filter). In protein mode "
+            "(BLASTX/DIAMOND) the aligned query span in nucleotides "
+            "(qend - qstart + 1) is compared, because the reported `length` "
+            "is in amino acids."
+        ),
     )
     min_alignment_fraction: float = Field(
         default=0.3,
@@ -678,6 +683,14 @@ class ScoringConfig(BaseModel):
             msg = f"YAML config must be a mapping, got {type(raw).__name__}"
             raise ValueError(msg)
 
+        unknown = _find_unknown_yaml_keys(raw, _build_yaml_structure(cls()))
+        if unknown:
+            logger.warning(
+                "Ignoring unknown key(s) in config %s: %s (check for typos)",
+                path,
+                ", ".join(unknown),
+            )
+
         flat = _flatten_yaml_config(raw)
         return cls(**flat)
 
@@ -844,6 +857,28 @@ def _flatten_yaml_config(raw: dict[str, Any]) -> dict[str, Any]:
     _map_if_present(output_sec, "include_legacy_scores", flat, "include_legacy_scores")
 
     return flat
+
+
+# YAML sections whose children are user-defined (not validated by key name).
+_FREEFORM_YAML_PATHS = {"bayesian.priors", "bayesian.category_params"}
+
+
+def _find_unknown_yaml_keys(
+    raw: dict[str, Any], known: dict[str, Any], prefix: str = ""
+) -> list[str]:
+    """Return dotted paths of keys in ``raw`` that ScoringConfig does not read."""
+    unknown: list[str] = []
+    for key, value in raw.items():
+        path = f"{prefix}{key}"
+        if key not in known:
+            unknown.append(path)
+        elif (
+            isinstance(value, dict)
+            and isinstance(known[key], dict)
+            and path not in _FREEFORM_YAML_PATHS
+        ):
+            unknown.extend(_find_unknown_yaml_keys(value, known[key], f"{path}."))
+    return unknown
 
 
 def _map_if_present(

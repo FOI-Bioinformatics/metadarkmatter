@@ -39,7 +39,7 @@ from metadarkmatter.core.classification.runner import (
     run_classification,
     validate_ani_genome_coverage,
 )
-from metadarkmatter.core.exceptions import ConfigurationError
+from metadarkmatter.core.exceptions import ConfigurationError, MetadarkmatterError
 from metadarkmatter.core.io_utils import OutputFormat, read_dataframe, write_dataframe
 from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.models.classification import TaxonomicSummary
@@ -1193,7 +1193,7 @@ def batch(
     file_ext = ".parquet" if output_format == "parquet" else ".csv"
 
     # Find all alignment files
-    alignment_files = list(alignment_dir.glob(pattern))
+    alignment_files = sorted(alignment_dir.glob(pattern))
 
     if not alignment_files:
         console.print(
@@ -1234,6 +1234,14 @@ def batch(
                     f"[dim]Genome coverage (sample): {matched}/{total} genomes in ANI matrix "
                     f"({coverage_pct:.1f}%)[/dim]"
                 )
+
+            if total > 0 and matched == 0:
+                console.print(
+                    f"[red]Error: None of the {total} genome(s) in {alignment_files[0].name} "
+                    f"are present in the ANI matrix (0% overlap); inputs appear "
+                    f"mismatched.[/red]"
+                )
+                raise typer.Exit(code=1) from None
 
             if coverage_pct < 50.0 and total > 0:
                 console.print(
@@ -1374,17 +1382,26 @@ def batch(
             num_classified = len(df)
 
             # Write results in specified format
+            write_dataframe(df, output_file, output_format)
             if num_classified > 0:
-                write_dataframe(df, output_file, output_format)
-
                 # Generate summary using in-memory DataFrame
                 summary_obj = _generate_summary(df)
                 summary_obj.to_json(summary_file)
-
-            console.print(f"  [green]Classified {num_classified:,} reads[/green]")
+                console.print(f"  [green]Classified {num_classified:,} reads[/green]")
+            else:
+                console.print(
+                    "  [yellow]Warning: 0 reads classified (header-only output "
+                    "written); check the alignment filters.[/yellow]"
+                )
             total_classified += num_classified
 
-        except (pl.exceptions.PolarsError, FileNotFoundError, ValueError, OSError) as e:
+        except (
+            MetadarkmatterError,
+            pl.exceptions.PolarsError,
+            FileNotFoundError,
+            ValueError,
+            OSError,
+        ) as e:
             console.print(f"  [red]Failed: {e}[/red]")
             failed_files.append(alignment_file.name)
             if verbose:
@@ -1401,6 +1418,9 @@ def batch(
             console.print(f"  - {fname}")
 
     console.print(f"\n[bold green]Results written to:[/bold green] {output_dir}\n")
+
+    if failed_files:
+        raise typer.Exit(code=1)
 
 
 def _generate_summary(df: pl.DataFrame) -> TaxonomicSummary:
@@ -1685,19 +1705,12 @@ def extract_novel(
     # Build filter expression based on category
     out.print(f"\n[bold]Step 2:[/bold] Filtering for {category} candidates...")
 
-    if min_novelty is not None:
-        # Custom novelty threshold
-        filter_expr = (
-            (pl.col("novelty_index") >= min_novelty) &
-            (pl.col("placement_uncertainty") < max_uncertainty)
-        )
-        filter_desc = f"novelty >= {min_novelty}%, uncertainty < {max_uncertainty}%"
-    elif category == "species":
+    if category == "species":
         filter_expr = pl.col("taxonomic_call") == "Novel Species"
-        filter_desc = "Novel Species (5-20% novelty, <2% uncertainty)"
+        filter_desc = "Novel Species"
     elif category == "genus":
         filter_expr = pl.col("taxonomic_call") == "Novel Genus"
-        filter_desc = "Novel Genus (20-25% novelty, <2% uncertainty)"
+        filter_desc = "Novel Genus"
     else:  # all
         filter_expr = (
             (pl.col("taxonomic_call") == "Novel Species") |
@@ -1705,12 +1718,20 @@ def extract_novel(
         )
         filter_desc = "Novel Species + Novel Genus"
 
+    # --min-novelty narrows the selected category (intersection); the
+    # uncertainty cap applies in every case.
+    if min_novelty is not None:
+        filter_expr = filter_expr & (pl.col("novelty_index") >= min_novelty)
+        filter_desc += f", novelty >= {min_novelty}%"
+    filter_expr = filter_expr & (pl.col("placement_uncertainty") < max_uncertainty)
+    filter_desc += f", uncertainty < {max_uncertainty}%"
+
     # Apply filter
     novel_df = df.filter(filter_expr)
 
     if len(novel_df) == 0:
         console.print(f"[yellow]No reads found matching criteria: {filter_desc}[/yellow]")
-        raise typer.Exit(code=0)
+        console.print("[yellow]Writing header-only output.[/yellow]")
 
     out.print(f"  [green]Found {len(novel_df):,} novel candidates[/green]")
     out.print(f"  [dim]Filter: {filter_desc}[/dim]")
@@ -1771,7 +1792,13 @@ def extract_novel(
     if read_ids:
         out.print("\n[bold]Step 4:[/bold] Exporting read IDs...")
 
-        novel_df.select("read_id").write_csv(read_ids, include_header=False)
+        ids_df = novel_df
+        if group_by_genome:
+            # Same lineage set (--min-reads) as the grouped output.
+            ids_df = novel_df.filter(
+                pl.col("best_match_genome").is_in(grouped["best_match_genome"].to_list())
+            )
+        ids_df.select("read_id").write_csv(read_ids, include_header=False)
         out.print(f"[green]Read IDs written to:[/green] {read_ids}")
         out.print(f"  [dim]Use with: seqtk subseq reads.fastq.gz {read_ids} > novel.fastq[/dim]")
 
@@ -1863,7 +1890,7 @@ def sensitivity(
         "tsv",
         "--format",
         "-f",
-        help="Output format: 'tsv' (long form) or 'json'.",
+        help="Output format: 'tsv' (long form) or 'json' (case-insensitive).",
     ),
     quiet: bool = typer.Option(
         False,
@@ -1876,8 +1903,11 @@ def sensitivity(
 
     Re-classifies the rows of an existing classification file across a
     grid of (novelty_known_max, uncertainty_known_max) values, varying
-    both proportionally in ``steps`` increments. The output reveals
-    whether category counts are stable or sharply threshold-dependent.
+    both together along a diagonal (point i uses the i-th novelty AND the
+    i-th uncertainty value; this is not a 2D grid) in ``steps`` increments.
+    Counts are for the legacy hard-threshold cascade (column ``legacy_call``),
+    not the Bayesian ``taxonomic_call``; all categories present are listed so
+    each point sums to the total read count.
 
     Example:
 
@@ -1900,6 +1930,7 @@ def sensitivity(
             "[red]--uncertainty-min must be strictly less than --uncertainty-max[/red]"
         )
         raise typer.Exit(code=2)
+    output_format = output_format.lower()
     if output_format not in ("tsv", "json"):
         console.print(
             f"[red]Invalid --format '{output_format}'. Use 'tsv' or 'json'.[/red]"
@@ -1953,7 +1984,7 @@ def sensitivity(
                     {
                         "novelty_known_max": round(n_thr, 4),
                         "uncertainty_known_max": round(u_thr, 4),
-                        "taxonomic_call": category,
+                        "legacy_call": category,
                         "count": counts[i],
                     }
                 )

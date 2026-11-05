@@ -12,10 +12,13 @@ Includes GTDB-style naming for novel taxa:
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path
 from typing import cast
 
 import polars as pl
+
+logger = logging.getLogger(__name__)
 
 
 class GenomeMetadata:
@@ -40,6 +43,18 @@ class GenomeMetadata:
             metadata_df: DataFrame with columns: accession, species, genus, family, gtdb_taxonomy
                 Optional column: representative (species representative accession)
         """
+        # Duplicate accession rows would duplicate reads in
+        # join_classifications; keep the first occurrence.
+        n_dup = metadata_df.height - metadata_df["accession"].n_unique()
+        if n_dup > 0:
+            logger.warning(
+                "Metadata contains %d duplicate accession row(s); keeping the "
+                "first occurrence of each accession.",
+                n_dup,
+            )
+            metadata_df = metadata_df.unique(
+                subset=["accession"], keep="first", maintain_order=True
+            )
         self._df = metadata_df
 
         # Build lookup dictionaries for fast access
@@ -71,13 +86,15 @@ class GenomeMetadata:
 
         # Representative lookup (optional column)
         if "representative" in metadata_df.columns:
-            self._accession_to_representative: dict[str, str] = dict(
-                zip(
+            # Blank/null representative cells fall back to the accession itself.
+            self._accession_to_representative: dict[str, str] = {
+                acc: (str(rep).strip() if rep is not None and str(rep).strip() else acc)
+                for acc, rep in zip(
                     metadata_df["accession"].to_list(),
                     metadata_df["representative"].to_list(),
                     strict=False,
                 )
-            )
+            }
         else:
             self._accession_to_representative = {}
 
@@ -177,9 +194,10 @@ class GenomeMetadata:
         if self._df.is_empty():
             return None
         family_counts = (
-            self._df.group_by("family")
+            self._df.drop_nulls("family")
+            .group_by("family")
             .len()
-            .sort("len", descending=True)
+            .sort(["len", "family"], descending=[True, False])
         )
         if family_counts.is_empty():
             return None

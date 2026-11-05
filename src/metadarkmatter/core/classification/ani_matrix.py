@@ -107,13 +107,26 @@ class ANIMatrix:
         # Fill diagonal with 100.0 (self-ANI)
         np.fill_diagonal(self._ani_array, 100.0)
 
-        # Populate matrix from dictionary
+        # Populate matrix from dictionary (NaN/inf/None are treated as
+        # missing = 0.0, never stored)
+        n_nonfinite = 0
         for genome1, inner_dict in ani_dict.items():
             i = self._genome_to_idx[genome1]
             for genome2, ani_value in inner_dict.items():
                 if genome2 in self._genome_to_idx:
                     j = self._genome_to_idx[genome2]
-                    self._ani_array[i, j] = ani_value
+                    value = float(ani_value) if ani_value is not None else 0.0
+                    if not np.isfinite(value):
+                        n_nonfinite += 1
+                        value = 0.0
+                    self._ani_array[i, j] = value
+
+        if n_nonfinite:
+            logger.warning(
+                "ANI matrix contained %d NaN/non-finite value(s); treating them "
+                "as missing (0 = not computed).",
+                n_nonfinite,
+            )
 
         # Fill one-directional pairs: if only ANI(a,b) was supplied (the
         # reverse is 0 = missing), mirror it. The vectorized classifier reads

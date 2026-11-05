@@ -27,6 +27,13 @@ class SensitivityResult:
     def to_dict(self) -> dict[str, Any]:
         """Convert to JSON-serializable dictionary."""
         return {
+            "category_column": "legacy_call",
+            "note": (
+                "Counts are for the legacy hard-threshold cascade (legacy_call), "
+                "not the Bayesian taxonomic_call. Novelty and uncertainty "
+                "thresholds are swept together along a diagonal (point i of "
+                "each list is used together)."
+            ),
             "novelty_thresholds": [round(t, 2) for t in self.novelty_thresholds],
             "uncertainty_thresholds": [round(t, 2) for t in self.uncertainty_thresholds],
             "counts": self.counts,
@@ -44,7 +51,9 @@ def run_sensitivity_analysis(
     Run threshold sensitivity analysis.
 
     Sweeps the novelty_known_max threshold across a range, re-classifying
-    reads at each point. The uncertainty thresholds are co-varied proportionally.
+    reads at each point with the legacy hard-threshold cascade (reported as
+    ``legacy_call``). Novelty and uncertainty thresholds are swept together
+    along a diagonal (not a 2D grid).
     This reveals whether classification counts are stable or threshold-sensitive.
 
     The DataFrame must contain pre-computed metrics from the classification
@@ -77,8 +86,9 @@ def run_sensitivity_analysis(
         "Ambiguous", "Conserved Region", "Species Boundary",
         "Unclassified",
     ]
-    for cat in categories:
-        result.counts[cat] = []
+    # Any other category present (Ambiguous Within Genus, Off-target, ...) is
+    # appended below so that per-point counts sum to the total read count.
+    per_point: list[dict[str, int]] = []
 
     for novelty_thresh, uncertainty_thresh in zip(novelty_values, uncertainty_values, strict=False):
         # Create modified config with swept thresholds
@@ -98,11 +108,15 @@ def run_sensitivity_analysis(
         # Re-classify with modified thresholds
         classified = apply_classification_thresholds(df, config)
 
-        # Count categories
+        # Count categories (the cascade writes its result to taxonomic_call
+        # here; it is the legacy cascade, reported as legacy_call)
         counts = classified.group_by("taxonomic_call").len()
         count_dict = {row[0]: row[1] for row in counts.iter_rows()}
 
-        for cat in categories:
-            result.counts[cat].append(count_dict.get(cat, 0))
+        per_point.append(count_dict)
+
+    extras = sorted({c for d in per_point for c in d if c not in categories and c is not None})
+    for cat in [*categories, *extras]:
+        result.counts[cat] = [d.get(cat, 0) for d in per_point]
 
     return result

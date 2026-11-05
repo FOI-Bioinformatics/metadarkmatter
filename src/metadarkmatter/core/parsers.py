@@ -655,7 +655,38 @@ class ANIMatrixParser:
             self.ani_path,
             separator=separator,
             has_header=True,
+            null_values=["NA", "N/A", "na", "n/a", "NaN", "nan", "NAN", "null", "NULL", ""],
+            infer_schema_length=None,
         )
+
+        # Treat NaN / inf / empty / NA tokens as "not computed" (0.0), which
+        # downstream means a missing pair; never let NaN reach the classifier.
+        if df.width > 1:
+            value_cols = df.columns[1:]
+            try:
+                df = df.with_columns(pl.col(value_cols).cast(pl.Float64))
+            except pl.exceptions.PolarsError as e:
+                msg = f"ANI matrix contains non-numeric values: {e}"
+                raise ValueError(msg) from e
+            bad = df.select(
+                (pl.col(value_cols).is_null()
+                 | pl.col(value_cols).is_nan()
+                 | pl.col(value_cols).is_infinite()).sum()
+            ).sum_horizontal()[0]
+            if bad:
+                logger.warning(
+                    "ANI matrix contains %d NaN/NA/empty/non-finite value(s); "
+                    "treating them as missing (0 = not computed).",
+                    bad,
+                )
+                df = df.with_columns(
+                    pl.when(pl.col(value_cols).is_null()
+                            | pl.col(value_cols).is_nan()
+                            | pl.col(value_cols).is_infinite())
+                    .then(0.0)
+                    .otherwise(pl.col(value_cols))
+                    .name.keep()
+                )
 
         # Validate matrix structure
         self._validate_matrix(df)
