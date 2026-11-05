@@ -428,34 +428,34 @@ DATA_QUICK_FILTERS_TEMPLATE: str = '''
 <div class="quick-filters">
     <div class="filter-row">
         <span class="filter-label">Category:</span>
-        <button class="filter-chip active" data-filter="" onclick="clearAllFilters()" title="Show all reads and reset every filter">All</button>
-        <button class="filter-chip known" data-filter="Known Species" onclick="quickFilter(this, 'Known Species')">Known Species ({known_count})</button>
-        <button class="filter-chip novel-species" data-filter="Novel Species" onclick="quickFilter(this, 'Novel Species')">Novel Species ({novel_species_count})</button>
-        <button class="filter-chip novel-genus" data-filter="Novel Genus" onclick="quickFilter(this, 'Novel Genus')">Novel Genus ({novel_genus_count})</button>
-        <button class="filter-chip species-boundary" data-filter="Species Boundary" onclick="quickFilter(this, 'Species Boundary')">Species Boundary ({species_boundary_count})</button>
-        <button class="filter-chip ambiguous" data-filter="Ambiguous" onclick="quickFilter(this, 'Ambiguous')">Ambiguous ({ambiguous_count})</button>
-        <button class="filter-chip ambiguous-wg" data-filter="Ambiguous Within Genus" onclick="quickFilter(this, 'Ambiguous Within Genus')">Ambiguous Within Genus ({ambiguous_wg_count})</button>
-        <button class="filter-chip conserved" data-filter="Conserved Region" onclick="quickFilter(this, 'Conserved Region')">Conserved ({conserved_count})</button>
-        <button class="filter-chip unclassified" data-filter="Unclassified" onclick="quickFilter(this, 'Unclassified')">Unclassified ({unclassified_count})</button>
+        <button class="filter-chip active" aria-pressed="true" data-filter="" onclick="clearAllFilters()" title="Show all reads and reset every filter">All</button>
+        <button class="filter-chip known" aria-pressed="false" data-filter="Known Species" onclick="quickFilter(this, 'Known Species')">Known Species ({known_count})</button>
+        <button class="filter-chip novel-species" aria-pressed="false" data-filter="Novel Species" onclick="quickFilter(this, 'Novel Species')">Novel Species ({novel_species_count})</button>
+        <button class="filter-chip novel-genus" aria-pressed="false" data-filter="Novel Genus" onclick="quickFilter(this, 'Novel Genus')">Novel Genus ({novel_genus_count})</button>
+        <button class="filter-chip species-boundary" aria-pressed="false" data-filter="Species Boundary" onclick="quickFilter(this, 'Species Boundary')">Species Boundary ({species_boundary_count})</button>
+        <button class="filter-chip ambiguous" aria-pressed="false" data-filter="Ambiguous" onclick="quickFilter(this, 'Ambiguous')">Ambiguous ({ambiguous_count})</button>
+        <button class="filter-chip ambiguous-wg" aria-pressed="false" data-filter="Ambiguous Within Genus" onclick="quickFilter(this, 'Ambiguous Within Genus')">Ambiguous Within Genus ({ambiguous_wg_count})</button>
+        <button class="filter-chip conserved" aria-pressed="false" data-filter="Conserved Region" onclick="quickFilter(this, 'Conserved Region')">Conserved ({conserved_count})</button>
+        <button class="filter-chip unclassified" aria-pressed="false" data-filter="Unclassified" onclick="quickFilter(this, 'Unclassified')">Unclassified ({unclassified_count})</button>
         {off_target_chip}
         <button class="clear-btn data-table-clear" id="clearFiltersTop" onclick="clearAllFilters()" style="display:none;">Clear filters</button>
     </div>
     <div class="filter-row">
         <span class="filter-label">Novelty:</span>
-        <button class="filter-chip range" data-range="novelty" data-min="0" data-max="5" onclick="rangeFilter(this, 'novelty', 0, 5)">Low (0-5%)</button>
-        <button class="filter-chip range" data-range="novelty" data-min="5" data-max="20" onclick="rangeFilter(this, 'novelty', 5, 20)">Medium (5-20%)</button>
-        <button class="filter-chip range" data-range="novelty" data-min="20" data-max="100" onclick="rangeFilter(this, 'novelty', 20, 100)">High (>20%)</button>
+        <button class="filter-chip range" aria-pressed="false" data-range="novelty" data-min="0" data-max="5" onclick="rangeFilter(this, 'novelty', 0, 5)">Low (0-5%)</button>
+        <button class="filter-chip range" aria-pressed="false" data-range="novelty" data-min="5" data-max="20" onclick="rangeFilter(this, 'novelty', 5, 20)">Medium (5-20%)</button>
+        <button class="filter-chip range" aria-pressed="false" data-range="novelty" data-min="20" data-max="100" onclick="rangeFilter(this, 'novelty', 20, 100)">High (>20%)</button>
     </div>
     <div class="filter-row">
         <span class="filter-label">Uncertainty:</span>
-        <button class="filter-chip range" data-range="uncertainty" data-min="0" data-max="2" onclick="rangeFilter(this, 'uncertainty', 0, 2)">Confident (<2%)</button>
-        <button class="filter-chip range" data-range="uncertainty" data-min="2" data-max="5" onclick="rangeFilter(this, 'uncertainty', 2, 5)">Moderate (2-5%)</button>
-        <button class="filter-chip range" data-range="uncertainty" data-min="5" data-max="100" onclick="rangeFilter(this, 'uncertainty', 5, 100)">Ambiguous (>5%)</button>
+        <button class="filter-chip range" aria-pressed="false" data-range="uncertainty" data-min="0" data-max="2" onclick="rangeFilter(this, 'uncertainty', 0, 2)">Confident (<2%)</button>
+        <button class="filter-chip range" aria-pressed="false" data-range="uncertainty" data-min="2" data-max="5" onclick="rangeFilter(this, 'uncertainty', 2, 5)">Moderate (2-5%)</button>
+        <button class="filter-chip range" aria-pressed="false" data-range="uncertainty" data-min="5" data-max="100" onclick="rangeFilter(this, 'uncertainty', 5, 100)">Ambiguous (>5%)</button>
     </div>
     <div class="filter-row">
         <span class="filter-label">Hits:</span>
-        <button class="filter-chip range" data-range="hits" data-min="0" data-max="1" onclick="rangeFilter(this, 'hits', 0, 1)">Single-hit</button>
-        <button class="filter-chip range" data-range="hits" data-min="2" data-max="9999" onclick="rangeFilter(this, 'hits', 2, 9999)">Multi-hit</button>
+        <button class="filter-chip range" aria-pressed="false" data-range="hits" data-min="0" data-max="1" onclick="rangeFilter(this, 'hits', 0, 1)">Single-hit</button>
+        <button class="filter-chip range" aria-pressed="false" data-range="hits" data-min="2" data-max="9999" onclick="rangeFilter(this, 'hits', 2, 9999)">Multi-hit</button>
     </div>
 </div>
 '''
@@ -537,102 +537,50 @@ DATA_TABLE_TEMPLATE: str = '''
 <div class="table-container">
     <div class="table-controls">
         <div class="controls-row">
-            <input type="text" class="table-search" id="tableSearch"
-                   placeholder="Search reads, genomes, species..." oninput="filterTable()">
+            <input type="search" class="table-search" id="tableSearch"
+                   aria-label="Search reads, genomes, species and categories"
+                   placeholder="Search reads, genomes, species, categories..." oninput="filterTable()">
             <div class="controls-right">
                 <div class="column-selector">
-                    <button class="column-btn" onclick="toggleColumnMenu()">Columns</button>
-                    <div class="column-menu" id="columnMenu">
+                    <button type="button" class="column-btn" aria-haspopup="true" aria-expanded="false"
+                            aria-controls="columnMenu" onclick="toggleColumnMenu()">Columns</button>
+                    <div class="column-menu" id="columnMenu" role="group" aria-label="Show or hide columns">
                         <div class="menu-header">Show/Hide Columns</div>
-                        <label><input type="checkbox" data-col="0" checked onchange="toggleColumn(0)"> Read ID</label>
-                        <label><input type="checkbox" data-col="1" checked onchange="toggleColumn(1)"> Best Match</label>
-                        <label><input type="checkbox" data-col="2" onchange="toggleColumn(2)"> Species</label>
-                        <label><input type="checkbox" data-col="3" onchange="toggleColumn(3)"> Genus</label>
-                        <label><input type="checkbox" data-col="4" checked onchange="toggleColumn(4)"> Identity %</label>
-                        <label><input type="checkbox" data-col="5" checked onchange="toggleColumn(5)"> Novelty</label>
-                        <label><input type="checkbox" data-col="6" checked onchange="toggleColumn(6)"> Uncertainty</label>
-                        <label><input type="checkbox" data-col="7" onchange="toggleColumn(7)"> Ambiguous Hits</label>
-                        <label><input type="checkbox" data-col="8" onchange="toggleColumn(8)"> Identity Gap</label>
-                        <label><input type="checkbox" data-col="9" onchange="toggleColumn(9)"> Is Novel</label>
-                        <label><input type="checkbox" data-col="10" checked onchange="toggleColumn(10)"> Classification</label>
-                        <div class="menu-divider" id="enhancedColsDivider" style="display:none; border-top: 1px solid #ddd; margin: 0.5rem 0; padding-top: 0.5rem;"><em>Enhanced Scoring</em></div>
-                        <label id="colLabel11" style="display:none;"><input type="checkbox" data-col="11" onchange="toggleColumn(11)"> Unc. Type</label>
-                        <label id="colLabel12" style="display:none;"><input type="checkbox" data-col="12" onchange="toggleColumn(12)"> Inferred Unc.</label>
-                        <label id="colLabel13" style="display:none;"><input type="checkbox" data-col="13" onchange="toggleColumn(13)"> Discovery Score</label>
-                        <label id="colLabel14" style="display:none;"><input type="checkbox" data-col="14" onchange="toggleColumn(14)"> Identity Conf.</label>
-                        <label id="colLabel15" style="display:none;"><input type="checkbox" data-col="15" onchange="toggleColumn(15)"> Placement Conf.</label>
-                        <label id="colLabel16" style="display:none;"><input type="checkbox" data-col="16" onchange="toggleColumn(16)"> Legacy Call</label>
-                        <label id="colLabel17" style="display:none;"><input type="checkbox" data-col="17" onchange="toggleColumn(17)"> Confidence Score</label>
+{column_menu}
                     </div>
                 </div>
-                <button class="export-btn" onclick="exportTableTSV()">Export TSV</button>
+                <button type="button" class="export-btn" onclick="exportTableTSV()"
+                        title="Exports all filtered rows and the columns currently shown">Export TSV</button>
             </div>
         </div>
-        <div class="filter-status" id="filterStatus">
+        <div class="filter-status" id="filterStatus" role="status" aria-live="polite">
             <span class="results-count">Showing <strong id="resultsCount">{total_rows:,}</strong> reads</span>
-            <button class="clear-btn" id="clearFilters" onclick="clearAllFilters()" style="display:none;">Clear filters</button>
+            <button type="button" class="clear-btn" id="clearFilters" onclick="clearAllFilters()" style="display:none;">Clear filters</button>
         </div>
     </div>
+    <noscript><p class="mdm-note">JavaScript is required to display the table. The full per-read results are in the classifications CSV.</p></noscript>
     <div class="table-wrapper">
         <table class="data-table" id="dataTable">
             <thead>
                 <tr>
-                    <th data-col="0" onclick="sortTable(0)">Read ID <span class="sort-icon">-</span></th>
-                    <th data-col="1" onclick="sortTable(1)">Best Match <span class="sort-icon">-</span></th>
-                    <th data-col="2" onclick="sortTable(2)" style="display:none;">Species <span class="sort-icon">-</span></th>
-                    <th data-col="3" onclick="sortTable(3)" style="display:none;">Genus <span class="sort-icon">-</span></th>
-                    <th data-col="4" onclick="sortTable(4)">Identity % <span class="sort-icon">-</span></th>
-                    <th data-col="5" onclick="sortTable(5)">Novelty <span class="sort-icon">-</span></th>
-                    <th data-col="6" onclick="sortTable(6)">Uncertainty <span class="sort-icon">-</span></th>
-                    <th data-col="7" onclick="sortTable(7)" style="display:none;">Ambig. Hits <span class="sort-icon">-</span></th>
-                    <th data-col="8" onclick="sortTable(8)" style="display:none;">Identity Gap <span class="sort-icon">-</span></th>
-                    <th data-col="9" onclick="sortTable(9)" style="display:none;">Is Novel <span class="sort-icon">-</span></th>
-                    <th data-col="10" onclick="sortTable(10)">Classification <span class="sort-icon">-</span></th>
-                    <th data-col="11" onclick="sortTable(11)" style="display:none;">Unc. Type <span class="sort-icon">-</span></th>
-                    <th data-col="12" onclick="sortTable(12)" style="display:none;">Inferred Unc. <span class="sort-icon">-</span></th>
-                    <th data-col="13" onclick="sortTable(13)" style="display:none;">Discovery <span class="sort-icon">-</span></th>
-                    <th data-col="14" onclick="sortTable(14)" style="display:none;">Id. Conf. <span class="sort-icon">-</span></th>
-                    <th data-col="15" onclick="sortTable(15)" style="display:none;">Pl. Conf. <span class="sort-icon">-</span></th>
-                    <th data-col="16" onclick="sortTable(16)" style="display:none;">Legacy Call <span class="sort-icon">-</span></th>
-                    <th data-col="17" onclick="sortTable(17)" style="display:none;">Confidence <span class="sort-icon">-</span></th>
+{table_head}
                 </tr>
             </thead>
             <tbody id="tableBody">
-{table_rows}
             </tbody>
         </table>
     </div>
     <div class="table-pagination">
         <span class="page-info" id="pageInfo">Showing 1-{page_size} of {total_rows}</span>
         <div class="page-buttons">
-            <button class="page-btn" id="prevBtn" onclick="prevPage()" disabled>Previous</button>
+            <button type="button" class="page-btn" id="prevBtn" onclick="prevPage()" disabled>Previous</button>
             <span class="page-number" id="pageNumber">Page 1</span>
-            <button class="page-btn" id="nextBtn" onclick="nextPage()">Next</button>
+            <button type="button" class="page-btn" id="nextBtn" onclick="nextPage()">Next</button>
         </div>
     </div>
 </div>
+{table_data}
 '''
-
-TABLE_ROW_TEMPLATE: str = '''<tr class="data-row" data-class="{classification}">
-    <td data-col="0">{read_id}</td>
-    <td data-col="1">{best_match}</td>
-    <td data-col="2" style="display:none;">{species}</td>
-    <td data-col="3" style="display:none;">{genus}</td>
-    <td data-col="4">{identity}</td>
-    <td data-col="5">{novelty}</td>
-    <td data-col="6">{uncertainty}</td>
-    <td data-col="7" style="display:none;">{ambiguous_hits}</td>
-    <td data-col="8" style="display:none;">{identity_gap}</td>
-    <td data-col="9" style="display:none;">{is_novel}</td>
-    <td data-col="10" class="{cell_class}">{classification}</td>
-    <td data-col="11" style="display:none;">{uncertainty_type}</td>
-    <td data-col="12" style="display:none;">{inferred_uncertainty}</td>
-    <td data-col="13" style="display:none;">{discovery_score}</td>
-    <td data-col="14" style="display:none;">{identity_confidence}</td>
-    <td data-col="15" style="display:none;">{placement_confidence}</td>
-    <td data-col="16" style="display:none;">{legacy_call}</td>
-    <td data-col="17" style="display:none;">{confidence_score}</td>
-</tr>'''
 
 # =============================================================================
 # Enhanced Scoring Templates
@@ -891,305 +839,352 @@ function togglePanel(panelId) {
 }
 '''
 
-DATA_TABLE_JS: str = '''
-// Data table functionality
-let currentPage = 1;
-const pageSize = {page_size};
-let filteredRows = [];
-let allRows = [];
-let currentClassFilter = '';
-let currentSearchFilter = '';
-let rangeFilters = {{}}; // {{novelty: {{min: 0, max: 5}}, uncertainty: {{min: 0, max: 2}}, hits: {{min: 0, max: 1}}}}
+DATA_TABLE_JS: str = r'''
+// Data table: rendered client-side from the embedded column-oriented JSON.
+(function() {
+    var dataEl = document.getElementById('mdm-table-data');
+    if (!dataEl) return;
+    var D = JSON.parse(dataEl.textContent);
+    var N = D.n;
+    var C = D.cols;
+    var pageSize = D.pageSize;
+    var cols = D.columns;
+    var colByKey = {};
+    cols.forEach(function(c) { colByKey[c.key] = c; });
+    var collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
-// Column visibility state (stored in localStorage)
-// Includes enhanced scoring columns (11-15): uncertainty_type, inferred_uncertainty, discovery_score, identity_confidence, placement_confidence
-const columnNames = ['read_id', 'best_match', 'species', 'genus', 'identity', 'novelty', 'uncertainty', 'ambiguous_hits', 'identity_gap', 'is_novel', 'classification', 'uncertainty_type', 'inferred_uncertainty', 'discovery_score', 'identity_confidence', 'placement_confidence', 'legacy_call', 'confidence_score'];
-let columnVisibility = [true, true, false, false, true, true, true, false, false, false, true, false, false, false, false, false, false, false];
+    var visible = {};
+    cols.forEach(function(c) { visible[c.key] = !!c.visible; });
+    try {
+        var saved = JSON.parse(localStorage.getItem('mdm_columns_v3') || 'null');
+        if (saved) Object.keys(visible).forEach(function(k) { if (k in saved) visible[k] = !!saved[k]; });
+    } catch (e) { /* storage unavailable */ }
 
-// Column indices for range filtering
-const COL_NOVELTY = 5;
-const COL_UNCERTAINTY = 6;
-const COL_AMBIG_HITS = 7;
+    var state = { cls: '', search: '', ranges: {} };
+    var RANGE_COLUMN = { novelty: 'novelty', uncertainty: 'uncertainty', hits: 'ambiguous_hits' };
+    var sortKey = null, sortAsc = true;
+    var currentPage = 1;
+    var idx = [];          // filtered + sorted row indices
+    var dictRank = {};     // per dictionary column: entry -> sort rank
 
-document.addEventListener('DOMContentLoaded', function() {{
-    allRows = Array.from(document.querySelectorAll('.data-row'));
-    filteredRows = [...allRows];
+    // ---- value access -------------------------------------------------
+    function raw(key, i) {
+        var c = colByKey[key];
+        if (!c) return null;
+        switch (c.kind) {
+            case 'str': return C[key][i];
+            case 'genome': return D.genomes[C.genome[i]];
+            case 'species': return D.species[C.genome[i]];
+            case 'genus': return D.genus[C.genome[i]];
+            case 'dict': return D.dicts[key][C[key][i]];
+            case 'bool': return C[key][i] ? 'Yes' : 'No';
+            default: return C[key][i];
+        }
+    }
+    function display(key, i) {
+        var v = raw(key, i);
+        var c = colByKey[key];
+        if (v === null || v === undefined || v === '') return '-';
+        if (c.kind === 'num') return c.digits ? v.toFixed(c.digits) : String(v);
+        return String(v);
+    }
+    function esc(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
 
-    // Load saved column visibility from localStorage
-    const saved = localStorage.getItem('mdm_column_visibility_v2');
-    if (saved) {{
-        try {{
-            const savedVis = JSON.parse(saved);
-            // Merge with defaults (in case new columns were added)
-            savedVis.forEach((visible, col) => {{
-                if (col < columnVisibility.length) columnVisibility[col] = visible;
-            }});
-            // Apply saved visibility
-            columnVisibility.forEach((visible, col) => {{
-                const checkbox = document.querySelector(`input[data-col="${{col}}"]`);
-                if (checkbox) checkbox.checked = visible;
-                applyColumnVisibility(col, visible);
-            }});
-        }} catch (e) {{
-            console.warn('Could not load column preferences');
-        }}
-    }}
+    // ---- filtering ----------------------------------------------------
+    function matchingDictEntries(list, term) {
+        var hit = new Uint8Array(list.length);
+        for (var k = 0; k < list.length; k++) hit[k] = list[k].toLowerCase().indexOf(term) !== -1 ? 1 : 0;
+        return hit;
+    }
 
-    updatePagination();
+    function computeIdx() {
+        var term = state.search;
+        var hitGenome = null, hitSpecies = null, hitGenus = null, hitCls = null, hitLegacy = null;
+        if (term) {
+            hitGenome = matchingDictEntries(D.genomes, term);
+            hitSpecies = matchingDictEntries(D.species, term);
+            hitGenus = matchingDictEntries(D.genus, term);
+            if (C.classification) hitCls = matchingDictEntries(D.dicts.classification, term);
+            if (C.legacy_call) hitLegacy = matchingDictEntries(D.dicts.legacy_call, term);
+        }
+        var clsIdx = -1;
+        if (state.cls) clsIdx = D.dicts.classification.indexOf(state.cls);
+        var rangeList = [];
+        Object.keys(state.ranges).forEach(function(r) {
+            var key = RANGE_COLUMN[r];
+            if (C[key]) rangeList.push([C[key], state.ranges[r].min, state.ranges[r].max, r === 'hits']);
+        });
+        var out = [];
+        for (var i = 0; i < N; i++) {
+            if (state.cls) {
+                if (clsIdx < 0 || C.classification[i] !== clsIdx) continue;
+            }
+            var ok = true;
+            for (var r = 0; r < rangeList.length; r++) {
+                var v = rangeList[r][0][i];
+                if (v === null || v === undefined) { ok = false; break; }
+                // novelty/uncertainty bins are [min, max); hit bins are inclusive
+                if (rangeList[r][3] ? (v < rangeList[r][1] || v > rangeList[r][2])
+                                    : (v < rangeList[r][1] || v >= rangeList[r][2])) { ok = false; break; }
+            }
+            if (!ok) continue;
+            if (term) {
+                var g = C.genome ? C.genome[i] : -1;
+                var match = String(C.read_id ? C.read_id[i] : '').toLowerCase().indexOf(term) !== -1 ||
+                    (g >= 0 && (hitGenome[g] || hitSpecies[g] || hitGenus[g])) ||
+                    (hitCls && hitCls[C.classification[i]]) ||
+                    (hitLegacy && hitLegacy[C.legacy_call[i]]);
+                if (!match) continue;
+            }
+            out.push(i);
+        }
+        return out;
+    }
 
-    // Close column menu when clicking outside
-    document.addEventListener('click', function(e) {{
-        const menu = document.getElementById('columnMenu');
-        const btn = document.querySelector('.column-btn');
-        if (menu && !menu.contains(e.target) && !btn.contains(e.target)) {{
+    function rankFor(key) {
+        if (dictRank[key]) return dictRank[key];
+        var list;
+        var src;
+        var c = colByKey[key];
+        if (c.kind === 'genome') { list = D.genomes; src = C.genome; }
+        else if (c.kind === 'species') { list = D.species; src = C.genome; }
+        else if (c.kind === 'genus') { list = D.genus; src = C.genome; }
+        else { list = D.dicts[key]; src = C[key]; }
+        var order = list.map(function(_, k) { return k; }).sort(function(a, b) {
+            return collator.compare(list[a], list[b]) || a - b;
+        });
+        var rank = new Array(list.length);
+        order.forEach(function(entry, r) { rank[entry] = r; });
+        dictRank[key] = { rank: rank, src: src };
+        return dictRank[key];
+    }
+
+    function sortIdx() {
+        if (sortKey === null) return;
+        var c = colByKey[sortKey];
+        var dir = sortAsc ? 1 : -1;
+        var cmp;
+        if (c.kind === 'num') {
+            var arr = C[sortKey];
+            cmp = function(a, b) {
+                var x = arr[a], y = arr[b];
+                if (x === null && y === null) return 0;
+                if (x === null) return 1;   // nulls last in both directions
+                if (y === null) return -1;
+                return (x - y) * dir;
+            };
+        } else if (c.kind === 'str') {
+            var sarr = C[sortKey];
+            cmp = function(a, b) { return collator.compare(sarr[a], sarr[b]) * dir; };
+        } else if (c.kind === 'bool') {
+            var barr = C[sortKey];
+            cmp = function(a, b) { return (barr[a] - barr[b]) * dir; };
+        } else {
+            var rk = rankFor(sortKey);
+            cmp = function(a, b) { return (rk.rank[rk.src[a]] - rk.rank[rk.src[b]]) * dir; };
+        }
+        idx.sort(cmp);  // stable: ties keep original order
+    }
+
+    function applyFilters() {
+        idx = computeIdx();
+        sortIdx();
+        currentPage = 1;
+        render();
+        updateFilterStatus();
+    }
+
+    // ---- rendering ----------------------------------------------------
+    function visibleCols() { return cols.filter(function(c) { return visible[c.key]; }); }
+
+    function applyHeaderVisibility() {
+        cols.forEach(function(c) {
+            var th = document.querySelector('th[data-col="' + c.key + '"]');
+            if (th) th.style.display = visible[c.key] ? '' : 'none';
+        });
+    }
+
+    function render() {
+        var body = document.getElementById('tableBody');
+        var vc = visibleCols();
+        var start = (currentPage - 1) * pageSize;
+        var end = Math.min(start + pageSize, idx.length);
+        var html = [];
+        for (var p = start; p < end; p++) {
+            var i = idx[p];
+            var cells = [];
+            for (var k = 0; k < vc.length; k++) {
+                var key = vc[k].key;
+                var cls = '';
+                if (key === 'classification') cls = D.cellClass[raw(key, i)] || '';
+                cells.push('<td data-col="' + key + '"' + (cls ? ' class="' + cls + '"' : '') + '>' + esc(display(key, i)) + '</td>');
+            }
+            html.push('<tr class="data-row">' + cells.join('') + '</tr>');
+        }
+        if (!html.length) {
+            html.push('<tr class="data-row"><td colspan="' + Math.max(vc.length, 1) + '">No reads match the current filters.</td></tr>');
+        }
+        body.innerHTML = html.join('');
+        updatePagination();
+    }
+
+    function updatePagination() {
+        var totalPages = Math.max(1, Math.ceil(idx.length / pageSize));
+        var start = (currentPage - 1) * pageSize;
+        var end = Math.min(start + pageSize, idx.length);
+        var info = document.getElementById('pageInfo');
+        if (info) info.textContent = 'Showing ' + (idx.length ? start + 1 : 0).toLocaleString() + '-' + end.toLocaleString() + ' of ' + idx.length.toLocaleString();
+        var num = document.getElementById('pageNumber');
+        if (num) num.textContent = 'Page ' + currentPage + ' of ' + totalPages;
+        document.getElementById('prevBtn').disabled = currentPage <= 1;
+        document.getElementById('nextBtn').disabled = currentPage >= totalPages;
+    }
+
+    function updateFilterStatus() {
+        var rc = document.getElementById('resultsCount');
+        if (rc) rc.textContent = idx.length.toLocaleString();
+        var has = state.cls || state.search || Object.keys(state.ranges).length > 0;
+        ['clearFilters', 'clearFiltersTop'].forEach(function(id) {
+            var b = document.getElementById(id);
+            if (b) b.style.display = has ? 'inline-block' : 'none';
+        });
+    }
+
+    // ---- public handlers (referenced from inline onclick attributes) ---
+    window.quickFilter = function(element, classification) {
+        state.cls = classification;
+        document.querySelectorAll('.filter-chip[data-filter]').forEach(function(c) {
+            c.classList.remove('active');
+            c.setAttribute('aria-pressed', 'false');
+        });
+        if (element) { element.classList.add('active'); element.setAttribute('aria-pressed', 'true'); }
+        applyFilters();
+    };
+
+    window.rangeFilter = function(element, rangeType, min, max) {
+        var cur = state.ranges[rangeType];
+        if (cur && cur.min === min && cur.max === max) {
+            delete state.ranges[rangeType];
+            element.classList.remove('active');
+            element.setAttribute('aria-pressed', 'false');
+        } else {
+            document.querySelectorAll('.filter-chip[data-range="' + rangeType + '"]').forEach(function(c) {
+                c.classList.remove('active');
+                c.setAttribute('aria-pressed', 'false');
+            });
+            state.ranges[rangeType] = { min: min, max: max };
+            element.classList.add('active');
+            element.setAttribute('aria-pressed', 'true');
+        }
+        applyFilters();
+    };
+
+    var searchTimer = null;
+    window.filterTable = function() {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(function() {
+            state.search = document.getElementById('tableSearch').value.toLowerCase();
+            applyFilters();
+        }, 120);
+    };
+
+    window.clearAllFilters = function() {
+        clearTimeout(searchTimer);
+        state.cls = '';
+        state.search = '';
+        state.ranges = {};
+        document.getElementById('tableSearch').value = '';
+        document.querySelectorAll('.filter-chip').forEach(function(c) {
+            c.classList.remove('active');
+            c.setAttribute('aria-pressed', 'false');
+        });
+        var all = document.querySelector('.filter-chip[data-filter=""]');
+        if (all) { all.classList.add('active'); all.setAttribute('aria-pressed', 'true'); }
+        applyFilters();
+    };
+
+    window.nextPage = function() { currentPage++; render(); };
+    window.prevPage = function() { currentPage = Math.max(1, currentPage - 1); render(); };
+
+    window.sortTable = function(key) {
+        if (sortKey === key) sortAsc = !sortAsc; else { sortKey = key; sortAsc = true; }
+        document.querySelectorAll('th[data-col]').forEach(function(th) {
+            var on = th.getAttribute('data-col') === key;
+            th.setAttribute('aria-sort', on ? (sortAsc ? 'ascending' : 'descending') : 'none');
+            var icon = th.querySelector('.sort-icon');
+            if (icon) icon.textContent = on ? (sortAsc ? '▲' : '▼') : '-';
+        });
+        idx = computeIdx();
+        sortIdx();
+        currentPage = 1;
+        render();
+    };
+
+    window.toggleColumnMenu = function() {
+        var menu = document.getElementById('columnMenu');
+        var open = menu.classList.toggle('show');
+        var btn = document.querySelector('.column-btn');
+        if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+
+    window.toggleColumn = function(key) {
+        var cb = document.querySelector('input[data-col="' + key + '"]');
+        visible[key] = cb.checked;
+        try { localStorage.setItem('mdm_columns_v3', JSON.stringify(visible)); } catch (e) { /* ignore */ }
+        applyHeaderVisibility();
+        render();
+    };
+
+    // Exports every filtered row (in the current sort order) and every column
+    // that is currently shown.
+    window.exportTableTSV = function() {
+        var vc = visibleCols();
+        var clean = function(v) {
+            if (v === null || v === undefined) return '';
+            return String(v).replace(/[\t\r\n]+/g, ' ');
+        };
+        var lines = [vc.map(function(c) { return c.key; }).join('\t')];
+        for (var p = 0; p < idx.length; p++) {
+            var i = idx[p];
+            var row = new Array(vc.length);
+            for (var k = 0; k < vc.length; k++) row[k] = clean(raw(vc[k].key, i));
+            lines.push(row.join('\t'));
+        }
+        mdmDownloadBlob(lines.join('\n') + '\n', 'classifications_export.tsv', 'text/tab-separated-values;charset=utf-8');
+    };
+
+    document.addEventListener('click', function(e) {
+        var menu = document.getElementById('columnMenu');
+        var btn = document.querySelector('.column-btn');
+        if (menu && btn && !menu.contains(e.target) && !btn.contains(e.target)) {
             menu.classList.remove('show');
-        }}
-    }});
-}});
+            btn.setAttribute('aria-expanded', 'false');
+        }
+    });
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            var menu = document.getElementById('columnMenu');
+            var btn = document.querySelector('.column-btn');
+            if (menu && menu.classList.contains('show')) {
+                menu.classList.remove('show');
+                if (btn) { btn.setAttribute('aria-expanded', 'false'); btn.focus(); }
+            }
+        }
+    });
 
-function toggleColumnMenu() {{
-    const menu = document.getElementById('columnMenu');
-    menu.classList.toggle('show');
-}}
-
-function toggleColumn(col) {{
-    const checkbox = document.querySelector(`input[data-col="${{col}}"]`);
-    const visible = checkbox.checked;
-    columnVisibility[col] = visible;
-
-    // Save to localStorage
-    localStorage.setItem('mdm_column_visibility_v2', JSON.stringify(columnVisibility));
-
-    applyColumnVisibility(col, visible);
-}}
-
-function applyColumnVisibility(col, visible) {{
-    // Toggle header
-    const header = document.querySelector(`th[data-col="${{col}}"]`);
-    if (header) header.style.display = visible ? '' : 'none';
-
-    // Toggle all cells in that column
-    document.querySelectorAll(`td[data-col="${{col}}"]`).forEach(cell => {{
-        cell.style.display = visible ? '' : 'none';
-    }});
-}}
-
-function quickFilter(element, classification) {{
-    currentClassFilter = classification;
-    currentSearchFilter = document.getElementById('tableSearch').value.toLowerCase();
-
-    // Update chip active states for category chips only
-    document.querySelectorAll('.filter-chip[data-filter]').forEach(chip => chip.classList.remove('active'));
-    if (element) element.classList.add('active');
-
-    applyFilters();
-}}
-
-function rangeFilter(element, rangeType, min, max) {{
-    // Toggle range filter
-    const key = rangeType;
-    const currentRange = rangeFilters[key];
-
-    // If clicking same filter, remove it; otherwise set new filter
-    if (currentRange && currentRange.min === min && currentRange.max === max) {{
-        delete rangeFilters[key];
-        element.classList.remove('active');
-    }} else {{
-        // Remove active from other chips in same range group
-        document.querySelectorAll(`.filter-chip[data-range="${{rangeType}}"]`).forEach(chip => {{
-            chip.classList.remove('active');
-        }});
-        rangeFilters[key] = {{ min: min, max: max }};
-        element.classList.add('active');
-    }}
-
-    applyFilters();
-}}
-
-function filterTable() {{
-    currentSearchFilter = document.getElementById('tableSearch').value.toLowerCase();
-    applyFilters();
-}}
-
-function getRowValue(row, colIndex) {{
-    const cell = row.querySelector(`td[data-col="${{colIndex}}"]`);
-    if (!cell) return null;
-    const val = parseFloat(cell.textContent);
-    return isNaN(val) ? null : val;
-}}
-
-function applyFilters() {{
-    filteredRows = allRows.filter(row => {{
-        const text = row.textContent.toLowerCase();
-        const rowClass = row.dataset.class;
-
-        // Text search filter
-        const matchSearch = !currentSearchFilter || text.includes(currentSearchFilter);
-
-        // Classification filter (exact match)
-        const matchClass = !currentClassFilter || rowClass === currentClassFilter;
-
-        // Range filters
-        let matchRanges = true;
-
-        if (rangeFilters.novelty) {{
-            const novelty = getRowValue(row, COL_NOVELTY);
-            if (novelty !== null) {{
-                matchRanges = matchRanges && (novelty >= rangeFilters.novelty.min && novelty < rangeFilters.novelty.max);
-            }}
-        }}
-
-        if (rangeFilters.uncertainty) {{
-            const uncertainty = getRowValue(row, COL_UNCERTAINTY);
-            if (uncertainty !== null) {{
-                matchRanges = matchRanges && (uncertainty >= rangeFilters.uncertainty.min && uncertainty < rangeFilters.uncertainty.max);
-            }}
-        }}
-
-        if (rangeFilters.hits) {{
-            const hits = getRowValue(row, COL_AMBIG_HITS);
-            if (hits !== null) {{
-                matchRanges = matchRanges && (hits >= rangeFilters.hits.min && hits <= rangeFilters.hits.max);
-            }}
-        }}
-
-        return matchSearch && matchClass && matchRanges;
-    }});
-
-    currentPage = 1;
-    updatePagination();
-    updateFilterStatus();
-}}
-
-function clearAllFilters() {{
-    currentClassFilter = '';
-    currentSearchFilter = '';
-    rangeFilters = {{}};
-    document.getElementById('tableSearch').value = '';
-
-    // Reset all chip active states
-    document.querySelectorAll('.filter-chip').forEach(chip => chip.classList.remove('active'));
-    // Set "All" as active
-    const allChip = document.querySelector('.filter-chip[data-filter=""]');
-    if (allChip) allChip.classList.add('active');
-
-    filteredRows = [...allRows];
-    currentPage = 1;
-    updatePagination();
-    updateFilterStatus();
-}}
-
-function updateFilterStatus() {{
-    const resultsCount = document.getElementById('resultsCount');
-    const clearBtn = document.getElementById('clearFilters');
-
-    if (resultsCount) {{
-        resultsCount.textContent = filteredRows.length.toLocaleString();
-    }}
-
-    const hasFilters = currentClassFilter || currentSearchFilter || Object.keys(rangeFilters).length > 0;
-    [clearBtn, document.getElementById('clearFiltersTop')].forEach(btn => {{
-        if (btn) btn.style.display = hasFilters ? 'inline-block' : 'none';
-    }});
-}}
-
-function updatePagination() {{
-    const start = (currentPage - 1) * pageSize;
-    const end = start + pageSize;
-    const totalPages = Math.ceil(filteredRows.length / pageSize);
-
-    allRows.forEach(row => row.style.display = 'none');
-    filteredRows.slice(start, end).forEach(row => row.style.display = '');
-
-    const showing = Math.min(end, filteredRows.length);
-    const pageInfo = document.getElementById('pageInfo');
-    if (pageInfo) {{
-        pageInfo.textContent = `Showing ${{start + 1}}-${{showing}} of ${{filteredRows.length}}`;
-    }}
-
-    const pageNumber = document.getElementById('pageNumber');
-    if (pageNumber) {{
-        pageNumber.textContent = `Page ${{currentPage}} of ${{totalPages || 1}}`;
-    }}
-
-    document.getElementById('prevBtn').disabled = currentPage === 1;
-    document.getElementById('nextBtn').disabled = end >= filteredRows.length;
-}}
-
-function nextPage() {{
-    currentPage++;
-    updatePagination();
-}}
-
-function prevPage() {{
-    currentPage--;
-    updatePagination();
-}}
-
-let sortColumn = -1;
-let sortAsc = true;
-
-function sortTable(col) {{
-    if (sortColumn === col) {{
-        sortAsc = !sortAsc;
-    }} else {{
-        sortColumn = col;
-        sortAsc = true;
-    }}
-
-    filteredRows.sort((a, b) => {{
-        const aCell = a.querySelector(`td[data-col="${{col}}"]`);
-        const bCell = b.querySelector(`td[data-col="${{col}}"]`);
-        if (!aCell || !bCell) return 0;
-
-        const aVal = aCell.textContent;
-        const bVal = bCell.textContent;
-
-        // Try numeric comparison
-        const aNum = parseFloat(aVal);
-        const bNum = parseFloat(bVal);
-        if (!isNaN(aNum) && !isNaN(bNum)) {{
-            return sortAsc ? aNum - bNum : bNum - aNum;
-        }}
-
-        // String comparison
-        return sortAsc ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-    }});
-
-    currentPage = 1;
-    updatePagination();
-
-    // Update sort indicators
-    document.querySelectorAll('.sort-icon').forEach(icon => icon.textContent = '-');
-    const header = document.querySelector(`th[data-col="${{col}}"]`);
-    if (header) {{
-        const icon = header.querySelector('.sort-icon');
-        if (icon) icon.textContent = sortAsc ? '^' : 'v';
-    }}
-}}
-
-function exportTableTSV() {{
-    // Export only visible columns
-    const visibleCols = columnVisibility.map((v, i) => v ? i : -1).filter(i => i >= 0);
-    const headers = visibleCols.map(i => columnNames[i]);
-
-    const rows = filteredRows.map(row => {{
-        return visibleCols.map(col => {{
-            const cell = row.querySelector(`td[data-col="${{col}}"]`);
-            return cell ? cell.textContent : '';
-        }}).join('\\t');
-    }});
-
-    const tsv = headers.join('\\t') + '\\n' + rows.join('\\n');
-    const blob = new Blob([tsv], {{ type: 'text/tab-separated-values' }});
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'classifications_export.tsv';
-    a.click();
-    URL.revokeObjectURL(url);
-}}
+    document.addEventListener('DOMContentLoaded', function() {
+        cols.forEach(function(c) {
+            var cb = document.querySelector('input[data-col="' + c.key + '"]');
+            if (cb) cb.checked = visible[c.key];
+        });
+        applyHeaderVisibility();
+        idx = computeIdx();
+        render();
+        updateFilterStatus();
+    });
+})();
 '''
 
 # =============================================================================

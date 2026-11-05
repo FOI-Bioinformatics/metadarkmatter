@@ -4382,6 +4382,14 @@ button.collapsible-header {
     transition: max-height 0.3s ease, visibility 0s;
 }
 
+button.th-sort {
+    all: unset;
+    cursor: pointer;
+    font-weight: inherit;
+    color: inherit;
+}
+button.th-sort:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
 /* ---- Category colours (text uses the darker "-text" variants) ---- */
 .cell-known, .cat-known { color: var(--cat-known-text) !important; }
 .cell-novel-species, .cat-novel-species { color: var(--cat-novel-species-text) !important; }

@@ -235,12 +235,12 @@ class TestHTMLTemplates:
         assert "{content}" in REPORT_BASE_TEMPLATE
         assert "{css_styles}" in REPORT_BASE_TEMPLATE
 
-    def test_data_table_js_format(self):
+    def test_data_table_js_reads_embedded_payload(self):
         from metadarkmatter.visualization.report.templates import DATA_TABLE_JS
 
-        # Should be able to format with page_size
-        formatted = DATA_TABLE_JS.format(page_size=100)
-        assert "const pageSize = 100" in formatted
+        # Page size and rows come from the embedded JSON, not from str.format
+        assert "mdm-table-data" in DATA_TABLE_JS
+        assert "D.pageSize" in DATA_TABLE_JS
 
     def test_get_cell_class(self):
         from metadarkmatter.visualization.report.templates import get_cell_class

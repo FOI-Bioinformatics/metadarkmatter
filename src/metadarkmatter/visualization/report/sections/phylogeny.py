@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from metadarkmatter.visualization.report.embed import json_for_script
 from metadarkmatter.visualization.report.sections._base import _ReportBase
 
 if TYPE_CHECKING:
@@ -17,21 +17,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _json_for_script(data: object) -> str:
-    """Serialize ``data`` as JSON safe to embed inside a ``<script>`` element.
-
-    ``<``, ``>`` and ``&`` are emitted as unicode escapes so values such as
-    ``</script>`` in metadata species names cannot terminate the script
-    block; the result is still a valid JS/JSON literal.
-    """
-    return (
-        json.dumps(data)
-        .replace("<", "\\u003c")
-        .replace(">", "\\u003e")
-        .replace("&", "\\u0026")
-        .replace("\u2028", "\\u2028")
-        .replace("\u2029", "\\u2029")
-    )
+_json_for_script = json_for_script
 
 
 class PhylogenyMixin(_ReportBase):
