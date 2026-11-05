@@ -110,6 +110,10 @@ Production-readiness and UX hardening pass.
 
 ### Fixed
 
+- `score extract-novel`: the default `--max-uncertainty 2.0` cap removed every
+  read the clade-novelty rule had called Novel Species (their U is high by
+  construction). On the Francisellaceae sample this dropped 898 of 1,406 Novel
+  Species reads. Reads flagged `clade_novel_species` are now exempt from the cap.
 - Fixes from the 2026-11 pipeline audit (PR #13), checked against a real
   Francisellaceae BLAST/MMseqs2 run:
   - MMseqs2/DIAMOND reverse-strand hits (`qstart > qend`) had negative

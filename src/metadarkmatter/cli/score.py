@@ -1840,7 +1840,10 @@ def extract_novel(
     max_uncertainty: float = typer.Option(
         2.0,
         "--max-uncertainty",
-        help="Maximum placement uncertainty (exclude ambiguous placements)",
+        help=(
+            "Maximum placement uncertainty (exclude ambiguous placements). "
+            "Reads flagged clade_novel_species are exempt."
+        ),
         min=0.0,
         max=100.0,
     ),
@@ -2029,8 +2032,16 @@ def extract_novel(
     if min_novelty is not None:
         filter_expr = filter_expr & (pl.col("novelty_index") >= min_novelty)
         filter_desc += f", novelty >= {min_novelty}%"
-    filter_expr = filter_expr & (pl.col("placement_uncertainty") < max_uncertainty)
-    filter_desc += f", uncertainty < {max_uncertainty}%"
+    # Reads moved to Novel Species by the clade-novelty rule have high U by
+    # construction (competitors within one genus, all distant), so U does not
+    # measure doubt about their novelty; they are exempt from the cap.
+    u_ok = pl.col("placement_uncertainty") < max_uncertainty
+    if "clade_novel_species" in df.columns:
+        u_ok = u_ok | pl.col("clade_novel_species").fill_null(False)
+        filter_desc += f", uncertainty < {max_uncertainty}% (clade-rule reads exempt)"
+    else:
+        filter_desc += f", uncertainty < {max_uncertainty}%"
+    filter_expr = filter_expr & u_ok
 
     # Apply filter
     novel_df = df.filter(filter_expr)

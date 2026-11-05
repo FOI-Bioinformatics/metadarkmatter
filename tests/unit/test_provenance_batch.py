@@ -281,13 +281,14 @@ def test_batch_config_flags_reach_classifier(tmp_path, data):
     ScoringConfig(include_legacy_scores=True).to_yaml(cfg)
     res = _batch(
         data, in_dir, tmp_path / "o", "--config", str(cfg), "--target-family", "f__X",
-        "--no-clade-novel-species",
+        "--no-clade-novel-species", "--no-single-hit-novel-species",
     )
     assert res.exit_code == 0, res.output
     prov = json.loads((tmp_path / "o" / "s_classifications.csv.provenance.json").read_text())
     assert prov["config"]["include_legacy_scores"] is True
     assert prov["config"]["target_family"] == "f__X"
     assert prov["config"]["clade_novel_species"] is False
+    assert prov["config"]["single_hit_novel_species"] is False
 
 
 def test_batch_streaming_matches_streaming_classify(tmp_path, data):

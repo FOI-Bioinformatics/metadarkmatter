@@ -210,3 +210,24 @@ class TestConfig:
         )
         assert result.exit_code == 0, result.output
         assert _calls(pl.read_csv(out))["r_clade"] == "Ambiguous"
+
+
+def test_extract_novel_keeps_clade_rule_reads(tmp_path):
+    """The --max-uncertainty cap must not drop reads the clade rule called novel."""
+    cls = tmp_path / "c.csv"
+    pl.DataFrame({
+        "read_id": ["clade", "amb", "single"],
+        "best_match_genome": ["A", "A", "A"],
+        "top_hit_identity": [91.0, 91.0, 92.0],
+        "novelty_index": [9.0, 9.0, 8.0],
+        "placement_uncertainty": [8.0, 8.0, 0.0],
+        "num_ambiguous_hits": [2, 2, 1],
+        "taxonomic_call": ["Novel Species", "Novel Species", "Novel Species"],
+        "clade_novel_species": [True, False, False],
+    }).write_csv(cls)
+    out = tmp_path / "n.csv"
+    result = CliRunner().invoke(
+        app, ["score", "extract-novel", "-c", str(cls), "-o", str(out), "--no-group"]
+    )
+    assert result.exit_code == 0, result.output
+    assert sorted(pl.read_csv(out)["read_id"]) == ["clade", "single"]

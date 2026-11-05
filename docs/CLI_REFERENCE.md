@@ -833,7 +833,8 @@ Accepts the classify options below with the same meaning and defaults:
 `--min-read-length`, `--min-query-coverage`, `--coverage-weight-mode`,
 `--coverage-weight-strength`, `--uncertainty-mode`,
 `--single-hit-threshold`, `--include-legacy-scores`,
-`--clade-novel-species/--no-clade-novel-species`, `--streaming`,
+`--clade-novel-species/--no-clade-novel-species`,
+`--single-hit-novel-species/--no-single-hit-novel-species`, `--streaming`,
 `--chunk-size`, `--strict-ani`, `--adaptive-thresholds`, `--format`,
 `--verbose`, `--provenance/--no-provenance`. Config precedence is the same as
 for classify (`--config` > flags > `--preset` > defaults). `--qc-output` and
@@ -914,7 +915,7 @@ Extract candidate novel species or genera from classification results.
 | `--read-ids` | `-r` | PATH | - | Output path for read IDs only (for seqtk extraction) |
 | `--category` | `-t` | TEXT | all | Category to extract: 'species', 'genus', or 'all' (both) |
 | `--min-novelty` |  | FLOAT | - | Minimum novelty index threshold (overrides category defaults) |
-| `--max-uncertainty` |  | FLOAT | 2.0 | Maximum placement uncertainty (exclude ambiguous placements) |
+| `--max-uncertainty` |  | FLOAT | 2.0 | Maximum placement uncertainty (exclude ambiguous placements). Reads flagged `clade_novel_species` are exempt: their U reflects distant within-genus competitors, not uncertain novelty. |
 | `--group-by-genome/--no-group` |  | FLAG | on | Group results by closest reference genome (default: group) |
 | `--min-reads` |  | INT | 1 | Minimum reads per genome to include in output |
 | `--reads-1` |  | PATH | - | Original FASTQ/FASTA(.gz) (R1 or single-end) to extract the selected reads from; needs an output below |
