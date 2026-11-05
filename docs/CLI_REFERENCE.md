@@ -1574,7 +1574,8 @@ Generate a unified HTML report from classification results.
 | `--theme` | | TEXT | light | Color theme: 'light' or 'dark' |
 | `--alignment-mode` | | TEXT | nucleotide | 'nucleotide' (uses ANI) or 'protein' (uses AAI) |
 | `--max-points` | | INT | 50000 | Maximum points in scatter plots (for performance) |
-| `--max-table-rows` | | INT | 10000 | Maximum rows in data table (for file size) |
+| `--max-table-rows` | | INT | no limit | Maximum rows embedded in the Data tab table. When set, a deterministic sample balanced across `taxonomic_call` categories is kept (rare categories in full; highest novelty first within a category; original order preserved) and the report states that the table is truncated. Summary counts and plots always use all reads |
+| `--provenance` | | PATH | `<classifications>.provenance.json` if present | Provenance sidecar written by `score classify`; feeds the Summary tab's Run information panel |
 | `--max-phylo-clusters` | | INT | 20 | Maximum novel clusters in the phylogenetic context heatmap |
 | `--max-phylo-references` | | INT | 50 | Maximum reference genomes in the phylogenetic context heatmap |
 | `--tree` | | PATH | None | Newick tree file; if omitted, a neighbor-joining tree is built from the ANI matrix |
