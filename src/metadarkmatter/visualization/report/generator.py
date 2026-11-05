@@ -20,6 +20,7 @@ from metadarkmatter.core.metadata import GenomeMetadata
 from metadarkmatter.visualization.plots.base import (
     format_count,
 )
+from metadarkmatter.visualization.report.breakdowns import SORTABLE_TABLE_JS
 from metadarkmatter.visualization.report.embed import CSV_EXPORT_JS
 from metadarkmatter.visualization.report.models import (
     ReportConfig,
@@ -213,7 +214,9 @@ class ReportGenerator(
         plotly_js = self._build_plotly_js()
 
         # Combine JavaScript
-        js_scripts = "\n".join([TAB_NAVIGATION_JS, CSV_EXPORT_JS, DATA_TABLE_JS])
+        js_scripts = "\n".join(
+            [TAB_NAVIGATION_JS, CSV_EXPORT_JS, SORTABLE_TABLE_JS, DATA_TABLE_JS]
+        )
 
         # Build Plotly CDN script tag (empty when embedding JS inline)
         plotly_cdn_script = self._build_plotly_cdn_script()

@@ -21,6 +21,12 @@ from metadarkmatter.visualization.plots.distributions import (
 from metadarkmatter.visualization.plots.scatter_2d import (
     NoveltyUncertaintyScatter,
 )
+from metadarkmatter.visualization.report.breakdowns import (
+    build_call_comparison_html,
+    call_comparison_csv,
+    compute_call_comparison,
+)
+from metadarkmatter.visualization.report.embed import csv_export_button, csv_export_payload
 from metadarkmatter.visualization.report.models import (
     _safe_float,
 )
@@ -189,7 +195,10 @@ class ClassificationMixin(_ReportBase):
         """
         s = self.summary
 
-        if not (s.has_bayesian or s.has_enhanced_scoring or s.has_inferred_uncertainty):
+        if not (
+            s.has_bayesian or s.has_enhanced_scoring or s.has_inferred_uncertainty
+            or "legacy_call" in self.df.columns
+        ):
             return ""
 
         parts = [
@@ -199,6 +208,7 @@ class ClassificationMixin(_ReportBase):
             self._confidence_discovery_distribution(),
             self._confidence_uncertainty_types(),
             self._confidence_landscape_scatter(),
+            self._confidence_call_comparison(),
         ]
         return "\n".join(p for p in parts if p)
 
@@ -411,6 +421,24 @@ class ClassificationMixin(_ReportBase):
             parts.append(uncertainty_types_html)
 
         return "\n".join(parts)
+
+    def _confidence_call_comparison(self) -> str:
+        """taxonomic_call x legacy_call confusion table with CSV download."""
+        cmp = compute_call_comparison(self.df)
+        if cmp is None:
+            return ""
+        header, rows = call_comparison_csv(cmp)
+        export = csv_export_button(
+            "call-comparison",
+            csv_export_payload("call_comparison.csv", header, rows),
+        )
+        return (
+            '<div class="plot-container full-width" id="call-comparison">'
+            '<div class="plot-title">Bayesian call vs legacy threshold call</div>'
+            f'{build_call_comparison_html(cmp)}'
+            f'<div class="export-bar">{export}</div>'
+            "</div>"
+        )
 
     def _confidence_landscape_scatter(self) -> str:
         """Build the novelty-vs-entropy confidence-landscape scatter block."""
