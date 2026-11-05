@@ -50,6 +50,7 @@ from metadarkmatter.core.provenance import (
     summarize_classifications,
     write_provenance,
 )
+from metadarkmatter.core.read_export import extract_reads, normalize_read_id
 from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.models.classification import TaxonomicSummary
 from metadarkmatter.models.config import ScoringConfig
@@ -1854,6 +1855,41 @@ def extract_novel(
         help="Minimum reads per genome to include in output",
         min=1,
     ),
+    reads_1: Path | None = typer.Option(
+        None,
+        "--reads-1",
+        help=(
+            "Original FASTQ/FASTA(.gz) (the R1 file, or single-end reads) to pull "
+            "the selected reads from. Needs --fastq-out, --fasta-out or --per-lineage-dir."
+        ),
+        exists=True,
+        dir_okay=False,
+    ),
+    reads_2: Path | None = typer.Option(
+        None,
+        "--reads-2",
+        help="R2 FASTQ/FASTA(.gz). Outputs become {stem}_R1 / {stem}_R2 files.",
+        exists=True,
+        dir_okay=False,
+    ),
+    fastq_out: Path | None = typer.Option(
+        None,
+        "--fastq-out",
+        help="Write the selected reads as FASTQ (gzip if the path ends in .gz).",
+    ),
+    fasta_out: Path | None = typer.Option(
+        None,
+        "--fasta-out",
+        help="Write the selected reads as FASTA (gzip if the path ends in .gz).",
+    ),
+    per_lineage_dir: Path | None = typer.Option(
+        None,
+        "--per-lineage-dir",
+        help=(
+            "Also write one gzipped file per selected lineage (closest reference "
+            "genome) into this directory, for per-lineage assembly."
+        ),
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose", "-v",
@@ -1900,8 +1936,37 @@ def extract_novel(
     The output can be used with seqtk to extract reads for assembly:
 
         seqtk subseq reads.fastq.gz novel_read_ids.txt > novel_reads.fastq
+
+    Or let this command stream the original reads itself (gzip-aware, constant
+    memory). Read IDs are matched with the /1 and /2 mate suffix removed, so
+    IDs from a paired MMseqs2 search match plain FASTQ headers; both mates of a
+    selected pair are written:
+
+        metadarkmatter score extract-novel \\
+            --classifications results.csv --output novel.csv \\
+            --reads-1 sample_R1.fastq.gz --reads-2 sample_R2.fastq.gz \\
+            --fastq-out novel.fastq.gz --per-lineage-dir novel_by_lineage/
+
+    This writes novel_R1.fastq.gz and novel_R2.fastq.gz (plus one file per
+    lineage in novel_by_lineage/).
     """
     out = QuietConsole(console, quiet=quiet)
+
+    export_requested = any(x is not None for x in (fastq_out, fasta_out, per_lineage_dir))
+    if reads_2 is not None and reads_1 is None:
+        console.print("[red]Error: --reads-2 requires --reads-1.[/red]")
+        raise typer.Exit(code=1) from None
+    if export_requested and reads_1 is None:
+        console.print(
+            "[red]Error: --fastq-out/--fasta-out/--per-lineage-dir require --reads-1.[/red]"
+        )
+        raise typer.Exit(code=1) from None
+    if reads_1 is not None and not export_requested:
+        console.print(
+            "[red]Error: --reads-1 given but no output requested; add --fastq-out, "
+            "--fasta-out or --per-lineage-dir.[/red]"
+        )
+        raise typer.Exit(code=1) from None
 
     out.print("\n[bold blue]Metadarkmatter Novel Species Extraction[/bold blue]\n")
 
@@ -2042,6 +2107,64 @@ def extract_novel(
         ids_df.select("read_id").write_csv(read_ids, include_header=False)
         out.print(f"[green]Read IDs written to:[/green] {read_ids}")
         out.print(f"  [dim]Use with: seqtk subseq reads.fastq.gz {read_ids} > novel.fastq[/dim]")
+
+    # Stream the original reads and write the selected records
+    if reads_1 is not None:
+        out.print("\n[bold]Step 5:[/bold] Extracting reads from FASTQ/FASTA...")
+        selected_df = novel_df
+        if group_by_genome:
+            selected_df = novel_df.filter(
+                pl.col("best_match_genome").is_in(grouped["best_match_genome"].to_list())
+            )
+        # Sorted iteration makes the lineage of a pair whose mates hit
+        # different genomes deterministic (the smallest genome name wins).
+        lineage_of: dict[str, str] = {}
+        for rid, genome in sorted(
+            zip(
+                selected_df["read_id"].to_list(),
+                selected_df["best_match_genome"].to_list(),
+                strict=True,
+            ),
+            key=lambda t: (normalize_read_id(t[0]), str(t[1])),
+        ):
+            lineage_of.setdefault(normalize_read_id(rid), str(genome))
+        wanted = set(lineage_of)
+        try:
+            report = extract_reads(
+                reads_1=reads_1,
+                reads_2=reads_2,
+                ids=wanted,
+                fastq_out=fastq_out,
+                fasta_out=fasta_out,
+                per_lineage_dir=per_lineage_dir,
+                lineage_of=lineage_of,
+            )
+        except ConfigurationError as e:
+            console.print(f"[red]Error: {e}[/red]")
+            raise typer.Exit(code=1) from None
+
+        out.print(f"  Requested read IDs:  {report.requested:,}")
+        out.print(f"  Found in reads-1:    {report.found_1:,} ({report.written_1:,} records)")
+        if report.found_2 is not None:
+            out.print(f"  Found in reads-2:    {report.found_2:,} ({report.written_2:,} records)")
+        for path_out in [*report.outputs, *report.lineage_files]:
+            if verbose:
+                out.print(f"  [dim]wrote {path_out}[/dim]")
+        for path_out in report.outputs:
+            out.print(f"[green]Reads written to:[/green] {path_out}")
+        if report.lineage_files:
+            out.print(
+                f"[green]Per-lineage files:[/green] {len(report.lineage_files)} "
+                f"in {per_lineage_dir}"
+            )
+        for label, missing in (("reads-1", report.missing), ("reads-2", report.missing_2)):
+            if missing and (label == "reads-1" or reads_2 is not None):
+                console.print(
+                    f"[yellow]Warning: {len(missing):,} of {report.requested:,} requested "
+                    f"read IDs not found in {label} (first: "
+                    f"{', '.join(missing[:5])}{'...' if len(missing) > 5 else ''}). "
+                    "Check that the reads are the files that were aligned.[/yellow]"
+                )
 
     # Summary
     out.print("\n[bold green]Extraction complete![/bold green]")
