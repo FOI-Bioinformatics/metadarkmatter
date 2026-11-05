@@ -33,6 +33,7 @@
     },
     "bitscore_threshold_pct": 95.0,
     "clade_novel_species": true,
+    "single_hit_novel_species": false,
     "clade_novelty_max": 18.6,
     "clade_novelty_min": 5.0,
     "confidence_threshold": 50.0,

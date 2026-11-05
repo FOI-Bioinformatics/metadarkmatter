@@ -85,6 +85,7 @@ class TestPanelWithProvenance:
         assert "Uncertainty mode" in panel and "second" in panel
         assert "Coverage weighting" in panel and "linear" in panel
         assert "Clade-novelty rule" in panel and ">on<" in panel
+        assert "Single-hit novelty rule" in panel and ">off<" in panel
         assert "Min. percent identity = 70" in panel
         assert "Provenance was not available" not in panel
 

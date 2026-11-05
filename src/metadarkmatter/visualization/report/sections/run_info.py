@@ -38,6 +38,13 @@ _FILTER_FIELDS: tuple[tuple[str, str], ...] = (
 )
 
 
+
+# Stage 2 refinement rules recorded in ScoringConfig and as flag columns.
+_STAGE2_RULES: tuple[tuple[str, str], ...] = (
+    ("clade_novel_species", "Clade-novelty rule"),
+    ("single_hit_novel_species", "Single-hit novelty rule"),
+)
+
 class RunInfoMixin(_ReportBase):
     """Builds the collapsible Run information panel."""
 
@@ -56,11 +63,12 @@ class RunInfoMixin(_ReportBase):
             if mode != "none" and "coverage_weight_strength" in cfg:
                 text += f" (strength {format_setting(cfg['coverage_weight_strength'])})"
             rows.append(("Coverage weighting", _e(text)))
-        if "clade_novel_species" in cfg:
-            rows.append((
-                "Clade-novelty rule",
-                "on" if cfg["clade_novel_species"] else "off",
-            ))
+        for key, label in _STAGE2_RULES:
+            if key in cfg:
+                text = "on" if cfg[key] else "off"
+                if cfg[key] and key in self.df.columns:
+                    text += f" ({self._rule_flagged(key):,} reads changed)"
+                rows.append((label, text))
         add("Bitscore window (% of top hit)", "bitscore_threshold_pct")
         active = [
             f"{label} = {format_setting(cfg[key])}"
@@ -74,15 +82,19 @@ class RunInfoMixin(_ReportBase):
             ))
         return rows
 
+    def _rule_flagged(self, column: str) -> int:
+        """Number of reads a Stage 2 rule changed (its boolean flag column)."""
+        return int(self.df[column].cast(pl.Boolean, strict=False).sum() or 0)
+
     def _derived_settings_rows(self) -> list[tuple[str, str]]:
         """What can be said about the run from the data alone."""
         rows: list[tuple[str, str]] = [(
             "Alignment mode (from --alignment-mode)",
             _e(self.config.alignment_mode),
         )]
-        if "clade_novel_species" in self.df.columns:
-            flagged = int(self.df["clade_novel_species"].cast(pl.Boolean, strict=False).sum() or 0)
-            rows.append(("Clade-novelty rule", f"column present; {flagged:,} reads flagged"))
+        for key, label in _STAGE2_RULES:
+            if key in self.df.columns:
+                rows.append((label, f"column present; {self._rule_flagged(key):,} reads flagged"))
         if self.summary.has_family_validation:
             rows.append(("Family validation", "active (family bitscore columns present)"))
         return rows
