@@ -14,12 +14,22 @@ from pathlib import Path
 import typer
 import yaml
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from metadarkmatter import __version__
 from metadarkmatter.cli.options import DryRun, Quiet
 from metadarkmatter.cli.utils import QuietConsole
-from metadarkmatter.core.pipeline import Pipeline, PipelineLayout, RunManifest, StepStatus
+from metadarkmatter.core.pipeline import (
+    Cohort,
+    CohortLayout,
+    CohortResult,
+    Pipeline,
+    PipelineLayout,
+    RunManifest,
+    StepStatus,
+    read_samples_tsv,
+)
 from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.models.pipeline_config import Aligner, PipelineConfig, PipelineStep
 
@@ -67,7 +77,7 @@ def run_pipeline(
     ),
     extracted_reads_2: Path | None = typer.Option(
         None, "--extracted-reads-2",
-        help="Pre-extracted family R2 reads (paired-end; used by --aligner mmseqs2 only).",
+        help="Pre-extracted family R2 reads (paired-end; both aligners align both mates).",
         dir_okay=False,
     ),
     output_dir: Path | None = typer.Option(
@@ -80,6 +90,11 @@ def run_pipeline(
     no_report: bool = typer.Option(
         False, "--no-report", help="Skip the HTML report step.",
     ),
+    ani_backend: str | None = typer.Option(
+        None, "--ani-backend",
+        help="ANI backend: auto, fastani or skani [default: auto, or the --config value].",
+    ),
+
     from_step: PipelineStep | None = typer.Option(
         None, "--from", help="Resume from this step (earlier outputs must already exist).",
     ),
@@ -123,6 +138,7 @@ def run_pipeline(
         "extracted_reads_1": extracted_reads_1,
         "output_dir": output_dir,
         "aligner": aligner,
+        "ani_backend": ani_backend,
         "threads": threads,
         "report": False if no_report else None,
     }
@@ -215,3 +231,143 @@ def _print_summary(
     if layout.report.exists():
         out.print(f"  Report:          {layout.report}")
     out.print(f"  Manifest:        {layout.manifest}")
+
+
+@app.command(name="cohort")
+def run_cohort(
+    samples: Path = typer.Option(
+        ..., "--samples", "-s", exists=True, dir_okay=False,
+        help=(
+            "Tab-separated sample sheet with columns sample, reads_1, reads_2 (optional) "
+            "or extracted_reads_1, extracted_reads_2 (optional; skips Kraken2)."
+        ),
+    ),
+    output_dir: Path = typer.Option(
+        ..., "--output-dir", "-o",
+        help="Cohort root: reference/, samples/<sample>/, cohort_summary.tsv, cohort_report.html.",
+    ),
+    family: str | None = typer.Option(
+        None, "--family", help="GTDB family to download references for (e.g. f__Francisellaceae)."
+    ),
+    family_taxid: int | None = typer.Option(
+        None, "--family-taxid", help="NCBI taxid for the family (needed for Kraken2 extraction)."
+    ),
+    kraken_db: Path | None = typer.Option(
+        None, "--kraken-db", help="Kraken2 database directory.", file_okay=False,
+    ),
+    genomes: Path | None = typer.Option(
+        None, "--genomes", "-g", help="Pre-downloaded reference genomes dir (skips download).",
+        file_okay=False,
+    ),
+    aligner: Aligner = typer.Option(
+        Aligner.BLAST, "--aligner", help="Aligner for the alignment step.",
+    ),
+    ani_backend: str = typer.Option(
+        "auto", "--ani-backend", help="ANI backend: auto, fastani or skani.",
+    ),
+    no_report: bool = typer.Option(
+        False, "--no-report", help="Skip per-sample reports and the cohort report.",
+    ),
+    no_sample_reports: bool = typer.Option(
+        False, "--no-sample-reports",
+        help="Skip per-sample HTML reports but still build the cohort report.",
+    ),
+    from_step: PipelineStep | None = typer.Option(
+        None, "--from", help="Resume from this step (earlier outputs must already exist).",
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Re-run every step even if its outputs already exist.",
+    ),
+    threads: int = typer.Option(
+        8, "--threads", "-t", min=1, help="Threads passed to each tool step.",
+    ),
+    quiet: Quiet = False,
+    dry_run: DryRun = False,
+) -> None:
+    """Run the pipeline over many samples that share one reference.
+
+    The reference (genomes, alignment database, ANI matrix) is built once under
+    OUTPUT_DIR/reference; each sample then runs Kraken2, alignment, classification
+    and an optional report under OUTPUT_DIR/samples/<sample>/. Samples run
+    sequentially; a failing sample does not stop the rest, but the command then
+    exits non-zero. Finishes with cohort_summary.tsv and cohort_report.html.
+
+    Example:
+
+        # samples.tsv: sample<TAB>reads_1<TAB>reads_2
+        mdm run cohort --samples samples.tsv --family f__Francisellaceae \\
+            --family-taxid 34064 --kraken-db /db/kraken2 --output-dir results/cohort01
+
+        # Pre-extracted reads and pre-downloaded genomes (no Kraken2)
+        mdm run cohort --samples extracted.tsv --genomes genomes/ --output-dir results/cohort02
+    """
+    out = QuietConsole(console, quiet=quiet)
+    effective_dry_run = dry_run or is_dry_run()
+
+    sheet = read_samples_tsv(samples)
+    if genomes is not None and not genomes.is_dir():
+        raise ValueError(f"--genomes path does not exist or is not a directory: {genomes}")
+
+    shared: dict[str, object] = {
+        "family": family,
+        "family_taxid": family_taxid,
+        "kraken_db": kraken_db,
+        "genomes_dir": genomes,
+        "threads": threads,
+        "ani_backend": ani_backend,
+    }
+    cohort = Cohort(
+        sheet,
+        {k: v for k, v in shared.items() if v is not None},
+        CohortLayout(root=output_dir),
+        aligner=aligner,
+        dry_run=effective_dry_run,
+        force=force,
+        log=lambda msg: out.print(escape(msg)),
+        sample_reports=not (no_report or no_sample_reports),
+        cohort_report=not no_report,
+    )
+
+    if effective_dry_run:
+        out.print("\n[bold cyan]DRY RUN[/bold cyan] - planned cohort steps (no execution)\n")
+    else:
+        out.print(
+            f"\n[bold blue]metadarkmatter cohort[/bold blue] ({len(sheet)} samples) "
+            f"-> {output_dir}\n"
+        )
+
+    result = cohort.run(from_step=from_step, mdm_version=__version__)
+    _print_cohort_summary(out, result, cohort.layout, effective_dry_run, quiet)
+
+    if not effective_dry_run and not result.ok:
+        names = ", ".join(s.name for s in result.failed)
+        if names:
+            console.print(f"[red]Cohort finished with failed samples: {names}[/red]")
+        if result.report_error:
+            console.print(f"[red]Cohort report: {result.report_error}[/red]")
+        raise typer.Exit(code=1)
+
+
+def _print_cohort_summary(
+    out: QuietConsole,
+    result: CohortResult,
+    layout: CohortLayout,
+    dry_run: bool,
+    quiet: bool,
+) -> None:
+    if quiet:
+        return
+    table = Table(title="Cohort samples", show_header=True, header_style="bold")
+    table.add_column("Sample")
+    table.add_column("Status")
+    table.add_column("Detail")
+    style = {"completed": "green", "failed": "red", "planned": "cyan"}
+    for s in result.samples:
+        table.add_row(s.name, f"[{style.get(s.status, 'white')}]{s.status}[/]", s.error or "")
+    console.print(table)
+    if dry_run:
+        out.print("\n[dim]Dry run complete. Re-run without --dry-run to execute.[/dim]")
+        return
+    out.print(f"  Summary: {layout.summary_tsv}")
+    if result.report_path is not None:
+        out.print(f"  Report:  {result.report_path}")

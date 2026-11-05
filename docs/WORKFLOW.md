@@ -427,7 +427,7 @@ metadarkmatter blast makedb \
 
 ## Step 5: Run BLAST Alignment
 
-Competitive alignment (BLAST takes single-end input; use the R1 file or `mmseqs2 search` for paired-end data):
+Competitive alignment (single-end with `--query`; for paired-end data pass `--query-1`/`--query-2` to align both mates into one output, with `/1` and `/2` mate ID suffixes):
 
 ```bash
 metadarkmatter blast align \
@@ -443,6 +443,31 @@ metadarkmatter blast align \
 - `--max-targets 500`: Capture many competing hits per read
 
 For closely related references, `--task dc-megablast` is considerably faster with similar sensitivity in the 80-100% identity range.
+
+Paired-end:
+
+```bash
+metadarkmatter blast align \
+  --query-1 extraction/sample_taxid34064_R1.fastq.gz \
+  --query-2 extraction/sample_taxid34064_R2.fastq.gz \
+  --database blastdb/pangenome \
+  --output sample.blast.tsv.gz
+```
+
+### Multiple samples (cohort)
+
+To process several samples against one shared reference, list them in a TSV
+(`sample`, `reads_1`, `reads_2`; or `extracted_reads_1`/`extracted_reads_2`) and run:
+
+```bash
+mdm run cohort --samples samples.tsv --family f__Francisellaceae --family-taxid 34064 \
+  --kraken-db db/ --output-dir results/cohort01
+```
+
+The reference (genomes, database, ANI) is built once under `reference/`; each
+sample runs under `samples/<sample>/`. The run ends with `cohort_summary.tsv`
+and `cohort_report.html`. See `docs/CLI_REFERENCE.md` for details.
+
 
 **Expected output:**
 - `sample.blast.tsv.gz` - BLAST results; gzip-compressed because the name ends in `.gz` (13 columns including `qlen`)

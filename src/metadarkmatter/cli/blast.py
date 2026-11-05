@@ -335,10 +335,24 @@ def make_database(
 
 @app.command(name="align")
 def align_reads(
-    query: Path = typer.Option(
-        ...,
+    query: Path | None = typer.Option(
+        None,
         "--query", "-q",
-        help="Query reads file (FASTA/FASTQ)",
+        help="Single-end query reads (FASTA/FASTQ). Use this OR --query-1/--query-2.",
+        exists=True,
+        dir_okay=False,
+    ),
+    query_1: Path | None = typer.Option(
+        None,
+        "--query-1", "-1",
+        help="Forward (R1) reads for paired-end data (FASTA/FASTQ, gzipped OK)",
+        exists=True,
+        dir_okay=False,
+    ),
+    query_2: Path | None = typer.Option(
+        None,
+        "--query-2", "-2",
+        help="Reverse (R2) reads for paired-end data (FASTA/FASTQ, gzipped OK)",
         exists=True,
         dir_okay=False,
     ),
@@ -432,11 +446,24 @@ def align_reads(
     Defaults: --task blastn with --word-size following the task (blastn 7,
     dc-megablast 11, megablast 28), --evalue 1e-5, --max-targets 500.
 
+    Supports single-end (--query) and paired-end (--query-1, --query-2) input.
+    For paired-end data both mates are aligned in one BLAST run and written to
+    one output file; mate IDs get /1 and /2 suffixes unless already present
+    (the same convention as 'mmseqs2 search'), so mates are classified as
+    separate reads and each read's hits stay contiguous.
+
     Example:
 
         # Basic alignment
         metadarkmatter blast align \\
             --query extracted_reads.fasta \\
+            --database blastdb/pangenome \\
+            --output sample.blast.tsv.gz
+
+        # Paired-end alignment (both mates, one combined output)
+        metadarkmatter blast align \\
+            --query-1 extracted_R1.fastq.gz \\
+            --query-2 extracted_R2.fastq.gz \\
             --database blastdb/pangenome \\
             --output sample.blast.tsv.gz
 
@@ -453,6 +480,35 @@ def align_reads(
     out.print("\n[bold blue]Metadarkmatter BLAST Alignment[/bold blue]\n")
 
     dry_run = dry_run or is_dry_run()
+
+    # Validate input options (mutual exclusivity)
+    has_single_end = query is not None
+    has_paired_end = query_1 is not None or query_2 is not None
+    if has_single_end and has_paired_end:
+        console.print(
+            "[red]Error: Cannot use --query with --query-1/--query-2. "
+            "Choose one input mode.[/red]"
+        )
+        raise typer.Exit(code=1) from None
+    if not has_single_end and not has_paired_end:
+        console.print(
+            "[red]Error: Must provide either --query (single-end) or "
+            "--query-1 and --query-2 (paired-end).[/red]"
+        )
+        raise typer.Exit(code=1) from None
+    if has_paired_end and (query_1 is None or query_2 is None):
+        console.print(
+            "[red]Error: Paired-end mode requires both --query-1 and --query-2.[/red]"
+        )
+        raise typer.Exit(code=1) from None
+    if query_1 is not None and query_2 is not None and (
+        _sniff_sequence_suffix(query_1) != _sniff_sequence_suffix(query_2)
+    ):
+        console.print(
+            "[red]Error: --query-1 and --query-2 must use the same format "
+            "(both FASTA or both FASTQ).[/red]"
+        )
+        raise typer.Exit(code=1) from None
 
     # Check tool availability
     tool_ok, missing = _check_blastn_available()
@@ -491,7 +547,12 @@ def align_reads(
 
     # Show parameters
     out.print("[bold]Input:[/bold]")
-    out.print(f"  Query:    {query}")
+    if has_paired_end:
+        out.print("  Paired-end reads")
+        out.print(f"  R1:       {query_1}")
+        out.print(f"  R2:       {query_2}")
+    else:
+        out.print(f"  Query:    {query}")
     out.print(f"  Database: {database}")
 
     out.print("\n[bold]Parameters:[/bold]")
@@ -512,8 +573,9 @@ def align_reads(
         "qstart qend sstart send evalue bitscore qlen"
     )
 
-    # Handle gzipped query input (BLASTN doesn't support gzip directly)
-    query_is_gzipped = str(query).endswith(".gz") or str(query).endswith(".gzip")
+    # Prepare the query file. Gzipped input is decompressed (BLASTN does not
+    # read gzip); paired-end input is combined into one file with distinct
+    # /1 and /2 mate IDs so each mate is a separate read in the output.
     temp_query: Path | None = None
 
     def _cleanup_temp_query() -> None:
@@ -522,7 +584,31 @@ def align_reads(
             with contextlib.suppress(OSError):
                 temp_query.unlink()  # Best effort cleanup
 
-    if query_is_gzipped and not dry_run:
+    query_is_gzipped = query is not None and str(query).endswith((".gz", ".gzip"))
+    query_for_blast: Path
+    if has_paired_end:
+        assert query_1 is not None and query_2 is not None
+        if dry_run:
+            query_for_blast = Path("<paired R1+R2>")
+        else:
+            import os
+            import tempfile
+
+            from metadarkmatter.core.paired_reads import combine_mates
+
+            out.print("  [dim]Combining paired-end reads (mates tagged /1 and /2)...[/dim]")
+            fd, temp_query_path = tempfile.mkstemp(suffix=_sniff_sequence_suffix(query_1))
+            os.close(fd)
+            temp_query = Path(temp_query_path)
+            try:
+                n_reads = combine_mates(query_1, query_2, temp_query)
+            except Exception:
+                _cleanup_temp_query()
+                raise
+            out.print(f"  [dim]Combined {n_reads:,} reads from paired-end files[/dim]")
+            query_for_blast = temp_query
+    elif query_is_gzipped and not dry_run:
+        assert query is not None
         import os
         import shutil
         import tempfile
@@ -541,6 +627,7 @@ def align_reads(
             raise
         query_for_blast = temp_query
     else:
+        assert query is not None
         query_for_blast = query
 
     # For compressed output, we write to temp then compress
@@ -554,7 +641,7 @@ def align_reads(
             console.print("\n[green]Dry run complete. No files were created.[/green]")
             raise typer.Exit(code=0)
         result = blastn.run(
-            query=query,  # Show original query in dry run
+            query=query_for_blast,  # Show original query (or paired placeholder) in dry run
             database=database,
             output=temp_output,
             outfmt=outfmt,
@@ -567,7 +654,12 @@ def align_reads(
             dry_run=True,
         )
         console.print(f"\n[dim]Command: {result.command_string}[/dim]")
-        if query_is_gzipped:
+        if has_paired_end:
+            console.print(
+                f"[dim](R1 {query_1} and R2 {query_2} will be combined into one temp "
+                "query with /1 and /2 mate suffixes before alignment)[/dim]"
+            )
+        elif query_is_gzipped:
             console.print("[dim](Query will be decompressed to temp file before alignment)[/dim]")
         if should_compress:
             console.print(f"[dim]Then: gzip {temp_output} -> {output}[/dim]")

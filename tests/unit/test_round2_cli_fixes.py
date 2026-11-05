@@ -19,7 +19,7 @@ from metadarkmatter.cli.main import app
 from metadarkmatter.core.id_mapping import ContigIdMapping
 from metadarkmatter.core.pipeline import Pipeline, PipelineLayout, PipelineStepError, StepStatus
 from metadarkmatter.models.classification import TaxonomicCall
-from metadarkmatter.models.pipeline_config import Aligner, PipelineConfig, PipelineStep
+from metadarkmatter.models.pipeline_config import PipelineConfig, PipelineStep
 
 runner = CliRunner()
 
@@ -217,24 +217,22 @@ def test_old_manifest_is_kept(tmp_path: Path):
     assert all("fingerprint" in s for s in steps)
 
 
-def test_blast_with_r2_warns_in_plan_and_manifest(tmp_path: Path):
+def test_blast_with_r2_aligns_both_mates_without_warning(tmp_path: Path):
     cfg = _cfg(tmp_path)
     lay = PipelineLayout(root=cfg.output_dir)
     r2 = tmp_path / "r2.fastq.gz"
     r2.write_bytes(b"x")
     p = Pipeline(cfg, lay, extracted_reads_2=r2, runner=ProducingRunner())
-    assert any("single-end" in w for w in p.warnings)
+    assert not any("single-end" in w for w in p.warnings)
+    align = next(s for s in p.plan() if s.step == PipelineStep.ALIGN)
+    assert align.argv[align.argv.index("--query-2") + 1] == str(r2)
+    assert "--query" not in align.argv
     m = p.run()
-    assert any("single-end" in w for w in m.warnings)
-    assert "single-end" in lay.manifest.read_text()
-
-    mm = Pipeline(
-        cfg.model_copy(update={"aligner": Aligner.MMSEQS2}), lay, extracted_reads_2=r2
-    )
-    assert not mm.warnings
+    assert not m.warnings
+    assert "single-end" not in lay.manifest.read_text()
 
 
-def test_cli_dry_run_prints_blast_r2_warning(tmp_path: Path):
+def test_cli_dry_run_blast_r2_plans_paired_alignment(tmp_path: Path):
     cfg = _cfg(tmp_path)
     r2 = tmp_path / "r2.fastq.gz"
     r2.write_bytes(b"x")
@@ -245,7 +243,8 @@ def test_cli_dry_run_prints_blast_r2_warning(tmp_path: Path):
          "--output-dir", str(tmp_path / "o"), "--dry-run"],
     )
     assert res.exit_code == 0, res.output
-    assert "single-end" in res.output
+    assert "single-end" not in res.output
+    assert "--query-2" in res.output.replace("\n", "")
 
 
 def test_cli_nonexistent_genomes_fails_early(tmp_path: Path):

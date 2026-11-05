@@ -70,8 +70,13 @@ step only when it completed successfully before and its command and input
 files are unchanged; otherwise that step and all later ones re-run.
 `--from STEP` re-runs that step and all later ones; add `--dry-run` to preview the plan without executing. With
 `--config run.yaml`, YAML values apply unless the corresponding flag is
-passed explicitly. For paired-end MMseqs2 alignment of pre-extracted reads,
-add `--extracted-reads-2` with `--aligner mmseqs2`.
+passed explicitly. For paired-end alignment of pre-extracted reads (BLAST or
+MMseqs2), add `--extracted-reads-2`; mates get `/1` and `/2` ID suffixes.
+
+Several samples against one shared reference: `mdm run cohort --samples
+samples.tsv --output-dir results/cohort01 ...` builds the reference once, runs
+each sample under `samples/<sample>/`, and writes `cohort_summary.tsv` and
+`cohort_report.html`.
 
 ```bash
 mdm run pipeline \
@@ -140,6 +145,7 @@ walkthrough.
 | Command | Description |
 |---------|-------------|
 | `run pipeline` | Run the full pipeline end-to-end (checkpointed, resumable) |
+| `run cohort` | Run the pipeline over many samples sharing one reference; cohort summary and report |
 | `download genomes list` | Query GTDB for family genomes (creates metadata) |
 | `download genomes fetch` | Download genomes from NCBI |
 | `kraken2 classify` | Run Kraken2 classification |

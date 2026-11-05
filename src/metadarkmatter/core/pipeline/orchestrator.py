@@ -80,18 +80,26 @@ class PipelineLayout:
     root: Path
     sample_name: str = "sample"
     family_taxid: int | None = None
+    # Cohort runs keep the shared reference (genomes, alignment database, ANI
+    # matrix) in one directory and per-sample files under ``root``. Unset, the
+    # reference lives under ``root`` (single-sample layout).
+    reference_root: Path | None = None
+
+    @property
+    def ref_root(self) -> Path:
+        return self.reference_root if self.reference_root is not None else self.root
 
     @property
     def genomes_dir(self) -> Path:
-        return self.root / "genomes"
+        return self.ref_root / "genomes"
 
     @property
     def genomes_tsv(self) -> Path:
-        return self.root / "genomes.tsv"
+        return self.ref_root / "genomes.tsv"
 
     @property
     def metadata_tsv(self) -> Path:
-        return self.root / "genome_metadata.tsv"
+        return self.ref_root / "genome_metadata.tsv"
 
     @property
     def kraken_dir(self) -> Path:
@@ -124,18 +132,18 @@ class PipelineLayout:
 
     def database(self, aligner: Aligner) -> Path:
         sub = "blastdb" if aligner == Aligner.BLAST else "mmseqs_db"
-        return self.root / sub / "pangenome"
+        return self.ref_root / sub / "pangenome"
 
     def alignment(self, aligner: Aligner) -> Path:
-        return self.root / f"sample.{aligner.value}.tsv.gz"
+        return self.root / f"{self.sample_name}.{aligner.value}.tsv.gz"
 
     @property
     def ani_matrix(self) -> Path:
-        return self.root / "ani_matrix.csv"
+        return self.ref_root / "ani_matrix.csv"
 
     @property
     def aai_matrix(self) -> Path:
-        return self.root / "aai_matrix.csv"
+        return self.ref_root / "aai_matrix.csv"
 
     @property
     def classifications(self) -> Path:
@@ -256,6 +264,8 @@ class _Step:
     present: Callable[[], bool]
     # Input files/dirs whose size+mtime feed the step fingerprint.
     inputs: list[Path] = field(default_factory=list)
+    # True when the step belongs to another pipeline of the same cohort run.
+    out_of_scope: bool = False
 
 
 class Pipeline:
@@ -271,8 +281,12 @@ class Pipeline:
         runner: StepRunner = _default_runner,
         log: Callable[[str], None] | None = None,
         extracted_reads_2: Path | None = None,
+        only_steps: frozenset[PipelineStep] | None = None,
     ) -> None:
         self.config = config
+        # ``only_steps`` restricts the run to a subset of steps (cohort runs
+        # split the shared-reference steps from the per-sample steps).
+        self.only_steps = only_steps
         # Extracted-read filenames embed the taxid; derive it from the config
         # when the caller did not set it on the layout.
         if layout.family_taxid is None and config.family_taxid is not None:
@@ -288,13 +302,6 @@ class Pipeline:
     def _collect_warnings(self) -> list[str]:
         cfg = self.config
         warnings: list[str] = []
-        has_r2 = cfg.reads_2 is not None or self.extracted_reads_2 is not None
-        if cfg.aligner == Aligner.BLAST and has_r2:
-            warnings.append(
-                "BLAST is single-end: R2 reads (--reads-2 / --extracted-reads-2) "
-                "are NOT aligned and will be ignored. Use --aligner mmseqs2 to "
-                "align both mates."
-            )
         if cfg.compute_aai:
             warnings.append(
                 "compute_aai is set but AAI computation is not implemented in "
@@ -460,22 +467,23 @@ class Pipeline:
 
         # 5. Align extracted reads.
         if cfg.aligner == Aligner.BLAST:
-            align_argv = [
-                *MDM_INVOCATION, "blast", "align",
-                "--query", str(reads_1), "--database", str(db),
-                "--output", str(alignment), "--threads", threads,
-            ]
+            align_tool = "blast"
+            align_sub = "align"
         else:
-            query_args = (
-                ["--query-1", str(reads_1), "--query-2", str(reads_2)]
-                if reads_2 is not None
-                else ["--query", str(reads_1)]
-            )
-            align_argv = [
-                *MDM_INVOCATION, "mmseqs2", "search",
-                *query_args, "--database", str(db),
-                "--output", str(alignment), "--threads", threads,
-            ]
+            align_tool = "mmseqs2"
+            align_sub = "search"
+        # Both aligners align both mates when R2 is available; mate IDs get
+        # /1 and /2 suffixes so the classifier treats them as separate reads.
+        query_args = (
+            ["--query-1", str(reads_1), "--query-2", str(reads_2)]
+            if reads_2 is not None
+            else ["--query", str(reads_1)]
+        )
+        align_argv = [
+            *MDM_INVOCATION, align_tool, align_sub,
+            *query_args, "--database", str(db),
+            "--output", str(alignment), "--threads", threads,
+        ]
         steps.append(
             _Step(
                 step=PipelineStep.ALIGN,
@@ -485,7 +493,7 @@ class Pipeline:
                 present=lambda: _is_present(alignment),
                 inputs=[
                     reads_1,
-                    *([reads_2] if reads_2 is not None and cfg.aligner != Aligner.BLAST else []),
+                    *([reads_2] if reads_2 is not None else []),
                     db.parent,
                 ],
             )
@@ -497,6 +505,8 @@ class Pipeline:
             "--genomes", str(genomes_dir), "--output", str(lay.ani_matrix),
             "--threads", threads,
         ]
+        if cfg.ani_backend != "auto":
+            ani_argv += ["--backend", cfg.ani_backend]
         if use_metadata:
             ani_argv += ["--metadata", str(lay.metadata_tsv), "--representatives-only"]
         steps.append(
@@ -552,6 +562,12 @@ class Pipeline:
             )
         )
 
+        if self.only_steps is not None:
+            for st in steps:
+                if st.step not in self.only_steps:
+                    st.enabled = False
+                    st.out_of_scope = True
+
         return steps
 
     # ------------------------------------------------------------------
@@ -559,7 +575,8 @@ class Pipeline:
     # ------------------------------------------------------------------
     def run(self, from_step: PipelineStep | None = None, *, mdm_version: str = "") -> RunManifest:
         """Execute the planned steps, honouring checkpoints and ``from_step``."""
-        self.layout.root.mkdir(parents=True, exist_ok=True)
+        if not self.dry_run:
+            self.layout.root.mkdir(parents=True, exist_ok=True)
         plan = self.plan()
 
         order = PipelineStep.ordered()
@@ -582,8 +599,13 @@ class Pipeline:
             step_idx = order.index(step.step)
 
             if not step.enabled:
+                detail = (
+                    "handled by another stage of this run"
+                    if step.out_of_scope
+                    else "not applicable for provided inputs"
+                )
                 manifest.steps.append(StepResult(step.step.value, StepStatus.SKIPPED,
-                                                 detail="not applicable for provided inputs"))
+                                                 detail=detail))
                 continue
 
             marker = self._read_marker(step.step)
