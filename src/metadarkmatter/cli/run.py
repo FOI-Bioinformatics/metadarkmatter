@@ -142,6 +142,11 @@ def run_pipeline(
     if extracted_reads_2 is not None and cfg.extracted_reads_1 is None:
         raise ValueError("--extracted-reads-2 requires --extracted-reads-1.")
 
+    if cfg.genomes_dir is not None and not cfg.genomes_dir.is_dir():
+        raise ValueError(f"--genomes path does not exist or is not a directory: {cfg.genomes_dir}")
+
+    yaml_msgs = PipelineConfig.yaml_warnings(config) if config is not None else []
+
     layout = PipelineLayout(root=cfg.output_dir, family_taxid=cfg.family_taxid)
     pipeline = Pipeline(
         cfg,
@@ -151,6 +156,9 @@ def run_pipeline(
         log=lambda msg: out.print(msg),
         extracted_reads_2=extracted_reads_2,
     )
+
+    for msg in dict.fromkeys([*yaml_msgs, *getattr(pipeline, "warnings", [])]):
+        console.print(f"[yellow]Warning:[/yellow] {msg}")
 
     if effective_dry_run:
         out.print("\n[bold cyan]DRY RUN[/bold cyan] - planned steps (no execution)\n")

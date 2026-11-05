@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, Self
+from typing import Any, ClassVar, Self
 
 import yaml
 from pydantic import BaseModel, Field, model_validator
@@ -129,6 +129,28 @@ class PipelineConfig(BaseModel):
                 msg = "Provide --kraken-db (to classify) or --kraken-output (a precomputed .kraken)."
                 raise ValueError(msg)
         return self
+
+    # YAML keys accepted by ``mdm run pipeline`` that are not model fields.
+    _EXTRA_YAML_KEYS: ClassVar[frozenset[str]] = frozenset({"extracted_reads_2"})
+
+    @classmethod
+    def yaml_warnings(cls, path: Path) -> list[str]:
+        """Return warnings about a pipeline YAML (unknown keys, unimplemented fields)."""
+        raw = yaml.safe_load(path.read_text()) or {}
+        if not isinstance(raw, dict):
+            return []
+        known = set(cls.model_fields) | set(cls._EXTRA_YAML_KEYS)
+        messages = [
+            f"Unknown key '{key}' in {path.name} is ignored "
+            f"(known keys: {', '.join(sorted(known))})."
+            for key in sorted(str(k) for k in raw if k not in known)
+        ]
+        if raw.get("compute_aai"):
+            messages.append(
+                "compute_aai is set but AAI computation is not implemented in "
+                "'run pipeline'; it is ignored."
+            )
+        return messages
 
     @classmethod
     def from_yaml(cls, path: Path, **overrides: Any) -> PipelineConfig:

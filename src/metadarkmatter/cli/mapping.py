@@ -16,7 +16,7 @@ from rich.console import Console
 
 from metadarkmatter.cli.utils import QuietConsole, spinner_progress
 from metadarkmatter.core.genome_utils import extract_accession_from_filename
-from metadarkmatter.core.id_mapping import ContigIdMapping
+from metadarkmatter.core.id_mapping import ContigIdMapping, _strip_ncbi_seqid_prefix
 
 app = typer.Typer(
     name="util",
@@ -136,6 +136,19 @@ def validate_mapping(
             resolve_path=True,
         ),
     ] = None,
+    min_coverage: Annotated[
+        float | None,
+        typer.Option(
+            "--min-coverage",
+            help=(
+                "With --blast: exit non-zero when the percentage of BLAST "
+                "subject IDs covered by the mapping (or already in "
+                "accession|contig form) is below this value (0-100)."
+            ),
+            min=0.0,
+            max=100.0,
+        ),
+    ] = None,
     quiet: Annotated[
         bool,
         typer.Option(
@@ -157,6 +170,19 @@ def validate_mapping(
     qc = QuietConsole(console, quiet)
 
     try:
+        conflicts = ContigIdMapping.find_conflicts(mapping_file)
+        if conflicts:
+            console.print(
+                f"[red]Error:[/red] {len(conflicts):,} contig ID(s) map to more "
+                "than one genome accession (the last row would silently win):",
+                style="bold",
+            )
+            for contig, accs in list(conflicts.items())[:10]:
+                console.print(f"  {contig} -> {', '.join(accs)}")
+            if len(conflicts) > 10:
+                console.print(f"  ... and {len(conflicts) - 10:,} more")
+            raise typer.Exit(1)
+
         mapping = ContigIdMapping.from_tsv(mapping_file)
         qc.print(f"[green]Valid mapping file[/green] with {len(mapping):,} entries")
 
@@ -178,10 +204,30 @@ def validate_mapping(
             ).select(pl.col("column_2").alias("sseqid")).unique().collect()
 
             unique_ids = set(df["sseqid"].to_list())
-            mapped = sum(1 for sid in unique_ids if sid in mapping)
-            unmapped = unique_ids - set(mapping.contig_to_accession.keys())
+            known = set(mapping.contig_to_accession.keys())
+            # IDs already in the pipeline's own ``accession|contig`` form
+            # (e.g. BLAST databases built by ``blast makedb``) need no
+            # mapping and count as mapped; NCBI-style ``ref|ID|`` IDs are
+            # looked up by their bare ID.
+            standardized: set[str] = set()
+            unmapped: set[str] = set()
+            mapped = 0
+            for sid in unique_ids:
+                bare = _strip_ncbi_seqid_prefix(sid)
+                if bare in known:
+                    mapped += 1
+                elif bare == sid and "|" in sid:
+                    standardized.add(sid)
+                    mapped += 1
+                else:
+                    unmapped.add(sid)
 
             coverage = (mapped / len(unique_ids)) * 100 if unique_ids else 0
+            if standardized:
+                qc.print(
+                    f"  Already standardized (accession|contig): "
+                    f"{len(standardized):,}"
+                )
 
             qc.print(f"  Unique subject IDs: {len(unique_ids):,}")
             qc.print(f"  Mapped: {mapped:,} ({coverage:.1f}%)")
@@ -198,6 +244,19 @@ def validate_mapping(
                     "Some IDs may not be transformed correctly."
                 )
 
+            if min_coverage is not None and coverage < min_coverage:
+                console.print(
+                    f"[red]Error:[/red] coverage {coverage:.1f}% is below "
+                    f"--min-coverage {min_coverage:.1f}%",
+                    style="bold",
+                )
+                raise typer.Exit(1)
+        elif min_coverage is not None:
+            console.print("[red]Error:[/red] --min-coverage requires --blast")
+            raise typer.Exit(2)
+
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}", style="bold")
         raise typer.Exit(1) from e
@@ -530,6 +589,18 @@ def generate_metadata(
             for err in parse_errors:
                 console.print(f"[yellow]Warning:[/yellow] {err}")
 
+        unparsed_taxonomy = sum(1 for r in records if not r["species"])
+        if unparsed_taxonomy:
+            console.print(
+                f"[yellow]Warning:[/yellow] {unparsed_taxonomy:,} of "
+                f"{len(records):,} files have no taxonomy in their filename "
+                "(expected {Family}_{Genus}_{species}_{Accession}.fna, e.g. "
+                "not the GCF_xxx.fna layout of 'download genomes fetch'); "
+                "species/genus/family are written empty. Use the metadata "
+                "from 'download genomes list' (genome_metadata.tsv), or pass "
+                "--family / --gtdb-metadata, instead."
+            )
+
         if not records:
             console.print(
                 "[red]Error:[/red] No genomes could be parsed. "
@@ -601,11 +672,18 @@ def generate_metadata(
             "gtdb_taxonomy": gtdb_taxonomy_col,
         })
 
+        # Write missing taxonomy as truly empty fields, not literal '""'.
+        out_df = out_df.with_columns(
+            [
+                pl.when(pl.col(c) == "").then(None).otherwise(pl.col(c)).alias(c)
+                for c in ("species", "genus", "family", "gtdb_taxonomy")
+            ]
+        )
         output.parent.mkdir(parents=True, exist_ok=True)
         out_df.write_csv(output, separator="\t")
 
         num_genomes = len(out_df)
-        num_species = out_df["species"].n_unique()
+        num_species = out_df["species"].drop_nulls().n_unique()
         num_reps = len(
             {r for r in representative_col if r in set(df["accession"])}
         )

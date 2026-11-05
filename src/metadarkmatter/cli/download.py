@@ -208,6 +208,26 @@ def list_genomes(
             f"species representatives"
         )
 
+    # Species with no GTDB representative among the queried genomes would
+    # otherwise fall back to "each genome is its own representative", giving
+    # one species several representatives. Assign one deterministic
+    # representative per such species: the first accession, sorted.
+    if reps_result is not None:
+        by_species: dict[str, list[str]] = {}
+        for g in result.genomes:
+            if g.species and g.species not in representative_map:
+                by_species.setdefault(g.species, []).append(g.accession)
+        for species, accs in sorted(by_species.items()):
+            chosen = sorted(accs)[0]
+            representative_map[species] = chosen
+            rep_accession_set.add(chosen)
+        if by_species:
+            console.print(
+                f"[yellow]Warning:[/yellow] {len(by_species):,} species had no GTDB "
+                "representative among the queried genomes; assigned the first "
+                "accession (sorted) of each as its representative."
+            )
+
     # Convert to AccessionList
     accessions = [
         GenomeAccession(
@@ -276,6 +296,11 @@ def fetch_genomes(
         help="Number of accessions per NCBI request (max 1000)",
         min=1,
         max=1000,
+    ),
+    require_all: bool = typer.Option(
+        False,
+        "--require-all",
+        help="Exit non-zero if any requested genome could not be downloaded",
     ),
     verbose: bool = typer.Option(
         False,
@@ -463,7 +488,13 @@ def fetch_genomes(
     n_failed = len(report.failed)
     n_recovered = len(report.recovered)
 
-    out.print("\n[bold green]Download complete![/bold green]")
+    if n_failed > 0:
+        console.print(
+            f"\n[bold yellow]Download finished with {n_failed:,} of "
+            f"{len(accessions_to_download):,} genomes unavailable.[/bold yellow]"
+        )
+    else:
+        out.print("\n[bold green]Download complete![/bold green]")
     out.print("\n[bold]Summary:[/bold]")
     out.print(f"  Requested: {len(accessions_to_download):,} genomes")
     out.print(f"  Downloaded: {n_succeeded:,} genomes")
@@ -560,3 +591,10 @@ def fetch_genomes(
         out.print(f"\n[dim]Elapsed time: {report.elapsed_seconds:.1f}s[/dim]")
 
     out.print()
+
+    if n_failed > 0 and require_all:
+        console.print(
+            f"[red]Error:[/red] {n_failed:,} genome(s) failed and --require-all "
+            "was set."
+        )
+        raise typer.Exit(code=1)

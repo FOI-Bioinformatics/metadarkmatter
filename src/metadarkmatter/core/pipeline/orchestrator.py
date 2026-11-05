@@ -16,6 +16,7 @@ without the external tools installed.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -58,6 +59,7 @@ class StepResult:
     outputs: list[str] = field(default_factory=list)
     elapsed_s: float = 0.0
     detail: str | None = None
+    fingerprint: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         d = asdict(self)
@@ -151,6 +153,18 @@ class PipelineLayout:
     def manifest(self) -> Path:
         return self.root / "run_manifest.json"
 
+    @property
+    def state_dir(self) -> Path:
+        """Directory holding per-step completion markers."""
+        return self.root / ".mdm_steps"
+
+    def marker(self, step: PipelineStep) -> Path:
+        return self.state_dir / f"{step.value}.done.json"
+
+    def running_marker(self, step: PipelineStep) -> Path:
+        """Present while a step is executing (or was killed mid-run)."""
+        return self.state_dir / f"{step.value}.running"
+
 
 @dataclass
 class RunManifest:
@@ -161,6 +175,7 @@ class RunManifest:
     steps: list[StepResult] = field(default_factory=list)
     started_at: str | None = None
     finished_at: str | None = None
+    warnings: list[str] = field(default_factory=list)
 
     def to_json(self) -> str:
         return json.dumps(
@@ -171,6 +186,7 @@ class RunManifest:
                 "started_at": self.started_at,
                 "finished_at": self.finished_at,
                 "config": self.config,
+                "warnings": self.warnings,
                 "steps": [s.to_dict() for s in self.steps],
             },
             indent=2,
@@ -215,6 +231,22 @@ def _db_present(db_prefix: Path, aligner: Aligner = Aligner.BLAST) -> bool:
     return False
 
 
+def _path_signature(path: Path) -> str:
+    """Cheap change detector for an input: size + mtime (files) or a digest of both (dirs)."""
+    try:
+        if path.is_dir():
+            h = hashlib.sha256()
+            for p in sorted(path.rglob("*")):
+                if p.is_file():
+                    st = p.stat()
+                    h.update(f"{p.relative_to(path)}:{st.st_size}:{st.st_mtime_ns}\n".encode())
+            return "dir:" + h.hexdigest()
+        st = path.stat()
+        return f"{st.st_size}:{st.st_mtime_ns}"
+    except OSError:
+        return "missing"
+
+
 @dataclass
 class _Step:
     step: PipelineStep
@@ -222,6 +254,8 @@ class _Step:
     argv: list[str]
     outputs: list[Path]
     present: Callable[[], bool]
+    # Input files/dirs whose size+mtime feed the step fingerprint.
+    inputs: list[Path] = field(default_factory=list)
 
 
 class Pipeline:
@@ -249,6 +283,65 @@ class Pipeline:
         self.force = force
         self._runner = runner
         self._log = log or (lambda _msg: None)
+        self.warnings: list[str] = self._collect_warnings()
+
+    def _collect_warnings(self) -> list[str]:
+        cfg = self.config
+        warnings: list[str] = []
+        has_r2 = cfg.reads_2 is not None or self.extracted_reads_2 is not None
+        if cfg.aligner == Aligner.BLAST and has_r2:
+            warnings.append(
+                "BLAST is single-end: R2 reads (--reads-2 / --extracted-reads-2) "
+                "are NOT aligned and will be ignored. Use --aligner mmseqs2 to "
+                "align both mates."
+            )
+        if cfg.compute_aai:
+            warnings.append(
+                "compute_aai is set but AAI computation is not implemented in "
+                "'run pipeline'; it is ignored."
+            )
+        return warnings
+
+    # ------------------------------------------------------------------
+    # Completion markers / fingerprints
+    # ------------------------------------------------------------------
+    def _fingerprint(self, step: _Step) -> str:
+        """Hash of the step's argv plus size+mtime of its input files."""
+        payload = {
+            "argv": step.argv,
+            "inputs": {str(p): _path_signature(p) for p in step.inputs},
+        }
+        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+    def _read_marker(self, step: PipelineStep) -> dict[str, object] | None:
+        try:
+            data = json.loads(self.layout.marker(step).read_text())
+        except (OSError, ValueError):
+            return None
+        return data if isinstance(data, dict) else None
+
+    def _write_marker(self, step: _Step, fingerprint: str) -> None:
+        marker = self.layout.marker(step.step)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(
+            json.dumps(
+                {
+                    "step": step.step.value,
+                    "fingerprint": fingerprint,
+                    "completed_at": _now_iso(),
+                    "command": " ".join(step.argv),
+                },
+                indent=2,
+            )
+        )
+
+    def _clear_marker(self, step: PipelineStep) -> None:
+        self.layout.marker(step).unlink(missing_ok=True)
+
+    def _mark_running(self, step: PipelineStep) -> None:
+        running = self.layout.running_marker(step)
+        running.parent.mkdir(parents=True, exist_ok=True)
+        running.write_text(_now_iso())
 
     # ------------------------------------------------------------------
     # Step planning
@@ -316,6 +409,7 @@ class Pipeline:
                 argv=kc_argv,
                 outputs=[lay.kraken_output, lay.kraken_report],
                 present=lambda: _is_present(lay.kraken_output) and _is_present(lay.kraken_report),
+                inputs=[p for p in (cfg.reads_1, cfg.reads_2, cfg.kraken_db) if p is not None],
             )
         )
 
@@ -336,6 +430,9 @@ class Pipeline:
                 argv=ke_argv,
                 outputs=[lay.extracted_reads_1],
                 present=lambda: _is_present(lay.extracted_reads_1),
+                inputs=[
+                    p for p in (kraken_output, cfg.reads_1, cfg.reads_2) if p is not None
+                ],
             )
         )
 
@@ -357,6 +454,7 @@ class Pipeline:
                 argv=makedb_argv,
                 outputs=[db],
                 present=lambda: _db_present(db, cfg.aligner),
+                inputs=[genomes_dir],
             )
         )
 
@@ -385,6 +483,11 @@ class Pipeline:
                 argv=align_argv,
                 outputs=[alignment],
                 present=lambda: _is_present(alignment),
+                inputs=[
+                    reads_1,
+                    *([reads_2] if reads_2 is not None and cfg.aligner != Aligner.BLAST else []),
+                    db.parent,
+                ],
             )
         )
 
@@ -403,6 +506,7 @@ class Pipeline:
                 argv=ani_argv,
                 outputs=[lay.ani_matrix],
                 present=lambda: _is_present(lay.ani_matrix),
+                inputs=[genomes_dir, *([lay.metadata_tsv] if use_metadata else [])],
             )
         )
 
@@ -421,6 +525,7 @@ class Pipeline:
                 argv=classify_argv,
                 outputs=[lay.classifications],
                 present=lambda: _is_present(lay.classifications),
+                inputs=[alignment, lay.ani_matrix, *([lay.metadata_tsv] if use_metadata else [])],
             )
         )
 
@@ -439,6 +544,11 @@ class Pipeline:
                 argv=report_argv,
                 outputs=[lay.report],
                 present=lambda: _is_present(lay.report),
+                inputs=[
+                    lay.classifications,
+                    lay.ani_matrix,
+                    *([lay.metadata_tsv] if use_metadata else []),
+                ],
             )
         )
 
@@ -462,7 +572,11 @@ class Pipeline:
             aligner=self.config.aligner.value,
             config={k: _jsonable(v) for k, v in self.config.model_dump().items()},
             started_at=_now_iso(),
+            warnings=list(self.warnings),
         )
+
+        # Once a step runs (or would run), every later step must re-run too.
+        upstream_ran = False
 
         for step in plan:
             step_idx = order.index(step.step)
@@ -472,45 +586,75 @@ class Pipeline:
                                                  detail="not applicable for provided inputs"))
                 continue
 
+            marker = self._read_marker(step.step)
+
             if step_idx < from_idx:
-                # Resuming: earlier steps must already have their outputs.
-                if not step.present():
+                # Resuming: earlier steps must have outputs and must not have
+                # been interrupted mid-run. Outputs from runs that predate the
+                # completion markers (no marker at all) are trusted here.
+                if not step.present() or self.layout.running_marker(step.step).exists():
                     raise PipelineStepError(
                         message=(
                             f"Cannot resume from '{from_label}': required output of "
-                            f"earlier step '{step.step.value}' is missing."
+                            f"earlier step '{step.step.value}' is missing or was not "
+                            "completed."
                         ),
                         suggestion="Run without --from to produce the missing intermediates.",
                     )
-                manifest.steps.append(StepResult(step.step.value, StepStatus.CACHED,
-                                                 outputs=[str(p) for p in step.outputs]))
+                fp_prev = marker.get("fingerprint") if marker else None
+                manifest.steps.append(StepResult(
+                    step.step.value, StepStatus.CACHED,
+                    outputs=[str(p) for p in step.outputs],
+                    fingerprint=fp_prev if isinstance(fp_prev, str) else None))
                 continue
 
             command_str = " ".join(step.argv)
+            fingerprint = self._fingerprint(step)
 
             # --from forces the selected step and every later one to re-run.
             forced = self.force or from_step is not None
-            if not forced and step.present():
-                self._log(f"[cached] {step.step.value}: outputs present, skipping")
+            reason: str | None = None
+            if forced:
+                reason = "forced"
+            elif upstream_ran:
+                reason = "an upstream step was re-run"
+            elif not step.present():
+                reason = "outputs missing"
+            elif marker is None:
+                reason = "outputs have no completed-step marker (partial or pre-existing)"
+            elif marker.get("fingerprint") != fingerprint:
+                reason = "inputs or parameters changed since the last completed run"
+
+            if reason is None:
+                self._log(f"[cached] {step.step.value}: completed with identical inputs, skipping")
                 manifest.steps.append(StepResult(step.step.value, StepStatus.CACHED,
                                                  command=command_str,
-                                                 outputs=[str(p) for p in step.outputs]))
+                                                 outputs=[str(p) for p in step.outputs],
+                                                 fingerprint=fingerprint))
                 continue
+
+            upstream_ran = True
 
             if self.dry_run:
                 self._log(f"[dry-run] {step.step.value}: {command_str}")
                 manifest.steps.append(StepResult(step.step.value, StepStatus.SKIPPED,
-                                                 command=command_str, detail="dry-run"))
+                                                 command=command_str,
+                                                 detail=f"dry-run ({reason})",
+                                                 fingerprint=fingerprint))
                 continue
 
-            self._log(f"[run] {step.step.value}")
+            self._log(f"[run] {step.step.value} ({reason})")
+            # Drop any stale marker first: a killed step must not look complete.
+            self._clear_marker(step.step)
+            self._mark_running(step.step)
             start = time.monotonic()
             code = self._run_step(step)
             elapsed = time.monotonic() - start
 
             if code != 0:
                 manifest.steps.append(StepResult(step.step.value, StepStatus.FAILED,
-                                                 command=command_str, elapsed_s=elapsed))
+                                                 command=command_str, elapsed_s=elapsed,
+                                                 fingerprint=fingerprint))
                 manifest.finished_at = _now_iso()
                 self._write_manifest(manifest)
                 raise PipelineStepError(
@@ -521,10 +665,16 @@ class Pipeline:
                     ),
                 )
 
+            # The step exited 0: only now is it marked complete. Re-fingerprint
+            # so inputs produced during the step (e.g. downloads) are reflected.
+            self._write_marker(step, self._fingerprint(step))
+            self.layout.running_marker(step.step).unlink(missing_ok=True)
             manifest.steps.append(StepResult(step.step.value, StepStatus.COMPLETED,
                                              command=command_str,
                                              outputs=[str(p) for p in step.outputs],
-                                             elapsed_s=round(elapsed, 2)))
+                                             elapsed_s=round(elapsed, 2),
+                                             detail=reason,
+                                             fingerprint=fingerprint))
 
         manifest.finished_at = _now_iso()
         self._write_manifest(manifest)
@@ -547,8 +697,18 @@ class Pipeline:
     def _write_manifest(self, manifest: RunManifest) -> None:
         if self.dry_run:
             return
-        self.layout.manifest.parent.mkdir(parents=True, exist_ok=True)
-        self.layout.manifest.write_text(manifest.to_json())
+        path = self.layout.manifest
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            # Keep the previous run's manifest instead of overwriting it.
+            stamp = datetime.fromtimestamp(path.stat().st_mtime, UTC).strftime("%Y%m%dT%H%M%SZ")
+            archive = path.with_name(f"run_manifest.{stamp}.json")
+            n = 1
+            while archive.exists():
+                archive = path.with_name(f"run_manifest.{stamp}.{n}.json")
+                n += 1
+            path.rename(archive)
+        path.write_text(manifest.to_json())
 
 
 def _now_iso() -> str:

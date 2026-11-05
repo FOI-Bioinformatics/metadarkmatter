@@ -139,7 +139,8 @@ class ContigIdMapping:
                 msg = (
                     f"Found {len(duplicates)} duplicate contig IDs across "
                     f"genome files (sample: {sample}). Re-run with "
-                    "allow_duplicates=True to tolerate this, or fix the "
+                    "--allow-duplicates (allow_duplicates=True in the API) to "
+                    "tolerate this, or fix the "
                     "input so each contig appears in exactly one genome."
                 )
                 raise ValueError(msg)
@@ -156,6 +157,29 @@ class ContigIdMapping:
         )
 
         return cls(contig_to_accession=mapping)
+
+    @staticmethod
+    def find_conflicts(path: Path) -> dict[str, list[str]]:
+        """Return contig IDs that map to more than one accession in a TSV.
+
+        Exact duplicate rows (same contig, same accession) are not conflicts.
+        """
+        df = pl.read_csv(path, separator="\t", infer_schema=False)
+        required = {"original_contig_id", "genome_accession"}
+        if not required.issubset(df.columns):
+            raise ValueError(
+                f"TSV must have columns: {required}, found: {df.columns}"
+            )
+        seen: dict[str, list[str]] = {}
+        for contig, acc in zip(
+            df["original_contig_id"].to_list(),
+            df["genome_accession"].to_list(),
+            strict=True,
+        ):
+            accs = seen.setdefault(contig, [])
+            if acc not in accs:
+                accs.append(acc)
+        return {c: a for c, a in seen.items() if len(a) > 1}
 
     @classmethod
     def from_tsv(cls, path: Path) -> ContigIdMapping:
