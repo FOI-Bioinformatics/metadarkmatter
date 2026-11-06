@@ -69,6 +69,7 @@ def validate_ani_genome_coverage(
         has_header=False,
         new_columns=parser.column_names,
         n_rows=sample_rows,
+        comment_prefix="#",
     ).with_columns(
         extract_genome_name_expr()
     ).collect()
@@ -115,6 +116,7 @@ def sample_unknown_genome_fraction(
         has_header=False,
         new_columns=parser.column_names,
         n_rows=sample_rows,
+        comment_prefix="#",
     ).with_columns(extract_genome_name_expr()).collect()
     n_rows = sample_df.height
     n_unknown = int((sample_df["genome_name"] == UNKNOWN_GENOME).sum()) if n_rows else 0

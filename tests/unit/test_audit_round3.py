@@ -122,3 +122,99 @@ class TestClassifyCompanions:
         prov = json.loads((tmp_path / "c.csv.provenance.json").read_text())
         rec = prov["inputs"]["genomes"]
         assert rec["files"] == 2 and len(rec["listing_sha256"]) == 64
+
+
+# ------------------------------------------------------------ classifier core
+
+
+class TestConfigPrecedence:
+    def test_explicit_default_flag_overrides_yaml(self, tmp_path):
+        cfg = tmp_path / "c.yaml"
+        cfg.write_text("alignment_mode: protein\nfilters:\n  min_alignment_length: 50\n"
+                       "uncertainty:\n  mode: max\n")
+        aln = _write_alignment(tmp_path / "s.blast.tsv")
+        ani = _write_ani(tmp_path / "ani.csv")
+        out = tmp_path / "c.csv"
+        base = ["score", "classify", "--alignment", str(aln), "--ani", str(ani),
+                "--output", str(out), "--config", str(cfg)]
+        res = runner.invoke(app, [*base, "--min-alignment-length", "100",
+                                  "--uncertainty-mode", "second", "--alignment-mode", "nucleotide"])
+        assert res.exit_code == 0, res.output
+        c = json.loads((tmp_path / "c.csv.provenance.json").read_text())["config"]
+        assert (c["alignment_mode"], c["min_alignment_length"], c["uncertainty_mode"]) == (
+            "nucleotide", 100, "second")
+        # Without flags the YAML values stay.
+        assert runner.invoke(app, base).exit_code == 0
+        c = json.loads((tmp_path / "c.csv.provenance.json").read_text())["config"]
+        assert (c["alignment_mode"], c["min_alignment_length"], c["uncertainty_mode"]) == (
+            "protein", 50, "max")
+
+
+class TestConfigValidation:
+    @pytest.mark.parametrize("kw", [{"novelty_novel_genus_max": 15.0},
+                                    {"uncertainty_conserved_min": 0.0}])
+    def test_reversed_ranges_rejected(self, kw):
+        from metadarkmatter.models.config import ScoringConfig
+        with pytest.raises(ValueError, match="must be <="):
+            ScoringConfig(**kw)
+
+    def test_taxonomy_yaml_round_trip(self, tmp_path):
+        from metadarkmatter.models.config import ScoringConfig
+        c = ScoringConfig(same_genus_ani_threshold=82.0, use_aai_for_genus=False,
+                          aai_genus_boundary_low=60.0)
+        p = tmp_path / "c.yaml"
+        c.to_yaml(p)
+        b = ScoringConfig.from_yaml(p)
+        assert (b.same_genus_ani_threshold, b.use_aai_for_genus, b.aai_genus_boundary_low) == (
+            82.0, False, 60.0)
+
+
+class TestClassifyInputs:
+    def _base(self, tmp_path, aln):
+        ani = _write_ani(tmp_path / "ani.csv")
+        return ["score", "classify", "--alignment", str(aln), "--ani", str(ani),
+                "--output", str(tmp_path / "c.csv"), *FILTERS]
+
+    def test_streaming_with_qc_output_is_an_error(self, tmp_path):
+        aln = _write_alignment(tmp_path / "s.blast.tsv")
+        res = runner.invoke(app, [*self._base(tmp_path, aln), "--streaming",
+                                  "--qc-output", str(tmp_path / "qc.json")])
+        assert res.exit_code == 1
+        assert "--qc-output" in res.output
+
+    def test_gzip_without_gz_suffix(self, tmp_path):
+        gz = _write_alignment(tmp_path / "s.blast.tsv.gz")
+        plain_name = tmp_path / "s.blast.tsv"
+        gz.rename(plain_name)
+        res = runner.invoke(app, self._base(tmp_path, plain_name))
+        assert res.exit_code == 0, res.output
+        assert pl.read_csv(tmp_path / "c.csv").height > 0
+
+    def test_comment_line_keeps_coverage_check(self, tmp_path, caplog):
+        aln = _write_alignment(tmp_path / "s.blast.tsv")
+        aln.write_text("# BLASTN 2.15\n" + aln.read_text())
+        with caplog.at_level("WARNING"):
+            res = runner.invoke(app, self._base(tmp_path, aln))
+        assert res.exit_code == 0, res.output
+        assert "Could not validate" not in caplog.text
+
+
+def test_clade_rule_stays_inside_preset_species_range():
+    from metadarkmatter.core.classification.ani_matrix import ANIMatrix
+    from metadarkmatter.core.classification.classifiers.vectorized import VectorizedClassifier
+    from metadarkmatter.models.config import ScoringConfig
+
+    ani = ANIMatrix({"A": {"A": 100.0, "B": 92.0}, "B": {"A": 92.0, "B": 100.0}})
+    rows = [("r16", "A|c", 84.0, 200), ("r16", "B|c", 83.7, 199),   # N = 16
+            ("r9", "A|c", 91.0, 220), ("r9", "B|c", 90.6, 218)]     # N = 9
+    df = pl.DataFrame({
+        "qseqid": [r[0] for r in rows], "sseqid": [r[1] for r in rows],
+        "pident": [r[2] for r in rows], "length": [150] * 4, "mismatch": [0] * 4,
+        "gapopen": [0] * 4, "qstart": [1] * 4, "qend": [150] * 4, "sstart": [1] * 4,
+        "send": [150] * 4, "evalue": [1e-40] * 4, "bitscore": [float(r[3]) for r in rows],
+        "qlen": [150] * 4,
+    }).with_columns(pl.col("sseqid").str.extract(r"^([^|]+)\|").alias("genome_name"))
+    cfg = ScoringConfig(novelty_novel_species_max=15.0, novelty_novel_genus_min=15.0)
+    out = VectorizedClassifier(ani, config=cfg).classify_file(df)
+    flags = dict(zip(out["read_id"], out["clade_novel_species"], strict=True))
+    assert flags == {"r9": True, "r16": False}

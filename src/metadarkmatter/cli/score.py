@@ -198,6 +198,28 @@ class _ClassifyOptions:
     preset: str | None
     clade_novel_species: bool | None = None
     single_hit_novel_species: bool | None = None
+    # Option names given on the command line (or via environment). When set,
+    # these override --config/--preset even if their value equals the default;
+    # when None (programmatic use), a flag counts as set if it differs from
+    # its default.
+    explicit: frozenset[str] | None = None
+
+
+def _explicit_params(ctx: typer.Context | None) -> frozenset[str] | None:
+    """Names of the current command's options that the user actually passed.
+
+    The parameter source is compared by name so this works with the click
+    package and with the click copy that newer typer releases bundle.
+    """
+    if ctx is None or not hasattr(ctx, "get_parameter_source"):
+        return None
+    given = {"COMMANDLINE", "ENVIRONMENT"}
+    names = set()
+    for name in ctx.params:
+        source = ctx.get_parameter_source(name)
+        if source is not None and getattr(source, "name", "") in given:
+            names.add(name)
+    return frozenset(names)
 
 
 def _is_gzip(path: Path) -> bool:
@@ -210,49 +232,51 @@ def _is_gzip(path: Path) -> bool:
 
 
 def _explicit_flag_overrides(opts: _ClassifyOptions) -> dict[str, Any]:
-    """Return the ScoringConfig fields whose CLI flags differ from their defaults.
+    """Return the ScoringConfig fields set by CLI flags the user passed.
 
     Used to layer explicitly-set flags on top of a ``--config`` YAML or a
     ``--preset`` without discarding fields that only the YAML/preset sets.
     """
+    # (option name, ScoringConfig field, default)
+    flags: tuple[tuple[str, str, Any], ...] = (
+        ("alignment_mode", "alignment_mode", "nucleotide"),
+        ("bitscore_threshold", "bitscore_threshold_pct", 95.0),
+        ("min_alignment_length", "min_alignment_length", 100),
+        ("min_alignment_fraction", "min_alignment_fraction", 0.3),
+        ("coverage_weight_mode", "coverage_weight_mode", "linear"),
+        ("coverage_weight_strength", "coverage_weight_strength", 0.5),
+        ("uncertainty_mode", "uncertainty_mode", "second"),
+        ("single_hit_uncertainty_threshold", "single_hit_uncertainty_threshold", 10.0),
+        ("family_ratio_threshold", "family_ratio_threshold", 0.8),
+        ("max_evalue", "max_evalue", 0.0),
+        ("min_percent_identity", "min_percent_identity", 0.0),
+        ("min_bitscore", "min_bitscore", 0.0),
+        ("min_read_length", "min_read_length", 0),
+        ("min_query_coverage", "min_query_coverage", 0.0),
+        ("include_legacy_scores", "include_legacy_scores", False),
+    )
     overrides: dict[str, Any] = {}
-    if opts.alignment_mode != "nucleotide":
-        overrides["alignment_mode"] = opts.alignment_mode
-    if opts.bitscore_threshold != 95.0:
-        overrides["bitscore_threshold_pct"] = opts.bitscore_threshold
-    if opts.min_alignment_length != 100:
-        overrides["min_alignment_length"] = opts.min_alignment_length
-    if opts.min_alignment_fraction != 0.3:
-        overrides["min_alignment_fraction"] = opts.min_alignment_fraction
-    if opts.coverage_weight_mode != "linear":
-        overrides["coverage_weight_mode"] = opts.coverage_weight_mode
-    if opts.coverage_weight_strength != 0.5:
-        overrides["coverage_weight_strength"] = opts.coverage_weight_strength
-    if opts.uncertainty_mode != "second":
-        overrides["uncertainty_mode"] = opts.uncertainty_mode
-    if opts.single_hit_uncertainty_threshold != 10.0:
-        overrides["single_hit_uncertainty_threshold"] = opts.single_hit_uncertainty_threshold
+    for name, field, default in flags:
+        value = getattr(opts, name)
+        given = name in opts.explicit if opts.explicit is not None else value != default
+        if given:
+            overrides[field] = value
     if opts.target_family is not None:
         overrides["target_family"] = opts.target_family
-    if opts.family_ratio_threshold != 0.8:
-        overrides["family_ratio_threshold"] = opts.family_ratio_threshold
-    if opts.max_evalue != 0.0:
-        overrides["max_evalue"] = opts.max_evalue
-    if opts.min_percent_identity != 0.0:
-        overrides["min_percent_identity"] = opts.min_percent_identity
-    if opts.min_bitscore != 0.0:
-        overrides["min_bitscore"] = opts.min_bitscore
-    if opts.min_read_length != 0:
-        overrides["min_read_length"] = opts.min_read_length
-    if opts.min_query_coverage != 0.0:
-        overrides["min_query_coverage"] = opts.min_query_coverage
-    if opts.include_legacy_scores:
-        overrides["include_legacy_scores"] = True
     if opts.clade_novel_species is not None:
         overrides["clade_novel_species"] = opts.clade_novel_species
     if opts.single_hit_novel_species is not None:
         overrides["single_hit_novel_species"] = opts.single_hit_novel_species
     return overrides
+
+
+def _apply_overrides(config: ScoringConfig, overrides: dict[str, Any]) -> ScoringConfig:
+    """Layer flag values onto a config and re-run the ScoringConfig validators.
+
+    ``model_copy(update=...)`` skips validation, which would let a flag create
+    an invalid combination (for example a coverage mode with strength 0).
+    """
+    return ScoringConfig.model_validate({**config.model_dump(), **overrides})
 
 
 def build_classify_config(opts: _ClassifyOptions) -> tuple[ScoringConfig, list[str]]:
@@ -284,7 +308,10 @@ def build_classify_config(opts: _ClassifyOptions) -> tuple[ScoringConfig, list[s
     }
     if opts.config_file:
         for flag_name, (val, default) in deprecated.items():
-            if val != default:
+            attr = flag_name.lstrip("-").replace("-", "_")
+            attr = {"single_hit_threshold": "single_hit_uncertainty_threshold"}.get(attr, attr)
+            given = attr in opts.explicit if opts.explicit is not None else val != default
+            if given:
                 messages.append(
                     f"[yellow]Warning: {flag_name} is deprecated when using --config. "
                     f"CLI flags override YAML values.[/yellow]"
@@ -304,7 +331,7 @@ def build_classify_config(opts: _ClassifyOptions) -> tuple[ScoringConfig, list[s
         # CLI flags override YAML values
         overrides = _explicit_flag_overrides(opts)
         if overrides:
-            config = config.model_copy(update=overrides)
+            config = _apply_overrides(config, overrides)
         return config, messages
 
     if opts.preset:
@@ -320,7 +347,7 @@ def build_classify_config(opts: _ClassifyOptions) -> tuple[ScoringConfig, list[s
         # preset-only fields (Bayesian settings, gap thresholds, ...).
         preset_overrides = _explicit_flag_overrides(opts)
         if preset_overrides:
-            config = config.model_copy(update=preset_overrides)
+            config = _apply_overrides(config, preset_overrides)
         return config, messages
 
     config = ScoringConfig(
@@ -410,6 +437,7 @@ def _write_summary_json(
 
 @app.command(name="classify")
 def classify(
+    ctx: typer.Context,
     alignment: Path = typer.Option(
         ...,
         "--alignment",
@@ -915,6 +943,13 @@ def classify(
             "[bold]Uncertainty mode: max[/bold] - using maximum ANI to any competing genome"
         )
 
+    if streaming and qc_output is not None:
+        console.print(
+            "[red]Error: --qc-output is not available with --streaming "
+            "(QC metrics need the full alignment table in memory).[/red]"
+        )
+        raise typer.Exit(code=1)
+
     # Resolve scoring config (--config > flags > preset > defaults) and emit
     # any deprecation/info messages it produced.
     config, config_messages = build_classify_config(
@@ -940,6 +975,7 @@ def classify(
             preset=preset,
             clade_novel_species=clade_novel_species,
             single_hit_novel_species=single_hit_novel_species,
+            explicit=_explicit_params(ctx),
         )
     )
     for _msg in config_messages:
@@ -1190,6 +1226,7 @@ def _find_sample_collisions(files: list[Path]) -> dict[str, list[Path]]:
 
 @app.command(name="batch")
 def batch(
+    ctx: typer.Context,
     alignment_dir: Path = typer.Option(
         ...,
         "--alignment-dir",
@@ -1582,6 +1619,7 @@ def batch(
             preset=preset,
             clade_novel_species=clade_novel_species,
             single_hit_novel_species=single_hit_novel_species,
+            explicit=_explicit_params(ctx),
         )
     )
     for _msg in config_messages:
