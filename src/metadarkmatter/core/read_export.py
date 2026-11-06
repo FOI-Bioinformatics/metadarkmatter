@@ -155,12 +155,17 @@ class _LineageWriters:
         self._handles: dict[Path, IO[bytes]] = {}
         self._seen: set[Path] = set()
         self.paths: dict[str, Path] = {}
-        used: dict[str, int] = {}
+        taken: set[str] = set()
         for lineage in sorted(set(lineages)):
             safe = re.sub(r"[^A-Za-z0-9._-]+", "_", lineage).strip("._") or "lineage"
-            n = used.get(safe, 0)
-            used[safe] = n + 1
-            self.paths[lineage] = directory / (safe if n == 0 else f"{safe}_{n}")
+            name, n = safe, 0
+            # A dedupe suffix may itself equal another lineage's name, so
+            # loop until the name is unused.
+            while name in taken:
+                n += 1
+                name = f"{safe}_{n}"
+            taken.add(name)
+            self.paths[lineage] = directory / name
 
     def path_for(self, lineage: str, mate: int | None) -> Path:
         base = self.paths[lineage]
@@ -210,6 +215,34 @@ class ExtractionReport:
     lineage_files: list[Path] = field(default_factory=list)
 
 
+def _check_output_paths(
+    reads_1: Path,
+    reads_2: Path | None,
+    fastq_out: Path | None,
+    fasta_out: Path | None,
+) -> None:
+    """Refuse outputs that would overwrite an input or each other.
+
+    Output files are opened for writing (truncated) before the inputs are
+    read, so an output equal to an input would destroy the reads.
+    """
+    paired = reads_2 is not None
+    inputs = {p.resolve() for p in (reads_1, reads_2) if p is not None}
+    targets: list[Path] = []
+    for out_path in (fastq_out, fasta_out):
+        if out_path is not None:
+            for mate in ((1, 2) if paired else (None,)):
+                targets.append(mate_output_path(out_path, mate).resolve())
+    for target in targets:
+        if target in inputs:
+            raise ConfigurationError(
+                f"Output {target} is also an input read file; it would be overwritten.",
+                suggestion="Choose a different --fastq-out/--fasta-out path.",
+            )
+    if len(set(targets)) != len(targets):
+        raise ConfigurationError("--fastq-out and --fasta-out resolve to the same file.")
+
+
 def extract_reads(
     *,
     reads_1: Path,
@@ -252,6 +285,7 @@ def extract_reads(
         )
 
     paired = reads_2 is not None
+    _check_output_paths(reads_1, reads_2, fastq_out, fasta_out)
     report = ExtractionReport(requested=len(ids))
     mates = [(1, reads_1)] + ([(2, reads_2)] if reads_2 is not None else [])
     found_sets: dict[int, set[str]] = {1: set(), 2: set()}
@@ -263,6 +297,15 @@ def extract_reads(
         lineage_writers = _LineageWriters(
             per_lineage_dir, (lineage_of or {}).values(), in_fmt, paired
         )
+        inputs = {p.resolve() for p in (reads_1, reads_2) if p is not None}
+        for lin in lineage_writers.paths:
+            for m in ((1, 2) if paired else (None,)):
+                if lineage_writers.path_for(lin, m).resolve() in inputs:
+                    raise ConfigurationError(
+                        f"Per-lineage file {lineage_writers.path_for(lin, m)} would "
+                        "overwrite an input read file.",
+                        suggestion="Use a separate --per-lineage-dir.",
+                    )
 
     with ExitStack() as stack:
         if lineage_writers is not None:

@@ -384,6 +384,7 @@ def _build_run_provenance(
             "metadata": request.metadata,
             "aai": request.aai,
             "id_mapping": request.id_mapping,
+            "genomes": request.genomes,
         },
         result.config,
         {
@@ -1009,6 +1010,13 @@ def classify(
     num_classified = result.num_classified
     classification_df = result.classification_df
     qc_metrics = result.qc_metrics
+    summary_written = False
+    # The output was just rewritten; drop companions from an earlier run that
+    # this run will not rewrite, so they cannot describe a different result.
+    if summary and num_classified == 0:
+        summary.unlink(missing_ok=True)
+    if not provenance:
+        provenance_path_for(output).unlink(missing_ok=True)
 
     # Provenance is built before the summary so it can be embedded there.
     prov_data: dict[str, Any] | None = None
@@ -1038,6 +1046,7 @@ def classify(
 
                 summary_obj = _generate_summary(summary_df)
                 _write_summary_json(summary_obj, summary, prov_data)
+                summary_written = True
 
                 # Display summary table (skip in quiet mode)
                 if not quiet:
@@ -1046,6 +1055,7 @@ def classify(
             except (pl.exceptions.PolarsError, ValueError, OSError) as e:
                 if prov_data is not None:
                     prov_data["outputs"]["summary"] = None
+                summary.unlink(missing_ok=True)
                 console.print(f"\n[yellow]Warning: Failed to generate summary: {e}[/yellow]")
                 if verbose:
                     console.print_exception()
@@ -1068,8 +1078,10 @@ def classify(
                 out.print(f"[yellow]QC Warning:[/yellow] {warning}")
 
     out.print(f"\n[bold green]Results written to:[/bold green] {output}")
-    if summary:
+    if summary_written:
         out.print(f"[bold green]Summary written to:[/bold green] {summary}")
+    elif summary:
+        out.print("[yellow]No summary written (no reads classified or summary failed).[/yellow]")
 
     # Point the user at the natural next step.
     out.print(
@@ -1629,12 +1641,15 @@ def batch(
                 _write_summary_json(_generate_summary(summary_df), summary_file, prov_data)
                 console.print(f"  [green]Classified {num_classified:,} reads[/green]")
             else:
+                summary_file.unlink(missing_ok=True)  # stale from an earlier run
                 console.print(
                     "  [yellow]Warning: 0 reads classified (header-only output "
                     "written); check the alignment filters.[/yellow]"
                 )
             if prov_data is not None:
                 write_provenance(provenance_path_for(output_file), prov_data)
+            else:
+                provenance_path_for(output_file).unlink(missing_ok=True)
             total_classified += num_classified
 
         except (
@@ -2011,6 +2026,18 @@ def extract_novel(
 
     out.print(f"  [green]Loaded {len(df):,} classifications[/green]")
 
+    if df.height == 0:
+        # A header-only CSV (written when no read was classified) is read
+        # with every column as String; give the filtered columns their types.
+        typed = {
+            "novelty_index": pl.Float64, "placement_uncertainty": pl.Float64,
+            "top_hit_identity": pl.Float64, "clade_novel_species": pl.Boolean,
+        }
+        df = df.with_columns(
+            pl.lit(None, dtype=dtype).alias(col)
+            for col, dtype in typed.items() if col in df.columns
+        )
+
     # Build filter expression based on category
     out.print(f"\n[bold]Step 2:[/bold] Filtering for {category} candidates...")
 
@@ -2053,21 +2080,33 @@ def extract_novel(
     out.print(f"  [green]Found {len(novel_df):,} novel candidates[/green]")
     out.print(f"  [dim]Filter: {filter_desc}[/dim]")
 
+    # --min-reads keeps reference genomes (lineages) with enough reads; it
+    # applies to the grouped table, the per-read table, --read-ids and the
+    # read export alike.
+    selected_df = novel_df
+    if min_reads > 1:
+        kept = (
+            novel_df.group_by("best_match_genome").len()
+            .filter(pl.col("len") >= min_reads)["best_match_genome"]
+        )
+        selected_df = novel_df.filter(pl.col("best_match_genome").is_in(kept.to_list()))
+
     # Group by genome if requested
     if group_by_genome:
         out.print("\n[bold]Step 3:[/bold] Grouping by reference genome...")
 
-        grouped = novel_df.group_by("best_match_genome").agg([
+        # Sort keys and the mode tie-break make the output order and the
+        # dominant category reproducible across runs (polars group_by and
+        # mode() do not preserve order).
+        grouped = selected_df.group_by("best_match_genome").agg([
             pl.len().alias("read_count"),
             pl.col("novelty_index").mean().alias("mean_novelty"),
             pl.col("novelty_index").min().alias("min_novelty"),
             pl.col("novelty_index").max().alias("max_novelty"),
             pl.col("top_hit_identity").mean().alias("mean_identity"),
             pl.col("placement_uncertainty").mean().alias("mean_uncertainty"),
-            pl.col("taxonomic_call").mode().first().alias("dominant_category"),
-        ]).filter(
-            pl.col("read_count") >= min_reads
-        ).sort("read_count", descending=True)
+            pl.col("taxonomic_call").mode().sort().first().alias("dominant_category"),
+        ]).sort(["read_count", "best_match_genome"], descending=[True, False])
 
         out.print(f"  [green]Found {len(grouped)} candidate lineages[/green]")
 
@@ -2102,31 +2141,20 @@ def extract_novel(
 
     else:
         # Write individual reads
-        novel_df.write_csv(output)
+        selected_df.write_csv(output)
         out.print(f"[green]Novel reads written to:[/green] {output}")
 
     # Write read IDs for seqtk extraction
     if read_ids:
         out.print("\n[bold]Step 4:[/bold] Exporting read IDs...")
 
-        ids_df = novel_df
-        if group_by_genome:
-            # Same lineage set (--min-reads) as the grouped output.
-            ids_df = novel_df.filter(
-                pl.col("best_match_genome").is_in(grouped["best_match_genome"].to_list())
-            )
-        ids_df.select("read_id").write_csv(read_ids, include_header=False)
+        selected_df.select("read_id").write_csv(read_ids, include_header=False)
         out.print(f"[green]Read IDs written to:[/green] {read_ids}")
         out.print(f"  [dim]Use with: seqtk subseq reads.fastq.gz {read_ids} > novel.fastq[/dim]")
 
     # Stream the original reads and write the selected records
     if reads_1 is not None:
         out.print("\n[bold]Step 5:[/bold] Extracting reads from FASTQ/FASTA...")
-        selected_df = novel_df
-        if group_by_genome:
-            selected_df = novel_df.filter(
-                pl.col("best_match_genome").is_in(grouped["best_match_genome"].to_list())
-            )
         # Sorted iteration makes the lineage of a pair whose mates hit
         # different genomes deterministic (the smallest genome name wins).
         lineage_of: dict[str, str] = {}

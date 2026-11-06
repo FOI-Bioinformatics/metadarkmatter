@@ -31,6 +31,7 @@ INPUT_ROLES: tuple[tuple[str, str], ...] = (
     ("metadata", "Genome metadata"),
     ("aai", "AAI matrix"),
     ("id_mapping", "ID mapping"),
+    ("genomes", "Genome directory (ID mapping)"),
 )
 
 
@@ -98,6 +99,8 @@ def file_row_value(info: object, fallback_name: str | None = None) -> str:
     path = str(info.get("path", ""))
     name = Path(path).name if path else (fallback_name or "")
     parts = [f'<code title="{_e(path)}">{_e(name)}</code>']
+    if "files" in info:
+        parts.append(f"{info.get('files')} files")
     if "size" in info:
         parts.append(human_size(info.get("size")))
     sha = info.get("sha256")
