@@ -438,7 +438,9 @@ def align_reads(
     diamond = Diamond()
 
     # For compressed output, we write to temp then compress
-    temp_output = output.with_suffix("").with_suffix(".tsv") if should_compress else output
+    # Uncompressed temp file next to the output; a name derived from the
+    # output itself so it can never be an unrelated existing file.
+    temp_output = output.with_name(output.name + ".partial") if should_compress else output
 
     if dry_run or is_dry_run():
         result = diamond.run(

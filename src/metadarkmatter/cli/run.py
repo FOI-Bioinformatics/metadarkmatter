@@ -169,7 +169,7 @@ def run_pipeline(
         layout,
         dry_run=effective_dry_run,
         force=force,
-        log=lambda msg: out.print(msg),
+        log=lambda msg: out.print(escape(msg)),
         extracted_reads_2=extracted_reads_2,
     )
 
@@ -179,7 +179,7 @@ def run_pipeline(
     if effective_dry_run:
         out.print("\n[bold cyan]DRY RUN[/bold cyan] - planned steps (no execution)\n")
     else:
-        out.print(f"\n[bold blue]metadarkmatter pipeline[/bold blue] -> {cfg.output_dir}\n")
+        out.print(f"\n[bold blue]metadarkmatter pipeline[/bold blue] -> {escape(str(cfg.output_dir))}\n")
 
     manifest = pipeline.run(from_step=from_step, mdm_version=__version__)
 
@@ -227,10 +227,10 @@ def _print_summary(
 
     out.print("\n[bold green]Pipeline complete.[/bold green]")
     if layout.classifications.exists():
-        out.print(f"  Classifications: {layout.classifications}")
+        out.print(f"  Classifications: {escape(str(layout.classifications))}")
     if layout.report.exists():
-        out.print(f"  Report:          {layout.report}")
-    out.print(f"  Manifest:        {layout.manifest}")
+        out.print(f"  Report:          {escape(str(layout.report))}")
+    out.print(f"  Manifest:        {escape(str(layout.manifest))}")
 
 
 @app.command(name="cohort")
@@ -333,12 +333,16 @@ def run_cohort(
     else:
         out.print(
             f"\n[bold blue]metadarkmatter cohort[/bold blue] ({len(sheet)} samples) "
-            f"-> {output_dir}\n"
+            f"-> {escape(str(output_dir))}\n"
         )
 
     result = cohort.run(from_step=from_step, mdm_version=__version__)
     _print_cohort_summary(out, result, cohort.layout, effective_dry_run, quiet)
 
+    if effective_dry_run and result.failed:
+        names = ", ".join(s.name for s in result.failed)
+        console.print(f"[red]Dry run: these samples cannot run as planned: {escape(names)}[/red]")
+        raise typer.Exit(code=1)
     if not effective_dry_run and not result.ok:
         names = ", ".join(s.name for s in result.failed)
         if names:
@@ -368,6 +372,6 @@ def _print_cohort_summary(
     if dry_run:
         out.print("\n[dim]Dry run complete. Re-run without --dry-run to execute.[/dim]")
         return
-    out.print(f"  Summary: {layout.summary_tsv}")
+    out.print(f"  Summary: {escape(str(layout.summary_tsv))}")
     if result.report_path is not None:
-        out.print(f"  Report:  {result.report_path}")
+        out.print(f"  Report:  {escape(str(result.report_path))}")

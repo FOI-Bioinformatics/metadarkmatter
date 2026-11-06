@@ -218,3 +218,71 @@ def test_clade_rule_stays_inside_preset_species_range():
     out = VectorizedClassifier(ani, config=cfg).classify_file(df)
     flags = dict(zip(out["read_id"], out["clade_novel_species"], strict=True))
     assert flags == {"r9": True, "r16": False}
+
+
+# ------------------------------------------------------- alignment / pipeline
+
+
+def _fq(path: Path, ids: list[str]) -> Path:
+    path.write_text("".join(f"@{i}\nACGTACGT\n+\nIIIIIIII\n" for i in ids))
+    return path
+
+
+@pytest.fixture
+def fake_tools():
+    from metadarkmatter.external.base import ExternalTool
+
+    ExternalTool.set_executable_resolver(lambda name: f"/usr/bin/{name}")
+    ExternalTool.clear_cache()
+    yield
+    ExternalTool.reset_executable_resolver()
+
+
+def test_mmseqs2_dry_run_touches_nothing(tmp_path, fake_tools):
+    r1, r2 = _fq(tmp_path / "a_R1.fq", ["x"]), _fq(tmp_path / "a_R2.fq", ["x"])
+    db = tmp_path / "db"
+    db.write_text("")
+    out = tmp_path / "new" / "deep" / "o.tsv.gz"
+    res = runner.invoke(app, ["mmseqs2", "search", "--query-1", str(r1), "--query-2", str(r2),
+                              "--database", str(db), "--output", str(out), "--dry-run"])
+    assert res.exit_code == 0, res.output
+    assert not (tmp_path / "new").exists()
+
+
+@pytest.mark.parametrize("tool", ["blast", "mmseqs2"])
+def test_compressed_output_temp_is_derived_from_output(tmp_path, fake_tools, tool):
+    """--output res.blast.gz used to use (then delete) an unrelated res.tsv."""
+    q = _fq(tmp_path / "q.fq", ["r1"])
+    db = tmp_path / "db" / "pan"
+    db.parent.mkdir()
+    for ext in (".nhr", ".nin", ".nsq", ".dbtype", ""):
+        (tmp_path / "db" / f"pan{ext}").write_text("")
+    args = (["blast", "align", "--query", str(q)] if tool == "blast"
+            else ["mmseqs2", "search", "--query", str(q)])
+    res = runner.invoke(app, [*args, "--database", str(db),
+                              "--output", str(tmp_path / "res.blast.gz"), "--dry-run"],
+                        env={"COLUMNS": "300"})
+    assert res.exit_code == 0, res.output
+    assert "res.blast.gz.partial" in res.output
+    assert "res.tsv" not in res.output
+
+
+def test_sample_sheet_with_utf8_bom(tmp_path):
+    from metadarkmatter.core.pipeline.cohort import read_samples_tsv
+
+    reads = _fq(tmp_path / "b.fq", ["x"])
+    sheet = tmp_path / "s.tsv"
+    sheet.write_bytes(b"\xef\xbb\xbfsample\treads_1\ns1\t" + reads.name.encode() + b"\n")
+    assert [s.name for s in read_samples_tsv(sheet)] == ["s1"]
+
+
+def test_run_pipeline_dry_run_with_markup_in_path(tmp_path):
+    g = tmp_path / "g"
+    g.mkdir()
+    (g / "GCF_000000001.1.fna").write_text(">c\nACGT\n")
+    r1 = _fq(tmp_path / "x_R1.fq", ["x"])
+    res = runner.invoke(app, ["run", "pipeline", "--genomes", str(g), "--extracted-reads-1",
+                              str(r1), "--output-dir", str(tmp_path / "out[/bold]"),
+                              "--no-report", "--dry-run"])
+    assert res.exit_code == 0, res.output
+    assert "[dry-run]" in res.output

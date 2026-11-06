@@ -426,6 +426,7 @@ def search_reads(
             --sensitivity 7.0 \\
             --threads 16
     """
+    import os
     import tempfile
 
     out = QuietConsole(console, quiet=quiet)
@@ -465,14 +466,23 @@ def search_reads(
 
     # Handle paired-end input by concatenating reads
     temp_query_file: Path | None = None
+    planning_only = bool(dry_run or is_dry_run())
     if has_paired_end:
         # Paired-end requires both mates; validated by the caller above.
         assert query_1 is not None and query_2 is not None
-        # Create temporary file for concatenated reads
-        _, temp_path = tempfile.mkstemp(suffix=".fastq")
-        temp_query_file = Path(temp_path)
-        _concatenate_paired_reads(query_1, query_2, temp_query_file, console, quiet)
-        query_for_search = temp_query_file
+        if planning_only:
+            query_for_search = query_1  # nothing is combined in a dry run
+        else:
+            # Create temporary file for concatenated reads
+            fd, temp_path = tempfile.mkstemp(suffix=".fastq")
+            os.close(fd)
+            temp_query_file = Path(temp_path)
+            try:
+                _concatenate_paired_reads(query_1, query_2, temp_query_file, console, quiet)
+            except BaseException:
+                temp_query_file.unlink(missing_ok=True)
+                raise
+            query_for_search = temp_query_file
         out.print("[bold]Input:[/bold] Paired-end reads")
         out.print(f"  R1: {query_1}")
         out.print(f"  R2: {query_2}")
@@ -497,8 +507,9 @@ def search_reads(
         )
         raise typer.Exit(code=1) from None
 
-    # Setup output
-    output.parent.mkdir(parents=True, exist_ok=True)
+    # Setup output (not in a dry run, which must not touch the filesystem)
+    if not planning_only:
+        output.parent.mkdir(parents=True, exist_ok=True)
 
     # Determine if output should be compressed
     should_compress = bool(compress) or output.suffix == ".gz"
@@ -526,7 +537,9 @@ def search_reads(
     mmseqs = MMseqs2()
 
     # For compressed output, we write to temp then compress
-    temp_output = output.with_suffix("").with_suffix(".tsv") if should_compress else output
+    # Uncompressed temp file next to the output; a name derived from the
+    # output itself so it can never be an unrelated existing file.
+    temp_output = output.with_name(output.name + ".partial") if should_compress else output
 
     if dry_run or is_dry_run():
         _cleanup_temp_query()
