@@ -313,9 +313,23 @@ class Pipeline:
     # Completion markers / fingerprints
     # ------------------------------------------------------------------
     def _fingerprint(self, step: _Step) -> str:
-        """Hash of the step's argv plus size+mtime of its input files."""
+        """Hash of the step's argv plus size+mtime of its input files.
+
+        ``--threads`` is left out: the thread count does not change results,
+        so changing it must not invalidate finished steps.
+        """
+        argv: list[str] = []
+        skip = False
+        for arg in step.argv:
+            if skip:
+                skip = False
+                continue
+            if arg == "--threads":
+                skip = True
+                continue
+            argv.append(arg)
         payload = {
-            "argv": step.argv,
+            "argv": argv,
             "inputs": {str(p): _path_signature(p) for p in step.inputs},
         }
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()

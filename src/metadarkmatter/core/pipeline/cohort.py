@@ -83,7 +83,7 @@ def read_samples_tsv(path: Path) -> list[CohortSample]:
     if not path.is_file():
         raise CohortError(message=f"Sample sheet not found: {path}")
 
-    with path.open(newline="") as fh:
+    with path.open(newline="", encoding="utf-8-sig") as fh:
         lines = [ln for ln in fh if ln.strip() and not ln.lstrip().startswith("#")]
     reader = csv.DictReader(lines, delimiter="\t")
     header = [h.strip() for h in (reader.fieldnames or [])]

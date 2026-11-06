@@ -169,11 +169,21 @@ def test_changed_parameter_reruns(tmp_path: Path):
     cfg = _cfg(tmp_path)
     lay = PipelineLayout(root=cfg.output_dir)
     Pipeline(cfg, lay, runner=ProducingRunner()).run()
-    cfg2 = cfg.model_copy(update={"threads": 3})
+    cfg2 = cfg.model_copy(update={"ani_backend": "fastani"})
     r2 = ProducingRunner()
     Pipeline(cfg2, lay, runner=r2).run()
-    assert r2.ran("align")
-    assert not r2.ran("makedb")  # makedb argv has no --threads
+    assert r2.ran("ani")
+    assert not r2.ran("makedb")
+
+
+def test_thread_count_change_does_not_rerun(tmp_path: Path):
+    """--threads does not change results, so it is not part of the fingerprint."""
+    cfg = _cfg(tmp_path)
+    lay = PipelineLayout(root=cfg.output_dir)
+    Pipeline(cfg, lay, runner=ProducingRunner()).run()
+    r2 = ProducingRunner()
+    Pipeline(cfg.model_copy(update={"threads": 3}), lay, runner=r2).run()
+    assert not r2.ran("align") and not r2.ran("ani") and not r2.ran("classify")
 
 
 def test_killed_step_leaves_no_marker_and_reruns(tmp_path: Path):
