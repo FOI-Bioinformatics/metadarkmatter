@@ -584,6 +584,20 @@ def multi_sample_report(
     # Ensure output directory exists
     output.parent.mkdir(parents=True, exist_ok=True)
 
+    # Two files mapping to one sample name would silently replace each other.
+    by_name: dict[str, list[Path]] = {}
+    for f in files:
+        by_name.setdefault(extract_sample_name(f), []).append(f)
+    clashes = {n: fs for n, fs in by_name.items() if len(fs) > 1}
+    if clashes:
+        for name, fs in sorted(clashes.items()):
+            console.print(
+                f"[red]Error: files map to the same sample name '{name}': "
+                f"{', '.join(str(p) for p in fs)}[/red]"
+            )
+        console.print("[dim]Rename the files or narrow --pattern.[/dim]")
+        raise typer.Exit(code=1)
+
     # Load samples
     out.print("\n[bold]Step 1:[/bold] Loading sample data...")
 
@@ -893,9 +907,18 @@ def summarize_novel_diversity(
     # Summary
     out.print("\n[bold green]Novel diversity summary complete![/bold green]")
     out.print("\n[bold]Summary:[/bold]")
-    out.print(f"  - Total clusters: {len(clusters)}")
-    out.print(f"  - Novel Species: {summary.novel_species_clusters} clusters ({summary.novel_species_reads:,} reads)")
-    out.print(f"  - Novel Genus: {summary.novel_genus_clusters} clusters ({summary.novel_genus_reads:,} reads)")
+    out.print(
+        f"  - Novel lineage groups: {len(clusters)} "
+        f"({summary.grouped_reads:,} of {summary.total_novel_reads:,} novel reads)"
+    )
+    out.print(
+        f"  - Novel Species groups: {summary.novel_species_clusters} "
+        f"({summary.novel_species_cluster_reads:,} reads in these groups)"
+    )
+    out.print(
+        f"  - Novel Genus groups: {summary.novel_genus_clusters} "
+        f"({summary.novel_genus_cluster_reads:,} reads in these groups)"
+    )
     out.print(f"  - High confidence: {summary.high_confidence_clusters}")
     out.print(f"  - Genera with novel species: {summary.genera_with_novel_species}")
     out.print(f"  - Families with novel genera: {summary.families_with_novel_genera}")

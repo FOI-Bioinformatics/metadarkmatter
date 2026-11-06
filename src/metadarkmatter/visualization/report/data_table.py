@@ -180,7 +180,9 @@ def _genome_taxa(
     species: list[str] = []
     genus: list[str] = []
     df_map: dict[str, tuple[str, str]] = {}
-    if genome_metadata is None and "species" in df.columns and "best_match_genome" in df.columns:
+    # The table's own species/genus columns are the fallback for genomes the
+    # metadata does not cover (or has no value for).
+    if "species" in df.columns and "best_match_genome" in df.columns:
         cols = ["best_match_genome", "species"] + (["genus"] if "genus" in df.columns else [])
         pairs = df.select(cols).unique().sort(cols, nulls_last=True)
         for row in pairs.iter_rows(named=True):
@@ -188,13 +190,12 @@ def _genome_taxa(
             if g not in df_map and row["species"] is not None:
                 df_map[g] = (str(row["species"]), str(row.get("genus") or ""))
     for g in genomes:
+        sp, ge = df_map.get(g, ("", ""))
         if genome_metadata is not None:
-            species.append(genome_metadata.get_species(g) or "")
-            genus.append(genome_metadata.get_genus(g) or "")
-        else:
-            sp, ge = df_map.get(g, ("", ""))
-            species.append(sp)
-            genus.append(ge)
+            sp = genome_metadata.get_species(g) or sp
+            ge = genome_metadata.get_genus(g) or ge
+        species.append(sp)
+        genus.append(ge)
     return species, genus
 
 

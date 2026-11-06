@@ -405,7 +405,8 @@ def subsample_dataframe(
 
 def format_count(count: int) -> str:
     """Format large counts with K/M suffixes."""
-    if count >= 1_000_000:
+    # 999,950 and above would round to "1000.0K"; show them as millions.
+    if count >= 999_950:
         return f"{count / 1_000_000:.1f}M"
     if count >= 1_000:
         return f"{count / 1_000:.1f}K"

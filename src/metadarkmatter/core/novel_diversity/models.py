@@ -51,12 +51,13 @@ class PhylogeneticNeighborhood(BaseModel):
 
 class NovelCluster(BaseModel):
     """
-    Represents a putative novel taxon cluster.
+    A novel lineage group: novel reads grouped by NovelDiversityAnalyzer.
 
-    Clusters are formed by grouping novel reads that share the same:
-    - Best match genome (closest reference)
-    - Novelty band (5% intervals of divergence)
-    - Taxonomic call (Novel Species or Novel Genus)
+    With the default genus grouping, reads share the GTDB genus of their
+    nearest reference (split within a genus at 80% ANI); ``taxonomic_call``
+    is the majority call. With legacy grouping, reads share the same
+    neighbourhood representative, 5% novelty band and call. See
+    ``core/novel_diversity/clustering.py``.
 
     Attributes:
         cluster_id: Unique identifier (e.g., NSP_001, NGN_001)
@@ -318,6 +319,15 @@ class NovelDiversitySummary(BaseModel):
     families_with_novel_genera: int = Field(default=0)
     mean_cluster_size: float = Field(default=0.0)
     largest_cluster_size: int = Field(default=0)
+    grouped_reads: int = Field(
+        default=0, description="Novel reads in groups that reached the minimum size"
+    )
+    novel_species_cluster_reads: int = Field(
+        default=0, description="Reads in groups whose majority call is Novel Species"
+    )
+    novel_genus_cluster_reads: int = Field(
+        default=0, description="Reads in groups whose majority call is Novel Genus"
+    )
 
     @computed_field
     @property

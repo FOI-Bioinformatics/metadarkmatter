@@ -218,7 +218,7 @@ def compute_species_breakdown(
     )
     categories = order_categories(set(base["taxonomic_call"].drop_nulls().to_list()))
     ident = (
-        pl.col("top_hit_identity").cast(pl.Float64, strict=False).mean()
+        pl.col("top_hit_identity").cast(pl.Float64, strict=False).fill_nan(None).mean()
         if "top_hit_identity" in base.columns
         else pl.lit(None, dtype=pl.Float64)
     )

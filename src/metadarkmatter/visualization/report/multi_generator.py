@@ -415,6 +415,11 @@ def generate_multi_sample_report(
     if not files:
         raise ValueError(f"No files found matching pattern '{pattern}' in {input_dir}")
 
+    names = [extract_sample_name(f) for f in files]
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    if dupes:
+        raise ValueError(f"Several files map to the same sample name: {', '.join(dupes)}")
+
     # Load all samples
     sample_data: dict[str, pl.DataFrame] = {}
     for f in files:

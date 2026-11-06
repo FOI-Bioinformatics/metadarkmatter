@@ -105,7 +105,8 @@ class TestUtilityFunctions:
 
         assert format_count(1000) == "1.0K"
         assert format_count(5500) == "5.5K"
-        assert format_count(999999) == "1000.0K"
+        assert format_count(999_949) == "999.9K"
+        assert format_count(999_999) == "1.0M"  # was "1000.0K"
 
     def test_format_count_millions(self):
         from metadarkmatter.visualization.plots.base import format_count
