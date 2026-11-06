@@ -310,7 +310,7 @@ class TestNovelTabLabels:
     def test_report_labels_units(self, tmp_path):
         html = _generate_report(tmp_path, _novel_df(), metadata=True)
         assert "Novel Species (reads)" in html
-        assert "Novel Species clusters" in html
+        assert "Novel Species groups" in html
 
 
 # ---------------------------------------------------------------------------

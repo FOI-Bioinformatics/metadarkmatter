@@ -605,7 +605,7 @@ Family validation activates whenever metadarkmatter knows the target family: eit
 |--------|------|---------|-------------|
 | `--bayesian` | FLAG | False | Deprecated, no effect beyond a warning: Bayesian posteriors are always computed |
 | `--adaptive-thresholds` | FLAG | False | Detect species boundary from ANI matrix via GMM (requires scikit-learn) |
-| `--qc-output` | PATH | None | Output path for QC metrics JSON |
+| `--qc-output` | PATH | None | Output path for QC metrics JSON (not available with `--streaming`) |
 | `--uncertainty-mode` | TEXT | second | Uncertainty calculation: 'second' (second-best genome) or 'max' (maximum ANI to any competing genome) |
 
 **Bayesian posteriors (always on):** `taxonomic_call` is the maximum a posteriori category from 2D Gaussian likelihoods over novelty and uncertainty, followed by a discrete refinement step (Conserved Region, Ambiguous Within Genus). The output carries six posterior columns (`p_known_species`, `p_novel_species`, `p_novel_genus`, `p_species_boundary`, `p_ambiguous`, `p_unclassified`), `posterior_entropy` (0 = confident, log2(6) = 2.585 = uniform), and `confidence_score = (1 - entropy / log2(6)) * 100`. The hard-threshold cascade is kept in `legacy_call`. See [METHODS.md](METHODS.md) for detailed formulas.
@@ -930,7 +930,7 @@ Extract candidate novel species or genera from classification results.
 | `--min-novelty` |  | FLOAT | - | Minimum novelty index threshold (overrides category defaults) |
 | `--max-uncertainty` |  | FLOAT | 2.0 | Maximum placement uncertainty (exclude ambiguous placements). Reads flagged `clade_novel_species` are exempt: their U reflects distant within-genus competitors, not uncertain novelty. |
 | `--group-by-genome/--no-group` |  | FLAG | on | Group results by closest reference genome (default: group) |
-| `--min-reads` |  | INT | 1 | Minimum reads per genome to include in output |
+| `--min-reads` |  | INT | 1 | Minimum reads per reference genome; applies to the grouped and per-read (`--no-group`) output, `--read-ids` and the read export |
 | `--reads-1` |  | PATH | - | Original FASTQ/FASTA(.gz) (R1 or single-end) to extract the selected reads from; needs an output below |
 | `--reads-2` |  | PATH | - | R2 FASTQ/FASTA(.gz); outputs become `{stem}_R1` / `{stem}_R2` |
 | `--fastq-out` |  | PATH | - | Write selected reads as FASTQ (gzip if the path ends in `.gz`) |
@@ -1708,7 +1708,7 @@ Positional argument: `CLASSIFICATIONS`
 |--------|-------|------|---------|-------------|
 | `--output` | `-o` | PATH | - | Output file path (TSV or JSON based on --format) (required) |
 | `--metadata` | `-m` | PATH | - | Genome metadata file (TSV) for species/genus/family lookups |
-| `--band-size` | `-b` | FLOAT | 5.0 | Size of novelty bands in percent (`--grouping legacy` only) |
+| `--band-size` | `-b` | FLOAT | 5.0 | Size of novelty bands in percent, a whole number (`--grouping legacy` only) |
 | `--min-cluster-size` | `-s` | INT | 3 | Minimum reads to form a group (default 3) |
 | `--ani` | `-a` | PATH | - | ANI matrix (CSV). With genus grouping, keeps references of one genus below 80% ANI apart; with legacy grouping, enables neighbourhood merging |
 | `--grouping` | `-g` | TEXT | auto | `auto` (genus when metadata gives genus names, otherwise reference), `genus` (GTDB genus of the nearest reference; within a genus, references below 80% ANI are kept apart), `reference` (nearest reference) or `legacy` (ANI neighbourhood x 5% novelty band x call, the previous method). See METHODS.md section 4.1 and NOVEL_LINEAGE_GROUPING.md. |

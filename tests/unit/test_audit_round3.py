@@ -286,3 +286,97 @@ def test_run_pipeline_dry_run_with_markup_in_path(tmp_path):
                               "--no-report", "--dry-run"])
     assert res.exit_code == 0, res.output
     assert "[dry-run]" in res.output
+
+
+# ---------------------------------------------------------- report / grouping
+
+
+def _cls_df(rows: list[tuple[str, str, float, str]]) -> pl.DataFrame:
+    return pl.DataFrame({
+        "read_id": [r[0] for r in rows], "best_match_genome": [r[1] for r in rows],
+        "top_hit_identity": [100.0 - r[2] for r in rows], "novelty_index": [r[2] for r in rows],
+        "placement_uncertainty": [0.5] * len(rows), "num_ambiguous_hits": [1] * len(rows),
+        "taxonomic_call": [r[3] for r in rows], "confidence_score": [80.0] * len(rows),
+    })
+
+
+def _md(tmp_path: Path, genomes: dict[str, tuple[str, str]]) -> Path:
+    p = tmp_path / "md.tsv"
+    p.write_text("accession\tspecies\tgenus\tfamily\n" + "".join(
+        f"{a}\t{sp}\t{ge}\tFam\n" for a, (ge, sp) in genomes.items()))
+    return p
+
+
+def test_genus_grouping_reference_missing_from_ani_does_not_chain(tmp_path):
+    from metadarkmatter.core.classification.ani_matrix import ANIMatrix
+    from metadarkmatter.core.metadata import GenomeMetadata
+    from metadarkmatter.core.novel_diversity.clustering import NovelDiversityAnalyzer
+
+    md = GenomeMetadata.from_file(_md(tmp_path, {"A": ("G", "G a"), "B": ("G", "G b"),
+                                                 "C": ("G", "G c")}))
+    ani = ANIMatrix({"A": {"A": 100.0, "B": 70.0}, "B": {"A": 70.0, "B": 100.0}})
+    df = _cls_df([(f"a{i}", "A", 10.0, "Novel Species") for i in range(3)]
+                 + [(f"b{i}", "B", 10.0, "Novel Species") for i in range(3)]
+                 + [("c0", "C", 10.0, "Novel Species")])
+    clusters = NovelDiversityAnalyzer(df, metadata=md, ani_matrix=ani,
+                                      min_cluster_size=1).cluster_novel_reads()
+    assert sorted(c.read_count for c in clusters) == [1, 3, 3]
+
+
+def test_summary_counts_reads_in_groups(tmp_path):
+    from metadarkmatter.core.metadata import GenomeMetadata
+    from metadarkmatter.core.novel_diversity.clustering import NovelDiversityAnalyzer
+
+    md = GenomeMetadata.from_file(_md(tmp_path, {"A": ("G", "G a"), "Z": ("H", "H z")}))
+    df = _cls_df([(f"a{i}", "A", 10.0, "Novel Species") for i in range(4)]
+                 + [("a9", "A", 22.0, "Novel Genus"), ("z0", "Z", 22.0, "Novel Genus")])
+    s = NovelDiversityAnalyzer(df, metadata=md, min_cluster_size=2).get_summary()
+    assert (s.novel_species_clusters, s.novel_species_cluster_reads) == (1, 5)
+    assert (s.novel_genus_clusters, s.novel_genus_cluster_reads) == (0, 0)
+    assert (s.grouped_reads, s.total_novel_reads) == (5, 6)
+
+
+def test_summary_without_groups_keeps_read_totals():
+    from metadarkmatter.core.novel_diversity.clustering import NovelDiversityAnalyzer
+
+    df = _cls_df([("a", "A", 10.0, "Novel Species")])
+    s = NovelDiversityAnalyzer(df, min_cluster_size=3).get_summary()
+    assert s.total_clusters == 0 and s.total_novel_reads == 1
+
+
+def test_band_size_must_be_whole():
+    from metadarkmatter.core.novel_diversity.clustering import NovelDiversityAnalyzer
+
+    with pytest.raises(ValueError, match="whole number"):
+        NovelDiversityAnalyzer(_cls_df([("a", "A", 10.0, "Novel Species")]),
+                               novelty_band_size=2.5)
+
+
+def test_species_breakdown_ignores_nan_identity():
+    from metadarkmatter.visualization.report.breakdowns import compute_species_breakdown
+
+    df = _cls_df([("a", "A", 10.0, "Novel Species"), ("b", "A", 12.0, "Novel Species")])
+    df = df.with_columns(pl.Series("top_hit_identity", [float("nan"), 88.0]))
+    table, _cats, _uses_species = compute_species_breakdown(df, None)
+    assert table["mean_identity"].to_list() == [88.0]
+
+
+def test_data_table_taxa_fall_back_to_table_columns(tmp_path):
+    from metadarkmatter.core.metadata import GenomeMetadata
+    from metadarkmatter.visualization.report.data_table import _genome_taxa
+
+    md = GenomeMetadata.from_file(_md(tmp_path, {"A": ("G", "G a")}))
+    df = pl.DataFrame({"best_match_genome": ["A", "B"], "species": ["G a", "K b"],
+                       "genus": ["G", "K"]})
+    assert _genome_taxa(["A", "B"], df, md) == (["G a", "K b"], ["G", "K"])
+
+
+def test_report_multi_rejects_sample_name_clash(tmp_path):
+    d = tmp_path / "multi"
+    d.mkdir()
+    for name in ("s1.csv", "s1_classifications.csv"):
+        _cls_df([("a", "A", 10.0, "Novel Species")]).write_csv(d / name)
+    res = runner.invoke(app, ["report", "multi", "-i", str(d), "-p", "*",
+                              "-o", str(tmp_path / "m.html")])
+    assert res.exit_code == 1
+    assert "same sample name" in res.output

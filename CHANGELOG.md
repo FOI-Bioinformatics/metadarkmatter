@@ -147,6 +147,41 @@ Production-readiness and UX hardening pass.
 
 ### Fixed
 
+- Round-3 audit, data safety: `blast align`, `blastx align` and `mmseqs2
+  search` with a compressed `--output` such as `res.blast.gz` wrote to and
+  then deleted an unrelated `res.tsv`; the temp file is now
+  `<output>.partial`. `score extract-novel` refuses a `--fastq-out` /
+  `--fasta-out` (or per-lineage file) that is also an input read file, which
+  was truncated before being read.
+- Round-3 audit, classification: flags typed on the command line now
+  override `--config`/`--preset` even when equal to their default (an
+  explicit `--alignment-mode nucleotide` was ignored under a protein YAML);
+  overrides are re-validated. Reversed novelty/uncertainty ranges are
+  rejected (they produced NaN posteriors and all reads Known Species). The
+  clade-novelty rule is limited to the effective Novel Species range, so
+  presets with a lower species/genus boundary no longer get clade calls
+  beyond it (default output unchanged). `--streaming --qc-output` is an
+  error instead of writing nothing. Gzip alignments are detected by magic
+  bytes; `#` comment lines no longer disable the genome-coverage check.
+  YAML `taxonomy` section for the ANI/AAI rank boundaries.
+- Round-3 audit, outputs: a classify/batch run that classifies no reads
+  removes a stale `--summary` from an earlier run, `--no-provenance` removes
+  a stale sidecar, and the sidecar records `--genomes`. `extract-novel`
+  handles header-only tables, sorts grouped output deterministically and
+  applies `--min-reads` with `--no-group`. Per-lineage file names are unique.
+- Round-3 audit, pipeline: `run pipeline`/`run cohort` escape log lines
+  (`[dry-run]` prefixes showed as nothing; a path with markup crashed),
+  step fingerprints ignore `--threads`, sample sheets with a UTF-8 BOM are
+  read, and `run cohort --dry-run` exits 1 when a sample cannot run;
+  `mmseqs2 search --dry-run` no longer creates directories or temp files.
+- Round-3 audit, report: genus grouping no longer chains distant lineages
+  through a reference missing from the ANI matrix; a NaN identity no longer
+  aborts the report; Data-tab species/genus fall back to the table's own
+  columns for genomes missing from the metadata; the Novel Diversity
+  summary shows the reads in Novel Species / Novel Genus groups (it showed
+  whole-table call totals); `report multi` rejects files that map to the
+  same sample name instead of dropping one; `format_count` no longer shows
+  "1000.0K"; non-integer `--band-size` is rejected.
 - `score extract-novel`: the default `--max-uncertainty 2.0` cap removed every
   read the clade-novelty rule had called Novel Species (their U is high by
   construction). On the Francisellaceae sample this dropped 898 of 1,406 Novel

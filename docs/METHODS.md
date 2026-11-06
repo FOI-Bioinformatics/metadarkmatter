@@ -491,7 +491,7 @@ Reads classified as Novel Species or Novel Genus are grouped into **novel lineag
 
 | Method | Group key | Used when |
 |---|---|---|
-| `genus` | GTDB genus of the nearest reference, split within the genus by single linkage at ANI >= 80% (`genome_neighborhood_threshold`) | default (`auto`) when the metadata gives genus names |
+| `genus` | GTDB genus of the nearest reference, split within the genus by single linkage at ANI >= 80% (`genome_neighborhood_threshold`); a reference absent from the ANI matrix is linked to no other reference | default (`auto`) when the metadata gives genus names |
 | `reference` | nearest reference (species representative) | default (`auto`) without genus information; a warning is printed |
 | `legacy` | (ANI neighbourhood of the nearest reference, 5% novelty band, call) | on request; the previous default |
 
@@ -577,18 +577,9 @@ estimated_ANI = 100 - mean_novelty_index
 
 This provides an approximate measure of genomic similarity, though read-level identity may differ from genome-level ANI by 10-20%.
 
-**Effective uncertainty for single-hit reads:**
+**Uncertainty in group statistics:**
 
-The effective uncertainty used for cluster statistics (`mean_placement_uncertainty`) is:
-
-```python
-if num_ambiguous_hits <= 1:      # when the column is absent: placement_uncertainty < 0.1
-    effective_uncertainty = min(novelty_index × 0.4, 15.0)
-else:
-    effective_uncertainty = placement_uncertainty
-```
-
-This is a separate approximation from the `inferred_uncertainty` column of Section 3.2.
+`mean_placement_uncertainty` is the mean of the reads' measured `placement_uncertainty`, with null values (off-target reads) counted as 0. Single-hit reads have no competing reference and contribute U = 0; no uncertainty is inferred for them here. The separate `inferred_uncertainty` column (Section 3.2) is reported as `mean_inferred_uncertainty` when present.
 
 ---
 
@@ -904,7 +895,7 @@ With `clade_novel_species = true` (the default; disable with `score classify --n
 | novelty to the best reference, N | `>= clade_novelty_min` (default 5.0) and `< clade_novelty_max` (default 18.6) |
 | novelty to the best competing reference, `100 - second_hit_identity` | `>= clade_novelty_min` |
 
-Selected reads get `taxonomic_call = "Novel Species"` (and therefore `diversity_status = Novel`, `is_novel = true`). The posteriors, entropy, `placement_uncertainty` and `ambiguity_scope` are unchanged, so the placement ambiguity remains visible, and an extra boolean column `clade_novel_species` records which reads the rule changed. The defaults lie between the legacy Known Species threshold (4%) and the measured Bayesian Known/Novel Species boundary (about 6.2%), and at the measured Bayesian Novel Species/Novel Genus boundary (18.6%), both at U = 0 (Section 2.5).
+Selected reads get `taxonomic_call = "Novel Species"` (and therefore `diversity_status = Novel`, `is_novel = true`). The posteriors, entropy, `placement_uncertainty` and `ambiguity_scope` are unchanged, so the placement ambiguity remains visible, and an extra boolean column `clade_novel_species` records which reads the rule changed. The defaults lie between the legacy Known Species threshold (4%) and the measured Bayesian Known/Novel Species boundary (about 6.2%), and at the measured Bayesian Novel Species/Novel Genus boundary (18.6%), both at U = 0 (Section 2.5). The bounds are also limited to the effective Novel Species range (`novelty_known_max` to `novelty_novel_species_max`), so with a preset that moves the species/genus boundary (for example `conservative`, 15%) the rule never calls reads beyond it.
 
 In a leave-one-out benchmark on three families (Francisellaceae, Lactobacillaceae, Enterobacteriaceae; `scripts/benchmark_leave_one_out.py`), the rule raised read-level novel-species recall from 0.47-0.52 to 0.59-0.70, left novel-versus-known precision at or above 0.989 and Novel Genus recall unchanged, and increased the fraction of genus-level reads called Novel Species. Details and limitations: [CLADE_NOVELTY_VALIDATION.md](CLADE_NOVELTY_VALIDATION.md). On the strength of that validation the rule is on by default; setting it off reproduces the previous classification exactly.
 

@@ -31,25 +31,26 @@ NOVEL_SUMMARY_TEMPLATE: str = '''
 <div class="novel-summary">
     <div class="novel-intro">
         <h3>Novel Diversity Analysis</h3>
-        <p>Reads classified as Novel Species or Novel Genus are grouped into clusters
-           based on their nearest reference genome and divergence level. Each cluster
-           represents a putative novel organism that may warrant further investigation.</p>
+        <p>Reads classified as Novel Species or Novel Genus are grouped into novel
+           lineage groups (see the grouping note above). Each group is a candidate
+           lineage that may warrant further investigation; it is not necessarily a
+           single organism.</p>
     </div>
     <div class="novel-metrics">
         <div class="novel-metric highlight">
             <div class="novel-metric-value">{total_clusters}</div>
-            <div class="novel-metric-label">Novel Clusters</div>
-            <div class="novel-metric-hint">{total_reads:,} reads total</div>
+            <div class="novel-metric-label">Novel lineage groups</div>
+            <div class="novel-metric-hint">{grouped_reads:,} of {total_reads:,} novel reads</div>
         </div>
         <div class="novel-metric species">
             <div class="novel-metric-value">{novel_species_clusters}</div>
-            <div class="novel-metric-label">Novel Species clusters</div>
-            <div class="novel-metric-hint">{novel_species_reads:,} reads</div>
+            <div class="novel-metric-label">Novel Species groups</div>
+            <div class="novel-metric-hint">{novel_species_reads:,} reads in these groups</div>
         </div>
         <div class="novel-metric genus">
             <div class="novel-metric-value">{novel_genus_clusters}</div>
-            <div class="novel-metric-label">Novel Genus clusters</div>
-            <div class="novel-metric-hint">{novel_genus_reads:,} reads</div>
+            <div class="novel-metric-label">Novel Genus groups</div>
+            <div class="novel-metric-hint">{novel_genus_reads:,} reads in these groups</div>
         </div>
         <div class="novel-metric confidence">
             <div class="novel-metric-value">{high_confidence}</div>
@@ -306,10 +307,11 @@ def build_novel_summary_html(summary: NovelDiversitySummary) -> str:
     return NOVEL_SUMMARY_TEMPLATE.format(
         total_clusters=summary.total_clusters,
         total_reads=summary.total_novel_reads,
+        grouped_reads=summary.grouped_reads,
         novel_species_clusters=summary.novel_species_clusters,
-        novel_species_reads=summary.novel_species_reads,
+        novel_species_reads=summary.novel_species_cluster_reads,
         novel_genus_clusters=summary.novel_genus_clusters,
-        novel_genus_reads=summary.novel_genus_reads,
+        novel_genus_reads=summary.novel_genus_cluster_reads,
         high_confidence=summary.high_confidence_clusters,
     )
 

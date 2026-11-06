@@ -97,6 +97,9 @@ class NovelDiversityAnalyzer:
                 metadata provides genus names for the novel reads' references,
                 otherwise reference). See the module docstring.
         """
+        if novelty_band_size <= 0 or float(novelty_band_size) != int(novelty_band_size):
+            msg = f"novelty_band_size must be a positive whole number, got {novelty_band_size}"
+            raise ValueError(msg)
         if grouping not in GROUPING_CHOICES:
             msg = f"grouping must be one of {GROUPING_CHOICES}, got {grouping!r}"
             raise ValueError(msg)
@@ -445,7 +448,8 @@ class NovelDiversityAnalyzer:
         References of one genus are linked (single linkage) when their ANI is
         >= ``genome_neighborhood_threshold``; links never cross genera, so a
         dense family cannot chain into one group. Without an ANI matrix every
-        genus is one group. Genomes without a genus form their own group.
+        genus is one group; with one, a reference absent from it is linked to
+        nothing. Genomes without a genus form their own group.
         """
         parent = {g: g for g in genomes}
 
@@ -464,10 +468,13 @@ class NovelDiversityAnalyzer:
         for members in by_genus.values():
             for i, a in enumerate(members):
                 for b in members[i + 1:]:
-                    linked = (
-                        ani is None
-                        or not (ani.has_genome(a) and ani.has_genome(b))
-                        or ani.get_ani(a, b) >= self._genome_neighborhood_threshold
+                    # Without an ANI matrix the whole genus is one group. With
+                    # one, link only on a measured ANI; a reference missing
+                    # from the matrix must not chain distant lineages together.
+                    linked = ani is None or (
+                        ani.has_genome(a)
+                        and ani.has_genome(b)
+                        and ani.get_ani(a, b) >= self._genome_neighborhood_threshold
                     )
                     if linked:
                         ra, rb = find(a), find(b)
@@ -704,16 +711,21 @@ class NovelDiversityAnalyzer:
 
         clusters = self.cluster_novel_reads()
 
-        if not clusters:
-            self._summary = NovelDiversitySummary()
-            return self._summary
-
-        # Count reads by type
+        # Count reads by call (whole table, including reads in groups below
+        # the minimum size)
         novel_df = self._df.filter(
             pl.col("taxonomic_call").is_in(["Novel Species", "Novel Genus"])
         )
         nsp_reads = len(novel_df.filter(pl.col("taxonomic_call") == "Novel Species"))
         ngn_reads = len(novel_df.filter(pl.col("taxonomic_call") == "Novel Genus"))
+
+        if not clusters:
+            self._summary = NovelDiversitySummary(
+                total_novel_reads=nsp_reads + ngn_reads,
+                novel_species_reads=nsp_reads,
+                novel_genus_reads=ngn_reads,
+            )
+            return self._summary
 
         # Count clusters by type and confidence
         nsp_clusters = sum(1 for c in clusters if c.taxonomic_call == "Novel Species")
@@ -745,6 +757,13 @@ class NovelDiversityAnalyzer:
             families_with_novel_genera=len(families),
             mean_cluster_size=round(mean_size, 1),
             largest_cluster_size=max_size,
+            grouped_reads=sum(sizes),
+            novel_species_cluster_reads=sum(
+                c.read_count for c in clusters if c.taxonomic_call == "Novel Species"
+            ),
+            novel_genus_cluster_reads=sum(
+                c.read_count for c in clusters if c.taxonomic_call == "Novel Genus"
+            ),
         )
         return self._summary
 
