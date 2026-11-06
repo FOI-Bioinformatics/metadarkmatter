@@ -48,7 +48,7 @@ PROVENANCE_SCHEMA = "metadarkmatter.provenance/1"
 PROVENANCE_SUFFIX = ".provenance.json"
 
 # Input slots that are always present in the sidecar (null when unused).
-INPUT_SLOTS: tuple[str, ...] = ("alignment", "ani", "metadata", "aai", "id_mapping")
+INPUT_SLOTS: tuple[str, ...] = ("alignment", "ani", "metadata", "aai", "id_mapping", "genomes")
 
 _HASH_CHUNK = 1024 * 1024
 
@@ -69,6 +69,30 @@ def fingerprint_file(path: Path) -> dict[str, Any]:
         "path": str(resolved),
         "size": resolved.stat().st_size,
         "sha256": sha256_file(resolved),
+    }
+
+
+def fingerprint_dir(path: Path) -> dict[str, Any]:
+    """Fingerprint a directory without reading file contents.
+
+    Returns ``{"path", "files", "size", "listing_sha256"}``, where
+    ``listing_sha256`` hashes the sorted (relative path, size) listing of all
+    regular files. Genome directories can hold gigabytes, so contents are not
+    hashed; a renamed, added, removed or resized file changes the value.
+    """
+    resolved = Path(path).resolve()
+    entries = sorted(
+        (str(f.relative_to(resolved)), f.stat().st_size)
+        for f in resolved.rglob("*") if f.is_file()
+    )
+    digest = hashlib.sha256()
+    for name, size in entries:
+        digest.update(f"{name}\t{size}\n".encode())
+    return {
+        "path": str(resolved),
+        "files": len(entries),
+        "size": sum(size for _, size in entries),
+        "listing_sha256": digest.hexdigest(),
     }
 
 
@@ -124,7 +148,12 @@ def build_provenance(
     """
     input_records: dict[str, Any] = dict.fromkeys(INPUT_SLOTS)
     for name, path in inputs.items():
-        input_records[name] = fingerprint_file(path) if path is not None else None
+        if path is None:
+            input_records[name] = None
+        elif Path(path).is_dir():
+            input_records[name] = fingerprint_dir(path)
+        else:
+            input_records[name] = fingerprint_file(path)
 
     data: dict[str, Any] = {
         "schema": PROVENANCE_SCHEMA,

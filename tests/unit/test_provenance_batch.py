@@ -117,7 +117,7 @@ def test_build_provenance_schema_and_null_slots(tmp_path):
     assert prov["schema"] == PROVENANCE_SCHEMA
     assert prov["command"] == ["mdm", "score", "classify"]
     assert isinstance(prov["seed"], int)
-    assert set(prov["inputs"]) == {"alignment", "ani", "metadata", "aai", "id_mapping"}
+    assert set(prov["inputs"]) == {"alignment", "ani", "metadata", "aai", "id_mapping", "genomes"}
     assert prov["inputs"]["metadata"] is None
     rec = prov["inputs"]["alignment"]
     assert rec == {
