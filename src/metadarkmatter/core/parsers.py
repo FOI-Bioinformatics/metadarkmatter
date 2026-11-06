@@ -224,8 +224,14 @@ class StreamingBlastParser:
             raise FileNotFoundError(msg)
 
     def _is_gzipped(self) -> bool:
-        """Check if file is gzip compressed."""
-        return self.blast_path.suffix == ".gz"
+        """Check if file is gzip compressed (by magic bytes, not only the suffix)."""
+        if self.blast_path.suffix == ".gz":
+            return True
+        try:
+            with self.blast_path.open("rb") as handle:
+                return handle.read(2) == b"\x1f\x8b"
+        except OSError:
+            return False
 
     def _detect_column_count(self) -> int:
         """

@@ -1091,8 +1091,13 @@ class VectorizedClassifier:
             from metadarkmatter.core.classification.bayesian import (
                 apply_clade_novelty_rule,
             )
+            # The rule calls reads Novel Species, so keep it inside the
+            # effective Novel Species novelty range (presets and adaptive
+            # thresholds move it); with the defaults this is 5 <= N < 18.6.
             result = apply_clade_novelty_rule(
-                result, self.config.clade_novelty_min, self.config.clade_novelty_max
+                result,
+                max(self.config.clade_novelty_min, eff["novelty_known_max"]),
+                min(self.config.clade_novelty_max, eff["novelty_novel_species_max"]),
             )
 
         # Optional single-hit novelty refinement (nucleotide mode only): with

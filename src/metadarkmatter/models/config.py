@@ -604,6 +604,19 @@ class ScoringConfig(BaseModel):
             )
             raise ValueError(msg)
 
+        # Ranges must not be reversed: the Bayesian category widths are
+        # derived from them (width/3 + 0.5), and a reversed range gives a
+        # negative sigma (NaN posteriors, every read called Known Species).
+        for lo_name, hi_name in (
+            ("novelty_novel_species_min", "novelty_novel_species_max"),
+            ("novelty_novel_genus_min", "novelty_novel_genus_max"),
+            ("uncertainty_novel_genus_max", "uncertainty_conserved_min"),
+        ):
+            lo, hi = getattr(self, lo_name), getattr(self, hi_name)
+            if lo > hi:
+                msg = f"{lo_name} ({lo}) must be <= {hi_name} ({hi})"
+                raise ValueError(msg)
+
         # Ensure uncertainty thresholds form a valid hierarchy
         if self.uncertainty_novel_species_max > self.uncertainty_novel_genus_max:
             msg = (
@@ -918,6 +931,15 @@ def _flatten_yaml_config(raw: dict[str, Any]) -> dict[str, Any]:
     single_hit = raw.get("single_hit_novelty", {})
     _map_if_present(single_hit, "enabled", flat, "single_hit_novel_species")
 
+    # Taxonomy section (ANI/AAI rank boundaries used for ambiguity scope)
+    tax = raw.get("taxonomy", {})
+    for key in (
+        "same_species_ani_threshold", "same_genus_ani_threshold",
+        "genus_bitscore_threshold_pct", "use_aai_for_genus",
+        "aai_genus_boundary_low", "aai_genus_boundary_high",
+    ):
+        _map_if_present(tax, key, flat, key)
+
     # Output section
     output_sec = raw.get("output", {})
     _map_if_present(output_sec, "include_legacy_scores", flat, "include_legacy_scores")
@@ -1030,6 +1052,14 @@ def _build_yaml_structure(config: ScoringConfig) -> dict[str, Any]:
         },
         "single_hit_novelty": {
             "enabled": config.single_hit_novel_species,
+        },
+        "taxonomy": {
+            "same_species_ani_threshold": config.same_species_ani_threshold,
+            "same_genus_ani_threshold": config.same_genus_ani_threshold,
+            "genus_bitscore_threshold_pct": config.genus_bitscore_threshold_pct,
+            "use_aai_for_genus": config.use_aai_for_genus,
+            "aai_genus_boundary_low": config.aai_genus_boundary_low,
+            "aai_genus_boundary_high": config.aai_genus_boundary_high,
         },
         "output": {
             "include_legacy_scores": config.include_legacy_scores,
