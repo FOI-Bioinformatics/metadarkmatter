@@ -147,6 +147,38 @@ Production-readiness and UX hardening pass.
 
 ### Fixed
 
+- Round-4 audit, regressions from the round-3 threshold validation:
+  `--adaptive-thresholds` with presets whose Novel Species range ends below
+  the detected boundary (conservative, gtdb-strict, ...) crashed, and
+  `score sensitivity` crashed for ranges its help allowed. Adaptive
+  boundaries outside 92-99% ANI now fall back to 96% (one family's pairwise
+  ANIs gave 83%, making reads at 83% identity Known Species); sensitivity
+  ranges are checked up front with a clear message, and protein-mode
+  configs are rejected (fixed thresholds). `score evaluate` computes ECE
+  over rows that have a confidence.
+- Round-4 audit, ANI/AAI: skani parsing of genome paths with spaces;
+  fastANI no longer drops genomes without output rows or labels symlinked
+  genomes by their targets; matrix files are read with the separator in
+  their header (`-o x.tsv` wrote CSV that was then read as TSV); AAI
+  matrices reject 0-1 scale and treat NaN as missing; `blastx` finds
+  `<prefix>.dmnd` for dotted prefixes; `-q` in `blast/blastx align` is
+  `--quiet` only; `aai compute --protein-pattern` is honoured and the
+  default no longer picks up nucleotide `*.fasta`; `proteins predict` exits
+  1 when genomes fail; genome labels agree between ANI, AAI and BLAST
+  databases for files without an accession.
+- Round-4 audit, download/mapping: corrupt GTDB cache entries are misses;
+  non-JSON responses and HTTP-date `Retry-After` are handled; empty results
+  are not cached; `select-representatives` works without genus/family
+  columns; `generate-metadata --family` parses `Family_Genus_species_Acc`
+  names; empty species cells no longer break `download genomes fetch`;
+  `download genomes list` refuses `--output genome_metadata.tsv` and warns
+  before overwriting the metadata file; empty FASTA headers and unreadable
+  genome files are errors instead of silently truncated mappings.
+- Round-4 audit, inputs: `validate fastq` accepts a trailing blank line and
+  reports empty or non-nucleotide sequences; both validators report a
+  truncated gzip instead of crashing; out-of-range `METADARKMATTER_SEED`
+  falls back to 42; `kraken2 classify/extract --dry-run` create nothing and
+  `extract --exact-match` reports the taxon's own read count.
 - `ANIWeightedClassifier` (programmatic API) now applies the same Stage 2
   steps as the CLI classifier: ambiguity scope with the Conserved Region
   refinement, genus uncertainty over the bitscore window, and the
