@@ -179,7 +179,11 @@ class PhylogeneticNeighborhoodAnalyzer:
         isolation_score: float,
     ) -> float:
         """Derive a composite placement support score (0-100)."""
-        confidence_raw = cluster.mean_bayesian_confidence or 50.0
+        confidence_raw = (
+            cluster.mean_bayesian_confidence
+            if cluster.mean_bayesian_confidence is not None
+            else 50.0
+        )
 
         if cluster.taxonomic_call == "Novel Genus":
             isolation_component = min(isolation_score / 10.0, 1.0) * 40

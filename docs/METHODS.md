@@ -755,7 +755,7 @@ w_high = 1 / sigma_high
 boundary = (mu_low * w_low + mu_high * w_high) / (w_low + w_high)
 ```
 
-The boundary is clamped to the range 80-99% ANI. The fit uses `n_init=5`, `max_iter=200` and `random_state = METADARKMATTER_SEED` (default 42).
+A boundary outside 92-99% ANI is not used; the default 96% applies instead, because a two-component split of, for example, the pairwise ANIs of one family separates genera rather than species. With a preset whose Novel Species range ends below the detected novelty boundary, the configured thresholds are kept. The fit uses `n_init=5`, `max_iter=200` and `random_state = METADARKMATTER_SEED` (default 42).
 
 **Step 4:** `novelty_known_max` and `novelty_novel_species_min` are set to `100 - boundary`; all other settings of the base configuration are kept. Because the Known Species and Novel Species Gaussians are derived from these thresholds (Section 10.1), the adaptive boundary also shifts the Bayesian model, not only `legacy_call`. In protein mode the adjusted thresholds are ignored (Section 6).
 

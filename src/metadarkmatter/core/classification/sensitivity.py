@@ -72,6 +72,31 @@ def run_sensitivity_analysis(
     """
     import numpy as np
 
+    from metadarkmatter.core.exceptions import ConfigurationError
+
+    if base_config.alignment_mode == "protein":
+        raise ConfigurationError(
+            "Threshold sensitivity is not available in protein mode: protein "
+            "classification uses fixed thresholds, so every sweep point would "
+            "give the same counts.",
+            suggestion="Run the sweep on a nucleotide-mode configuration.",
+        )
+    # Each point sets novelty_known_max = novelty_novel_species_min and the
+    # three uncertainty maxima; they must stay inside the config's ranges.
+    novelty_cap = base_config.novelty_novel_species_max
+    uncertainty_cap = base_config.uncertainty_conserved_min
+    if max(novelty_range) > novelty_cap or max(uncertainty_range) > uncertainty_cap:
+        raise ConfigurationError(
+            f"Sweep range outside the configuration: novelty values must be <= "
+            f"{novelty_cap} (novelty_novel_species_max) and uncertainty values "
+            f"<= {uncertainty_cap} (uncertainty_conserved_min); got novelty "
+            f"{novelty_range} and uncertainty {uncertainty_range}.",
+            suggestion="Lower --novelty-max/--uncertainty-max, or use --config "
+            "with wider Novel Species / Conserved Region thresholds.",
+        )
+    if min(novelty_range) < 0 or min(uncertainty_range) < 0:
+        raise ConfigurationError("Sweep ranges must not be negative.")
+
     result = SensitivityResult()
 
     novelty_values = np.linspace(novelty_range[0], novelty_range[1], steps).tolist()

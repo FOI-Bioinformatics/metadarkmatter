@@ -1248,7 +1248,7 @@ In protein mode, `get_effective_thresholds()` returns these fixed constants from
 - `uncertainty_conserved_min` (float): Minimum uncertainty for conserved regions (default: 5.0)
 - `genus_uncertainty_ambiguous_min` (float): Minimum genus uncertainty for ambiguous-within-genus flag (default: 10.0)
 - `identity_gap_ambiguous_max` (float): Maximum identity gap before ambiguity flag (default: 2.0)
-- `confidence_threshold` (float): Minimum confidence score for high-confidence classification (default: 50.0)
+- `confidence_threshold` (float): Kept for compatibility; not used by the classifiers (`low_confidence` is based on posterior entropy, `bayesian.entropy_threshold`) and not written to YAML (default: 50.0)
 - `min_alignment_length` (int): Minimum alignment length in bp (default: 100)
 - `min_alignment_fraction` (float): Minimum fraction of read aligned (default: 0.3)
 - `coverage_weight_mode` (Literal): Coverage weighting mode for hit selection (default: 'linear')
@@ -1261,7 +1261,7 @@ In protein mode, `get_effective_thresholds()` returns these fixed constants from
 - `target_family` (str | None): Target family for off-target detection (default: None)
 - `family_ratio_threshold` (float): Bitscore ratio threshold for off-target reads (default: 0.8)
 - `same_genus_ani_threshold`, `same_species_ani_threshold` (float): ANI cut-offs for same-genus / same-species grouping in phylogenetic context computation (defaults: 80.0, 95.0)
-- `merge_band_tolerance` (float): Novelty tolerance when merging adjacent novel-cluster bands (default: 2.0)
+- `merge_band_tolerance` (float): Kept for compatibility; not read from `ScoringConfig` by the report. The legacy novel grouping takes its own `NovelDiversityAnalyzer(merge_band_tolerance=...)` argument (default: 2.0)
 - `bayesian` (BayesianConfig): Priors, prior boosts, entropy threshold and optional fitted `category_params` / `entropy_calibration`
 - `include_legacy_scores` (bool): Add `alignment_quality`, `identity_confidence`, `placement_confidence`, `discovery_score` to output (default: False)
 

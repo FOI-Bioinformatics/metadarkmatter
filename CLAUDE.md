@@ -202,9 +202,10 @@ documentation:
 - **Offline self-contained reports** are the default; SRI integrity
   attributes on CDN-mode tags via `mdm report vendor-cdn-sri`.
 - **Configurable thresholds** that were previously hardcoded:
-  `ScoringConfig.same_genus_ani_threshold`,
-  `same_species_ani_threshold`, `merge_band_tolerance` (see
-  `models/config.py`).
+  `ScoringConfig.same_genus_ani_threshold` and
+  `same_species_ani_threshold` (YAML `taxonomy` section; see
+  `models/config.py`). `ScoringConfig.merge_band_tolerance` and
+  `confidence_threshold` are not read by any code path.
 - **Container build**: `Containerfile` at the repo root pins all
   external tools via bioconda; `uv.lock` pins every transitive Python
   dependency for `uv sync --frozen`.

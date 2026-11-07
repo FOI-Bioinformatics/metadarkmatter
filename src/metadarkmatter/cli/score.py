@@ -2302,7 +2302,10 @@ def sensitivity(
     novelty_max: float = typer.Option(
         8.0,
         "--novelty-max",
-        help="Upper bound of the novelty_known_max sweep (default 8.0).",
+        help=(
+            "Upper bound of the novelty_known_max sweep (default 8.0); at most the "
+            "config's novelty_novel_species_max (20 by default)."
+        ),
         min=0.0,
         max=100.0,
     ),
@@ -2316,7 +2319,10 @@ def sensitivity(
     uncertainty_max: float = typer.Option(
         3.0,
         "--uncertainty-max",
-        help="Upper bound of the uncertainty_known_max sweep (default 3.0).",
+        help=(
+            "Upper bound of the uncertainty sweep (default 3.0); at most the "
+            "config's uncertainty_conserved_min (5 by default)."
+        ),
         min=0.0,
         max=100.0,
     ),

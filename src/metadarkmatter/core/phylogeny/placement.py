@@ -410,7 +410,10 @@ def extract_novel_clusters(
             best_match_genome=row["best_match_genome"],
             mean_identity=round(row["mean_identity"], 2),
             mean_novelty=round(row["mean_novelty"], 2),
-            mean_uncertainty=round(row["mean_uncertainty"], 2),
+            # Null when every read of the group lacks a placement uncertainty
+            mean_uncertainty=(
+                round(row["mean_uncertainty"], 2) if row["mean_uncertainty"] is not None else 0.0
+            ),
             read_count=row["read_count"],
             confidence_rating=confidence,
         )

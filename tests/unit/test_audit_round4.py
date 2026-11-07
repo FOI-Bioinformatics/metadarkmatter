@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import httpx
@@ -197,3 +196,68 @@ def test_kraken_exact_match_expected_reads(tmp_path):
     _kraken_inputs(tmp_path)
     report = KrakenReport(tmp_path / "s.kreport")
     assert (report.get_taxon_reads(262), report.get_clade_reads(262)) == (2, 3)
+
+
+# ---------------------------------------------------------- analysis tools
+
+
+def test_adaptive_boundary_outside_species_range_falls_back():
+    pytest.importorskip("sklearn")
+    from metadarkmatter.core.classification.adaptive import detect_species_boundary
+    from metadarkmatter.core.classification.ani_matrix import ANIMatrix
+
+    # Two groups of genomes at ~78% and ~88% ANI: a genus-level split.
+    names = [f"G{i}" for i in range(8)]
+    m = {a: {b: (100.0 if a == b else (88.0 if (i < 4) == (j < 4) else 78.0) + 0.1 * ((i + j) % 3))
+             for j, b in enumerate(names)} for i, a in enumerate(names)}
+    res = detect_species_boundary(ANIMatrix(m))
+    assert res.method == "fallback" and res.species_boundary == pytest.approx(96.0)
+
+
+def test_adaptive_config_keeps_preset_when_boundary_too_high():
+    from metadarkmatter.core.classification.adaptive import (
+        AdaptiveThresholds,
+        build_adaptive_config,
+    )
+    from metadarkmatter.models.config import ScoringConfig
+
+    base = ScoringConfig(novelty_novel_species_max=15.0, novelty_novel_genus_min=15.0)
+    ad = AdaptiveThresholds(species_boundary=83.0, novelty_known_max=17.0, confidence=0.7,
+                            method="gmm", ani_values_used=45)
+    assert build_adaptive_config(base, ad) == base
+
+
+def _metrics_df():
+    import polars as pl
+
+    return pl.DataFrame({
+        "read_id": ["a", "b"], "novelty_index": [3.0, 12.0], "placement_uncertainty": [0.5, 0.2],
+        "num_ambiguous_hits": [1, 1], "identity_gap": [None, None], "taxonomic_call": ["x", "y"],
+    })
+
+
+@pytest.mark.parametrize("kw", [{"novelty_range": (2.0, 25.0)}, {"uncertainty_range": (0.5, 8.0)}])
+def test_sensitivity_range_outside_config_is_clear_error(kw):
+    from metadarkmatter.core.classification.sensitivity import run_sensitivity_analysis
+    from metadarkmatter.models.config import ScoringConfig
+
+    with pytest.raises(ConfigurationError, match="Sweep range outside the configuration"):
+        run_sensitivity_analysis(_metrics_df(), ScoringConfig(), **kw)
+
+
+def test_sensitivity_protein_mode_is_error():
+    from metadarkmatter.core.classification.sensitivity import run_sensitivity_analysis
+    from metadarkmatter.models.config import ScoringConfig
+
+    with pytest.raises(ConfigurationError, match="protein mode"):
+        run_sensitivity_analysis(_metrics_df(), ScoringConfig(alignment_mode="protein"))
+
+
+def test_ece_ignores_rows_without_confidence():
+    import polars as pl
+
+    from metadarkmatter.core.classification.evaluation import evaluate_classifications
+
+    df = pl.DataFrame({"true_category": ["A", "A"], "taxonomic_call": ["A", "B"],
+                       "confidence_score": [float("nan"), 100.0]})
+    assert evaluate_classifications(df).expected_calibration_error == pytest.approx(1.0)

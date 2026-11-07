@@ -833,9 +833,14 @@ class NovelDiversityAnalyzer:
         """
         t_species, t_genus, t_family = self._table_taxa.get(accession, (None, None, None))
         md = self._metadata
-        species = (md.get_species(accession) if md else None) or t_species or "Unknown species"
-        genus = (md.get_genus(accession) if md else None) or t_genus or "Unknown"
-        family = (md.get_family(accession) if md else None) or t_family or "Unknown family"
+
+        def known(value: str | None) -> str | None:
+            # Placeholder names count as missing, as in _genus_of.
+            return None if value in (None, "", "Unknown", "Unknown species", "Unknown family") else value
+
+        species = known(md.get_species(accession) if md else None) or t_species or "Unknown species"
+        genus = known(md.get_genus(accession) if md else None) or t_genus or "Unknown"
+        family = known(md.get_family(accession) if md else None) or t_family or "Unknown family"
         return (str(species), str(genus), str(family))
 
     def _generate_suggested_name(
