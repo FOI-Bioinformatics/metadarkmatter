@@ -111,6 +111,7 @@ class NovelDiversityAnalyzer:
         self._genome_neighborhood_threshold = genome_neighborhood_threshold
         self._merge_band_tolerance = merge_band_tolerance
         self._grouping_requested: str = grouping
+        self._table_taxa = self._taxa_from_table(classifications)
         self.grouping: str | None = None  # resolved method, set by cluster_novel_reads
         self._clusters: list[NovelCluster] | None = None
         self._summary: NovelDiversitySummary | None = None
@@ -417,10 +418,33 @@ class NovelDiversityAnalyzer:
     # Grouping methods
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _taxa_from_table(df: pl.DataFrame) -> dict[str, tuple[str | None, str | None, str | None]]:
+        """{genome: (species, genus, family)} from the table's own columns.
+
+        ``score classify --metadata`` writes these columns, so a report or
+        summary built without ``--metadata`` can still group by genus.
+        """
+        cols = [c for c in ("species", "genus", "family") if c in df.columns]
+        if "best_match_genome" not in df.columns or "genus" not in cols:
+            return {}
+        pairs = (
+            df.select("best_match_genome", *cols)
+            .filter(pl.col("genus").is_not_null())
+            .unique()
+            .sort(["best_match_genome", *cols], nulls_last=True)
+        )
+        out: dict[str, tuple[str | None, str | None, str | None]] = {}
+        for row in pairs.iter_rows(named=True):
+            g = row["best_match_genome"]
+            if g is not None and g not in out:
+                out[str(g)] = (row.get("species"), row.get("genus"), row.get("family"))
+        return out
+
     def _genus_of(self, accession: str) -> str | None:
-        if self._metadata is None:
-            return None
-        genus = self._metadata.get_genus(accession)
+        genus = self._metadata.get_genus(accession) if self._metadata is not None else None
+        if not genus or genus == "Unknown":
+            genus = self._table_taxa.get(accession, (None, None, None))[1]
         if not genus or genus == "Unknown":
             return None
         return str(genus)
@@ -435,8 +459,8 @@ class NovelDiversityAnalyzer:
         if has_genus:
             return "genus"
         logger.warning(
-            "No genus information for the novel reads' references (no --metadata, "
-            "or no genus column); grouping novel reads by nearest reference "
+            "No genus information for the novel reads' references (no --metadata "
+            "and no genus column in the table); grouping novel reads by nearest reference "
             "instead of by genus. Reads of one novel organism may be split "
             "across several groups."
         )
@@ -807,14 +831,12 @@ class NovelDiversityAnalyzer:
         Returns:
             Tuple of (species, genus, family)
         """
-        if self._metadata is None:
-            return ("Unknown species", "Unknown", "Unknown family")
-
-        species = self._metadata.get_species(accession) or "Unknown species"
-        genus = self._metadata.get_genus(accession) or "Unknown"
-        family = self._metadata.get_family(accession) or "Unknown family"
-
-        return (species, genus, family)
+        t_species, t_genus, t_family = self._table_taxa.get(accession, (None, None, None))
+        md = self._metadata
+        species = (md.get_species(accession) if md else None) or t_species or "Unknown species"
+        genus = (md.get_genus(accession) if md else None) or t_genus or "Unknown"
+        family = (md.get_family(accession) if md else None) or t_family or "Unknown family"
+        return (str(species), str(genus), str(family))
 
     def _generate_suggested_name(
         self,

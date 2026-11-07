@@ -252,6 +252,12 @@ def generate_report(
             f"[red]Invalid --report-mode '{report_mode}'. Use 'offline' or 'cdn'.[/red]"
         )
         raise typer.Exit(code=2)
+    if alignment_mode not in ("nucleotide", "protein"):
+        console.print(
+            f"[red]Invalid --alignment-mode '{alignment_mode}'. "
+            "Use 'nucleotide' or 'protein'.[/red]"
+        )
+        raise typer.Exit(code=2)
     from metadarkmatter.core.novel_diversity.clustering import GROUPING_CHOICES
 
     if cluster_grouping not in GROUPING_CHOICES:

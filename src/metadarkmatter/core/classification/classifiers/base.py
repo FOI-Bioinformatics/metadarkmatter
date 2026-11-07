@@ -51,6 +51,13 @@ class ANIWeightedClassifier:
         3. Find secondary hits within 95% of top bitscore
         4. Calculate Placement Uncertainty (U) = 100 - max(ANI(top, secondary))
         5. Classify based on N and U thresholds
+
+    Calls follow the CLI's VectorizedClassifier: Bayesian MAP, Stage 2
+    refinement (Conserved Region, Ambiguous Within Genus) and the clade and
+    single-hit novelty rules. Known remaining differences: no alignment
+    filters (min length/fraction etc.), no representative mapping and no
+    family validation. Use VectorizedClassifier for results identical to
+    the CLI.
     """
 
     def __init__(
@@ -171,12 +178,13 @@ class ANIWeightedClassifier:
             )
             return (-score, -h.pident, h.genome_name)
 
-        ambiguous_hits_iter = iter(sorted(ambiguous_hits_iter, key=_order_key))
+        ambiguous_hits = sorted(ambiguous_hits_iter, key=_order_key)
 
         placement_uncertainty, num_ambiguous_hits = self._calculate_placement_uncertainty(
             best_genome,
-            ambiguous_hits_iter,
+            iter(ambiguous_hits),
         )
+        ambiguity_scope = self._ambiguity_scope(best_genome, ambiguous_hits)
 
         # Calculate genus-level uncertainty using lower threshold
         # This captures hits from other species in the same genus
@@ -210,15 +218,21 @@ class ANIWeightedClassifier:
             identity_gap=identity_gap,
         )
 
-        # Stage 2 discrete refinement (scalar version)
+        # Stage 2 discrete refinement (scalar version). Genus uncertainty is
+        # computed as in VectorizedClassifier: over the distinct competing
+        # genomes in the bitscore window, 100 - min ANI to the best genome.
         import numpy as np
+        secondary = sorted({h.genome_name for h in ambiguous_hits if h.genome_name != best_genome})
+        if secondary:
+            min_ani = min(self.ani_matrix.get_ani(best_genome, g) for g in secondary)
+            stage2_genus_unc = 100.0 if min_ani == 0.0 else 100.0 - min_ani
+        else:
+            stage2_genus_unc = 0.0
         refined_array = apply_stage2_refinement(
             [posterior.map_category],
-            genus_uncertainty=np.array([genus_uncertainty or 0.0]),
-            num_secondary=(
-                np.array([num_genus_hits - 1]) if num_genus_hits is not None and num_genus_hits > 1
-                else np.array([0])
-            ),
+            ambiguity_scope=[ambiguity_scope],
+            genus_uncertainty=np.array([stage2_genus_unc]),
+            num_secondary=np.array([len(secondary)]),
             genus_uncertainty_threshold=self.config.genus_uncertainty_ambiguous_min,
         )
         bayesian_call = str(refined_array[0])
@@ -240,6 +254,27 @@ class ANIWeightedClassifier:
                 bayesian_call = "Ambiguous Within Genus"
             else:
                 bayesian_call = "Novel Genus"
+
+        # Stage 2 novelty rules, in the same order and with the same bounds
+        # as VectorizedClassifier (nucleotide mode only).
+        if self.config.alignment_mode == "nucleotide":
+            if (
+                self.config.clade_novel_species
+                and bayesian_call in ("Ambiguous", "Species Boundary")
+                and ambiguity_scope in ("within_species", "within_genus")
+                and second_hit_identity is not None
+            ):
+                lo = max(self.config.clade_novelty_min, eff["novelty_known_max"])
+                hi = min(self.config.clade_novelty_max, eff["novelty_novel_species_max"])
+                if lo <= novelty_index < hi and 100.0 - second_hit_identity >= lo:
+                    bayesian_call = "Novel Species"
+            if (
+                self.config.single_hit_novel_species
+                and bayesian_call == "Known Species"
+                and ambiguity_scope == "unambiguous"
+                and novelty_index >= eff["novelty_known_max"]
+            ):
+                bayesian_call = "Novel Species"
 
         taxonomic_call = _CATEGORY_TO_ENUM[bayesian_call]
 
@@ -328,6 +363,24 @@ class ANIWeightedClassifier:
             discovery_score=discovery_score,
             taxonomic_call=taxonomic_call,
         )
+
+    def _ambiguity_scope(self, best_genome: str, ambiguous_hits: list[Any]) -> str:
+        """Phylogenetic scope of the competing hits, as in VectorizedClassifier.
+
+        ``unambiguous`` (no other genome within the bitscore window),
+        ``within_species`` / ``within_genus`` (every competing genome at or
+        above the same-species / same-genus ANI threshold to the best one),
+        otherwise ``across_genera``.
+        """
+        others = {h.genome_name for h in ambiguous_hits if h.genome_name != best_genome}
+        if not others:
+            return "unambiguous"
+        anis = [self.ani_matrix.get_ani(best_genome, g) for g in others]
+        if all(a >= self.config.same_species_ani_threshold for a in anis):
+            return "within_species"
+        if all(a >= self.config.same_genus_ani_threshold for a in anis):
+            return "within_genus"
+        return "across_genera"
 
     def _calculate_placement_uncertainty(
         self,
