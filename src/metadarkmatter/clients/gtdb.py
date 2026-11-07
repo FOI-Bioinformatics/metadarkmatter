@@ -7,6 +7,7 @@ retrieving representative genome accessions by taxonomic group.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -268,13 +269,19 @@ class GTDBClient:
 
     def _read_cache(self, cache_file: Path) -> Any | None:
         """Read cached response if fresh, otherwise None."""
+        # Any unreadable or malformed entry (corrupt bytes, wrong JSON shape,
+        # non-numeric timestamp) is a cache miss, never an error.
         try:
             payload = json.loads(cache_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+        except (OSError, ValueError) as exc:  # ValueError covers decode errors
             logger.debug("Cache read failed for %s: %s", cache_file, exc)
+            return None
+        if not isinstance(payload, dict):
             return None
         if self.cache_ttl is not None:
             timestamp = payload.get("timestamp", 0)
+            if not isinstance(timestamp, (int, float)) or isinstance(timestamp, bool):
+                return None
             if (time.time() - timestamp) > self.cache_ttl:
                 return None
         return payload.get("data")
@@ -295,7 +302,10 @@ class GTDBClient:
                 "timestamp": time.time(),
                 "data": data,
             }
-            cache_file.write_text(json.dumps(payload), encoding="utf-8")
+            # Write atomically so an interrupted run cannot leave a truncated entry.
+            tmp = cache_file.with_name(cache_file.name + ".tmp")
+            tmp.write_text(json.dumps(payload), encoding="utf-8")
+            tmp.replace(cache_file)
         except OSError as exc:
             logger.warning("Could not write GTDB cache to %s: %s", cache_file, exc)
 
@@ -331,8 +341,20 @@ class GTDBClient:
             try:
                 response = client.get(endpoint, params=params)
                 response.raise_for_status()
-                data = response.json()
-                if cache_file is not None:
+                try:
+                    data = response.json()
+                except ValueError as exc:
+                    # e.g. an HTML page from a proxy with status 200
+                    raise GTDBAPIError(
+                        "GTDB API returned a response that is not JSON "
+                        f"(content-type {response.headers.get('content-type', 'unknown')})."
+                    ) from exc
+                # Empty results are not cached: a transient empty answer
+                # would otherwise be served for the whole cache TTL.
+                empty = data in ([], {}, None) or (
+                    isinstance(data, dict) and data.get("rows") == []
+                )
+                if cache_file is not None and not empty:
                     self._write_cache(cache_file, endpoint, params, data)
                 return data
 
@@ -351,7 +373,10 @@ class GTDBClient:
                 if status_code == 429:
                     retry_after = e.response.headers.get("Retry-After")
                     if retry_after:
-                        delay = float(retry_after)
+                        # Seconds form only; an HTTP-date keeps the normal
+                        # backoff. Capped so a server cannot stall the run.
+                        with contextlib.suppress(ValueError):
+                            delay = min(max(float(retry_after), 0.0), 300.0)
 
                 # Retry on server errors (5xx) or rate limiting (429)
                 if attempt < self.max_retries:

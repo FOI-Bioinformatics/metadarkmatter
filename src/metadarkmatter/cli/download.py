@@ -120,6 +120,15 @@ def list_genomes(
     """
     out = QuietConsole(console, quiet=quiet)
 
+    # The metadata file always goes next to --output under a fixed name that
+    # the later steps expect; it must not be the accession list itself.
+    if output.name == "genome_metadata.tsv":
+        console.print(
+            "[red]Error: --output must not be named genome_metadata.tsv; that file "
+            "is written next to it with the genome metadata.[/red]"
+        )
+        raise typer.Exit(code=1)
+
     out.print("\n[bold blue]GTDB Genome Query[/bold blue]\n")
     out.print(f"Querying GTDB API for [bold]{taxon}[/bold]...")
 
@@ -247,12 +256,18 @@ def list_genomes(
         representative_map=representative_map,
     )
 
+    metadata_path = output.parent / "genome_metadata.tsv"
+    if metadata_path.exists():
+        console.print(
+            f"[yellow]Warning: overwriting existing {metadata_path} "
+            "(written for every 'download genomes list' run into this directory).[/yellow]"
+        )
+
     # Save to TSV
     output.parent.mkdir(parents=True, exist_ok=True)
     accession_list.to_tsv(output, include_metadata=include_metadata)
 
     # Save genome metadata for pipeline use
-    metadata_path = output.parent / "genome_metadata.tsv"
     accession_list.to_metadata_tsv(metadata_path)
 
     out.print("\n[bold green]Query complete![/bold green]")

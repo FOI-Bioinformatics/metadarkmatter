@@ -362,8 +362,10 @@ def select_representatives(
         if "representative" in df.columns:
             df = df.drop("representative")
 
-        # Insert representative column after family (or after genus if no family)
-        insert_after = "family" if "family" in df.columns else "genus"
+        # Insert representative column after family (else genus, else species)
+        insert_after = next(
+            (c for c in ("family", "genus", "species") if c in df.columns), "accession"
+        )
         cols = df.columns
         insert_idx = cols.index(insert_after) + 1
         before_cols = cols[:insert_idx]
@@ -452,7 +454,10 @@ def _parse_structured_filename(
     parts = prefix.split("_")
 
     if family_override:
-        # All tokens are genus + species
+        # Genus_species..., or Family_Genus_species... whose family token is
+        # replaced by the override (the token is dropped when it matches it).
+        if len(parts) > 1 and parts[0].lower() == family_override.lower():
+            parts = parts[1:]
         genus = parts[0] if parts else ""
         species_epithet = "_".join(parts[1:]) if len(parts) > 1 else ""
         family = family_override

@@ -99,9 +99,16 @@ def concatenate_genomes_with_mapping(
             # Handle gzipped files
             open_func = gzip.open if genome_file.suffix == ".gz" else Path.open
             with open_func(genome_file, "rt") as in_f:
-                for line in in_f:
+                for line_no, line in enumerate(in_f, start=1):
                     if line.startswith(">"):
                         original_header = line[1:].strip()
+                        if not original_header:
+                            from metadarkmatter.core.exceptions import ConfigurationError
+
+                            raise ConfigurationError(
+                                f"Empty FASTA header at line {line_no} of {genome_file}.",
+                                suggestion="Give every sequence an ID after '>'.",
+                            )
                         # Extract just the contig ID (first word)
                         original_contig = original_header.split()[0]
 
