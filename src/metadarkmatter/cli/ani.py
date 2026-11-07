@@ -19,6 +19,7 @@ from rich.table import Table
 from metadarkmatter.cli.utils import QuietConsole
 from metadarkmatter.core.ani_matrix_builder import (
     ani_dict_to_csv,
+    extract_genome_name_from_path,
     parse_fastani_output,
     parse_skani_output,
     validate_ani_coverage,
@@ -183,13 +184,16 @@ def compute(
         ANISensitivity.SENSITIVE,
         "--sensitivity",
         "-s",
-        help="Sensitivity preset: default (standard), sensitive (captures distant genomes)",
+        help=(
+            "skani only. Sensitivity preset: default (standard), sensitive "
+            "(captures distant genomes)"
+        ),
     ),
     min_af: float = typer.Option(
         None,
         "--min-af",
-        help="Minimum aligned fraction (0-100). Lower = more distant comparisons. "
-        "Default: 15 (default mode), 5 (sensitive mode)",
+        help="skani only. Minimum aligned fraction (0-100). Lower = more distant "
+        "comparisons. Default: 15 (default mode), 5 (sensitive mode)",
         min=0.0,
         max=100.0,
     ),
@@ -451,7 +455,9 @@ def compute(
                 # honours --representatives-only), not from the whole dir.
                 list_file = tmp_path / "genome_list.txt"
                 list_file.write_text(
-                    "".join(f"{p.resolve()}\n" for p in sorted(genome_files))
+                    # absolute(), not resolve(): a symlinked genome must keep
+                    # its own file name as label (as with skani and makedb).
+                    "".join(f"{p.absolute()}\n" for p in sorted(genome_files))
                 )
 
                 raw_output = tmp_path / "fastani_output.txt"
@@ -497,7 +503,10 @@ def compute(
                         out.print(f"[dim]Tool output: {result_stderr.strip()[:300]}[/dim]")
 
                 # Parse output
-                ani_dict = parse_fastani_output(raw_output)
+                ani_dict = parse_fastani_output(
+                    raw_output,
+                    genomes=[extract_genome_name_from_path(str(p)) for p in genome_files],
+                )
 
         zero_pairs, total_pairs = count_undetected_pairs(ani_dict)
         if total_pairs and zero_pairs / total_pairs > UNDETECTED_PAIR_WARN_FRACTION:
@@ -604,7 +613,6 @@ def validate(
     """
     import polars as pl
 
-    from metadarkmatter.core.ani_matrix_builder import extract_genome_name_from_path
 
     out = QuietConsole(console, quiet=quiet)
 

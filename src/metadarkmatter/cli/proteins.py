@@ -401,7 +401,10 @@ def predict(
     successful = [r for r in results if r[2] is None]
     total_proteins = sum(r[1] for r in successful)
 
-    out.print("\n[bold green]Prediction complete![/bold green]")
+    out.print(
+        "\n[bold green]Prediction complete![/bold green]" if not errors
+        else "\n[bold yellow]Prediction finished with errors[/bold yellow]"
+    )
     out.print("\n[bold]Summary:[/bold]")
     out.print(f"  Genomes processed: {len(successful):,}")
     out.print(f"  Total proteins predicted: {total_proteins:,}")
@@ -433,5 +436,12 @@ def predict(
             )
 
     out.print(f"\n[dim]Output directory: {output_dir}[/dim]")
+    if errors:
+        # A partial protein set gives an AAI matrix with genomes missing.
+        console.print(
+            f"[red]{len(errors)} of {len(results)} genomes failed; protein "
+            "prediction is incomplete.[/red]"
+        )
+        raise typer.Exit(code=1)
     out.print("[dim]Ready for: metadarkmatter aai compute --genomes " + str(output_dir) + "[/dim]")
     out.print()

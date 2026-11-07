@@ -937,7 +937,9 @@ class TestProteinsPredict:
                     "--quiet",
                 ],
             )
-        assert result.exit_code == 0
+        # A failed genome makes the protein set incomplete: non-zero exit.
+        assert result.exit_code == 1
+        assert "failed" in result.output
 
 
 class TestProteinHelpers:
@@ -1754,18 +1756,19 @@ class TestAAIFindProteinFiles:
 
         (tmp_path / "g1.faa").write_text(">p1\nM\n")
         (tmp_path / "g2.faa").write_text(">p2\nM\n")
-        files = _find_protein_files(tmp_path, "*.faa")
-        assert len(files) == 2
+        files, used = _find_protein_files(tmp_path, "*.faa")
+        assert len(files) == 2 and used == "*.faa"
 
     def test_fallback_pattern(self, tmp_path: Path) -> None:
         from metadarkmatter.cli.aai import _find_protein_files
 
-        (tmp_path / "g1.fasta").write_text(">p1\nM\n")
-        files = _find_protein_files(tmp_path, "*.xyz")
-        assert len(files) == 1
+        (tmp_path / "g1.faa.gz").write_text("")
+        (tmp_path / "g2.fasta").write_text(">c\nACGT\n")  # nucleotide: never a fallback
+        files, used = _find_protein_files(tmp_path, "*.xyz")
+        assert [f.name for f in files] == ["g1.faa.gz"] and used == "*.faa.gz"
 
     def test_no_files(self, tmp_path: Path) -> None:
         from metadarkmatter.cli.aai import _find_protein_files
 
-        files = _find_protein_files(tmp_path, "*.faa")
+        files, _used = _find_protein_files(tmp_path, "*.faa")
         assert len(files) == 0

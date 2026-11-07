@@ -30,6 +30,28 @@ logger = logging.getLogger(__name__)
 # ~50x faster to create than Pydantic models.
 
 
+
+def sniff_matrix_separator(path: Path) -> str:
+    """Return "\t" or "," for a matrix file, from its header line.
+
+    Falls back to the file extension when the header has neither.
+    """
+    import gzip
+
+    try:
+        with path.open("rb") as raw:
+            magic = raw.read(2)
+        opener = gzip.open if magic == b"\x1f\x8b" else open
+        with opener(path, "rt") as handle:
+            header = handle.readline()
+    except (OSError, EOFError, UnicodeDecodeError):
+        header = ""
+    if header.count("\t") > header.count(","):
+        return "\t"
+    if header.count(",") > 0:
+        return ","
+    return "\t" if str(path).endswith((".tsv", ".tsv.gz")) else ","
+
 class BlastHitFast(NamedTuple):
     """
     Lightweight BLAST hit for high-performance internal processing.
@@ -652,9 +674,9 @@ class ANIMatrixParser:
         Raises:
             ValueError: If matrix is not symmetric or contains invalid values
         """
-        # Detect separator (CSV vs TSV), handling .gz extension
-        path_str = str(self.ani_path)
-        separator = "\t" if path_str.endswith((".tsv", ".tsv.gz")) else ","
+        # Detect the separator from the header line, not the file name:
+        # 'ani compute -o x.tsv' writes comma-separated values.
+        separator = sniff_matrix_separator(self.ani_path)
 
         # Polars read_csv handles gzip automatically based on extension
         df = pl.read_csv(

@@ -218,8 +218,10 @@ def parse_aai_csv(path: Path) -> dict[str, dict[str, float]]:
     Returns:
         Nested dict mapping genome1 -> genome2 -> AAI value
     """
-    # Read CSV with Polars
-    df = pl.read_csv(path)
+    from metadarkmatter.core.parsers import sniff_matrix_separator
+
+    # Read with the separator found in the header ('-o x.tsv' writes CSV)
+    df = pl.read_csv(path, separator=sniff_matrix_separator(path))
 
     # Get genome names from first column
     if "genome" not in df.columns:
@@ -232,6 +234,18 @@ def parse_aai_csv(path: Path) -> dict[str, dict[str, float]]:
     # whole block to a NumPy array (no per-row DataFrame filtering).
     present = [g for g in genome_names if g in df.columns]
     block = df.select(present).fill_null(0.0).to_numpy().astype(float)
+    # NaN/inf mean "not computed" (0.0), as for ANI matrices.
+    block[~np.isfinite(block)] = 0.0
+    if len(present) >= 2:
+        off_diag = block[:, :][~np.eye(block.shape[0], block.shape[1], dtype=bool)]
+        positive = off_diag[off_diag > 0.0]
+        if positive.size and float(positive.max()) <= 1.0:
+            msg = (
+                "AAI matrix values appear to be fractions (max off-diagonal value "
+                f"{float(positive.max()):.3f} <= 1.0); expected percent identity on "
+                "a 0-100 scale. Multiply the matrix by 100."
+            )
+            raise ValueError(msg)
     col_index = {g: k for k, g in enumerate(present)}
 
     aai_dict: dict[str, dict[str, float]] = {}
@@ -314,7 +328,9 @@ def concatenate_protein_files(
         Dict mapping genome_accession -> protein_file_path
     """
     if patterns is None:
-        patterns = ["*.faa", "*.faa.gz", "*.fasta", "*.fasta.gz"]
+        # Not *.fasta: genome directories hold nucleotide .fasta files too,
+        # which Diamond would then search as protein.
+        patterns = ["*.faa", "*.faa.gz"]
 
     genome_to_file: dict[str, str] = {}
 
@@ -382,7 +398,9 @@ def extract_genome_name_from_filename(path: Path) -> str:
             break
 
     # Try to extract RefSeq/GenBank accession
-    match = re.match(r"(GC[AF]_\d+\.\d+)", filename)
+    # search, not match: prefixed names (Family_Genus_species_GCA_...) as
+    # for ANI matrices and BLAST databases
+    match = re.search(r"(GC[AF]_\d+\.\d+)", filename)
     if match:
         return match.group(1)
 
@@ -658,6 +676,7 @@ def compute_aai_matrix(
     keep_intermediates: bool = False,
     batch_mode: bool = True,
     sensitive: bool = False,
+    patterns: list[str] | None = None,
 ) -> dict[str, dict[str, float]]:
     """
     Compute AAI matrix from genome protein files.
@@ -701,7 +720,7 @@ def compute_aai_matrix(
         # Step 1: Concatenate protein files
         concat_fasta = tmpdir_path / "all_proteins.faa"
         logger.info("Concatenating protein files...")
-        genome_map = concatenate_protein_files(protein_dir, concat_fasta)
+        genome_map = concatenate_protein_files(protein_dir, concat_fasta, patterns=patterns)
         logger.info("Found %d genomes", len(genome_map))
 
         # Step 2: Create Diamond database

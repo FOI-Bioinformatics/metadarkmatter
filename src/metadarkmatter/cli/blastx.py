@@ -118,6 +118,15 @@ def _concatenate_proteins(
     return genome_count, protein_count
 
 
+
+
+def _dmnd_path(prefix: Path) -> Path:
+    """Diamond database file for a prefix: ``<prefix>.dmnd``.
+
+    ``with_suffix`` would replace a dot in the prefix (``pan.v2`` ->
+    ``pan.dmnd``) while Diamond writes ``pan.v2.dmnd``.
+    """
+    return prefix if prefix.name.endswith(".dmnd") else prefix.with_name(prefix.name + ".dmnd")
 @app.command(name="makedb")
 def make_database(
     proteins: Path = typer.Option(
@@ -194,7 +203,7 @@ def make_database(
     output.parent.mkdir(parents=True, exist_ok=True)
 
     # Check skip-if-exists
-    db_file = output.with_suffix(".dmnd")
+    db_file = _dmnd_path(output)
     if skip_if_exists and db_file.exists():
         out.print(f"[yellow]Skipping: Diamond database already exists at {db_file}[/yellow]")
         raise typer.Exit(code=0)
@@ -288,7 +297,7 @@ def make_database(
 def align_reads(
     query: Path = typer.Option(
         ...,
-        "--query", "-q",
+        "--query",
         help="Query reads file (FASTA/FASTQ, optionally gzipped)",
         exists=True,
         dir_okay=False,
@@ -402,7 +411,7 @@ def align_reads(
         raise typer.Exit(code=1) from None
 
     # Validate database exists
-    db_file = database.with_suffix(".dmnd")
+    db_file = _dmnd_path(database)
     if not db_file.exists():
         console.print(f"[red]Error: Diamond database not found at {db_file}[/red]")
         console.print(

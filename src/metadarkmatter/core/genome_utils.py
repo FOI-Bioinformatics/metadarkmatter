@@ -46,8 +46,10 @@ def extract_accession_from_filename(filename: str) -> str:
     if len(parts) >= 2 and parts[0] in ("GCF", "GCA"):
         return f"{parts[0]}_{parts[1]}"
 
-    # Last resort: return the whole stem
-    return stem
+    # Last resort: the stem without the NCBI "_genomic" suffix, matching
+    # ani_matrix_builder.extract_genome_name_from_path so the BLAST database
+    # and ANI matrix labels agree for files without an accession.
+    return stem.removesuffix("_genomic")
 
 
 def concatenate_genomes_with_mapping(
