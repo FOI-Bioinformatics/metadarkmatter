@@ -309,7 +309,12 @@ def run_classification(
     if request.aai:
         aai_matrix = AAIMatrix.from_file(request.aai)
         log(f"[green]Loaded AAI matrix for {len(aai_matrix.genomes)} genomes[/green]")
-        log("[dim]AAI will be used for genus-level classification (20-25% novelty)[/dim]\n")
+        eff = config.get_effective_thresholds()
+        log(
+            "[dim]AAI will be used for genus-level classification "
+            f"({eff['novelty_novel_genus_min']:g}-{eff['novelty_novel_genus_max']:g}% "
+            "novelty)[/dim]\n"
+        )
 
     # Load genome metadata if provided
     genome_metadata: GenomeMetadata | None = None

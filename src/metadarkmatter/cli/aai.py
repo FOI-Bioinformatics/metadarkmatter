@@ -35,19 +35,21 @@ console = Console()
 def _find_protein_files(
     protein_dir: Path,
     pattern: str,
-) -> list[Path]:
-    """Find protein FASTA files in directory, trying multiple patterns if needed."""
+) -> tuple[list[Path], str]:
+    """Find protein FASTA files; return them and the glob pattern that matched.
+
+    Falls back to ``*.faa`` / ``*.faa.gz`` when ``pattern`` matches nothing.
+    ``*.fasta`` is not tried: genome directories also hold nucleotide FASTA.
+    """
     protein_files = sorted(protein_dir.glob(pattern))
-
-    if not protein_files:
-        # Try alternative patterns
-        for alt_pattern in ["*.faa", "*.faa.gz", "*.fasta", "*.fasta.gz"]:
-            if alt_pattern != pattern:
-                protein_files = sorted(protein_dir.glob(alt_pattern))
-                if protein_files:
-                    break
-
-    return protein_files
+    if protein_files:
+        return protein_files, pattern
+    for alt_pattern in ("*.faa", "*.faa.gz"):
+        if alt_pattern != pattern:
+            protein_files = sorted(protein_dir.glob(alt_pattern))
+            if protein_files:
+                return protein_files, alt_pattern
+    return [], pattern
 
 
 @app.command(name="compute")
@@ -177,7 +179,7 @@ def compute(
         raise typer.Exit(code=1) from None
 
     # Find protein files
-    protein_files = _find_protein_files(genomes, protein_pattern)
+    protein_files, protein_pattern = _find_protein_files(genomes, protein_pattern)
 
     if not protein_files:
         console.print(
@@ -237,6 +239,7 @@ def compute(
                 evalue=evalue,
                 keep_intermediates=keep_intermediates,
                 sensitive=sensitive,
+                patterns=[protein_pattern],
             )
 
         except FileNotFoundError as e:

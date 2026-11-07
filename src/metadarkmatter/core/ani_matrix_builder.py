@@ -17,7 +17,9 @@ from pathlib import Path
 import polars as pl
 
 
-def parse_fastani_output(output_path: Path) -> dict[str, dict[str, float]]:
+def parse_fastani_output(
+    output_path: Path, genomes: list[str] | None = None
+) -> dict[str, dict[str, float]]:
     """Parse fastANI output into nested dictionary.
 
     FastANI outputs tab-delimited format:
@@ -33,13 +35,16 @@ def parse_fastani_output(output_path: Path) -> dict[str, dict[str, float]]:
 
     Args:
         output_path: Path to fastANI tabular output file.
+        genomes: Labels of every input genome. fastANI writes no row for a
+            genome with no detectable ANI to any other; listing them keeps
+            such genomes in the matrix (with 0.0 = not computed).
 
     Returns:
         Nested dict mapping genome1 -> genome2 -> ANI value.
         All values are symmetric and diagonal entries are 100.0.
     """
     ani_dict: dict[str, dict[str, float]] = defaultdict(dict)
-    all_genomes: set[str] = set()
+    all_genomes: set[str] = set(genomes or [])
     directional: dict[tuple[str, str], list[float]] = defaultdict(list)
 
     with output_path.open() as f:
@@ -136,7 +141,8 @@ def _parse_skani_full_matrix(output_path: Path) -> dict[str, dict[str, float]]:
     values: list[list[float]] = []
 
     for line in lines[1 : n_genomes + 1]:
-        parts = line.split()
+        # Tab-separated: a genome path may contain spaces.
+        parts = line.split("\t") if "\t" in line else line.split()
         genome_name = extract_genome_name_from_path(parts[0])
         genome_names.append(genome_name)
         row_values = [float(v) for v in parts[1:]]

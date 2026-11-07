@@ -261,3 +261,88 @@ def test_ece_ignores_rows_without_confidence():
     df = pl.DataFrame({"true_category": ["A", "A"], "taxonomic_call": ["A", "B"],
                        "confidence_score": [float("nan"), 100.0]})
     assert evaluate_classifications(df).expected_calibration_error == pytest.approx(1.0)
+
+
+# ---------------------------------------------------------- ANI / AAI / protein
+
+
+def test_skani_full_matrix_paths_with_spaces(tmp_path):
+    from metadarkmatter.core.ani_matrix_builder import parse_skani_output
+
+    out = tmp_path / "skani.txt"
+    out.write_text("2\n/g dir/GCF_000000001.1.fna\t100.0\t91.5\n"
+                   "/g dir/GCF_000000002.1.fna\t91.5\t100.0\n")
+    m = parse_skani_output(out, full_matrix=True)
+    assert m["GCF_000000001.1"]["GCF_000000002.1"] == 91.5
+
+
+def test_fastani_keeps_genomes_without_rows(tmp_path):
+    from metadarkmatter.core.ani_matrix_builder import parse_fastani_output
+
+    out = tmp_path / "fa.txt"
+    out.write_text("/g/A.fna\t/g/B.fna\t95.0\t10\t12\n/g/B.fna\t/g/A.fna\t95.2\t10\t12\n")
+    m = parse_fastani_output(out, genomes=["A", "B", "C"])
+    assert set(m) == {"A", "B", "C"} and m["A"]["C"] == 0.0 and m["C"]["C"] == 100.0
+
+
+def test_ani_matrix_csv_named_tsv_is_read(tmp_path):
+    from metadarkmatter.core.classification.ani_matrix import ANIMatrix
+
+    p = tmp_path / "ani.tsv"
+    p.write_text("genome,A,B\nA,100,92\nB,92,100\n")
+    assert ANIMatrix.from_file(p).get_ani("A", "B") == 92.0
+
+
+def test_aai_rejects_fraction_scale_and_nan(tmp_path):
+    from metadarkmatter.core.aai_matrix_builder import parse_aai_csv
+
+    p = tmp_path / "aai.csv"
+    p.write_text("genome,A,B\nA,1.0,0.75\nB,0.75,1.0\n")
+    with pytest.raises(ValueError, match="fractions"):
+        parse_aai_csv(p)
+    p.write_text("genome,A,B\nA,100,NaN\nB,NaN,100\n")
+    assert parse_aai_csv(p)["A"]["B"] == 0.0
+
+
+def test_dmnd_path_keeps_dotted_prefix():
+    from metadarkmatter.cli.blastx import _dmnd_path
+
+    assert _dmnd_path(Path("bx/pan.v2")).name == "pan.v2.dmnd"
+    assert _dmnd_path(Path("bx/pan.dmnd")).name == "pan.dmnd"
+
+
+@pytest.mark.parametrize("cmd", [["blast", "align"], ["blastx", "align"]])
+def test_short_q_means_quiet_not_query(cmd):
+    from typer.main import get_command
+
+    group = get_command(app)
+    params = group.commands[cmd[0]].commands[cmd[1]].params
+    query = next(p for p in params if p.name == "query")
+    assert "-q" not in query.opts
+
+
+def test_genome_labels_agree_across_ani_and_blastdb():
+    from metadarkmatter.core.aai_matrix_builder import extract_genome_name_from_filename
+    from metadarkmatter.core.ani_matrix_builder import extract_genome_name_from_path
+    from metadarkmatter.core.genome_utils import extract_accession_from_filename
+
+    for name in ["strainX_genomic.fna", "Fam_Gen_sp_GCA_000710735.1.fasta", "custom.fa"]:
+        assert extract_accession_from_filename(name) == extract_genome_name_from_path(name)
+    assert extract_genome_name_from_filename(
+        Path("Fam_Gen_sp_GCA_000710735.1.faa")) == "GCA_000710735.1"
+
+
+def test_aai_compute_honours_protein_pattern(tmp_path, monkeypatch):
+    from metadarkmatter.core import aai_matrix_builder as amb
+
+    prot = tmp_path / "prot"
+    prot.mkdir()
+    for name in ("GCF_000000001.1.faa", "GCF_000000002.1.faa", "GCF_000000003.1.pep",
+                 "GCF_000000004.1.fasta"):
+        (prot / name).write_text(">p\nMKV\n")
+    out = tmp_path / "concat.faa"
+    gm = amb.concatenate_protein_files(prot, out, patterns=["*.pep"])
+    assert set(gm) == {"GCF_000000003.1"}
+    gm = amb.concatenate_protein_files(prot, out)
+    # The default no longer includes *.fasta (nucleotide genomes live there too).
+    assert set(gm) == {"GCF_000000001.1", "GCF_000000002.1"}

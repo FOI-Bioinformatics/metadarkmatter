@@ -337,7 +337,7 @@ def make_database(
 def align_reads(
     query: Path | None = typer.Option(
         None,
-        "--query", "-q",
+        "--query",
         help="Single-end query reads (FASTA/FASTQ). Use this OR --query-1/--query-2.",
         exists=True,
         dir_okay=False,
