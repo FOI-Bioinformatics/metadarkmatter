@@ -13,8 +13,13 @@ merge records.
 from __future__ import annotations
 
 import gzip
+import logging
 from pathlib import Path
 from typing import IO
+
+from metadarkmatter.core.exceptions import ConfigurationError
+
+logger = logging.getLogger(__name__)
 
 
 def open_reads(path: Path) -> IO[str]:
@@ -63,6 +68,13 @@ def _write_mate_records(reads_file: Path, mate: int, out_f: IO[str]) -> int:
                 seq = in_f.readline()
                 plus = in_f.readline()
                 qual = in_f.readline()
+                if not line.startswith("@") or not plus.startswith("+") or not qual:
+                    raise ConfigurationError(
+                        f"Malformed or truncated FASTQ record {count + 1} in "
+                        f"{reads_file} (header {line.strip()[:60]!r}).",
+                        suggestion="Check that the file is complete (e.g. 'gzip -t') "
+                        "and is 4-line FASTQ.",
+                    )
                 out_f.write(_mate_id(line, mate))
                 for part in (seq, plus, qual):
                     out_f.write(part if part.endswith("\n") else part + "\n")
@@ -85,8 +97,17 @@ def combine_mates(reads_1: Path, reads_2: Path, output_path: Path) -> int:
     Records of one mate are contiguous and R1 precedes R2. Returns the total
     number of reads written.
     """
-    read_count = 0
+    counts: list[int] = []
     with output_path.open("w") as out_f:
         for mate, reads_file in ((1, reads_1), (2, reads_2)):
-            read_count += _write_mate_records(reads_file, mate, out_f)
-    return read_count
+            counts.append(_write_mate_records(reads_file, mate, out_f))
+    if counts[0] != counts[1]:
+        # Mates are aligned and classified independently, so unequal files
+        # still work (some trimmers filter mates separately), but it often
+        # means a truncated file or mismatched pair.
+        logger.warning(
+            "Paired-end files have different read counts: %s has %d, %s has %d. "
+            "Check that they are mates of the same run and are complete.",
+            reads_1, counts[0], reads_2, counts[1],
+        )
+    return sum(counts)

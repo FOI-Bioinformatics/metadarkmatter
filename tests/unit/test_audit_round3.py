@@ -380,3 +380,93 @@ def test_report_multi_rejects_sample_name_clash(tmp_path):
                               "-o", str(tmp_path / "m.html")])
     assert res.exit_code == 1
     assert "same sample name" in res.output
+
+
+# ------------------------------------------------- follow-ups (minor issues)
+
+
+def _base_calls(tmp_path, rows, ani_dict, cfg=None):
+    from metadarkmatter.core.classification.ani_matrix import ANIMatrix
+    from metadarkmatter.core.classification.classifiers.base import ANIWeightedClassifier
+    from metadarkmatter.core.parsers import StreamingBlastParser
+    from metadarkmatter.models.config import ScoringConfig
+
+    path = tmp_path / "a.tsv"
+    path.write_text("".join(
+        f"{q}\t{s}\t{p}\t150\t0\t0\t1\t150\t1\t150\t1e-40\t{b}\t150\n" for q, s, p, b in rows))
+    clf = ANIWeightedClassifier(ANIMatrix(ani_dict), config=cfg or ScoringConfig())
+    return {r.read_id: clf.classify_read(r).taxonomic_call.value
+            for r in StreamingBlastParser(path).iter_reads()}
+
+
+def test_base_classifier_applies_clade_and_single_hit_rules(tmp_path):
+    from metadarkmatter.models.config import ScoringConfig
+
+    ani = {"A": {"A": 100.0, "B": 92.0}, "B": {"A": 92.0, "B": 100.0}}
+    rows = [("clade", "A|c", 91.0, 220), ("clade", "B|c", 90.6, 218),
+            ("single", "A|c", 95.5, 240)]
+    calls = _base_calls(tmp_path, rows, ani)
+    assert calls == {"clade": "Novel Species", "single": "Novel Species"}
+    off = ScoringConfig(clade_novel_species=False, single_hit_novel_species=False)
+    calls = _base_calls(tmp_path, rows, ani, off)
+    assert calls["clade"] != "Novel Species" and calls["single"] == "Known Species"
+
+
+def test_base_classifier_emits_conserved_region(tmp_path):
+    ani = {"A": {"A": 100.0, "B": 70.0}, "B": {"A": 70.0, "B": 100.0}}
+    rows = [("cons", "A|c", 99.5, 280), ("cons", "B|c", 99.4, 279)]
+    assert _base_calls(tmp_path, rows, ani)["cons"] == "Conserved Region"
+
+
+def test_combine_mates_warns_on_unequal_counts_and_rejects_truncation(tmp_path, caplog):
+    from metadarkmatter.core.paired_reads import combine_mates
+
+    r1 = _fq(tmp_path / "r1.fq", ["a", "b"])
+    r2 = _fq(tmp_path / "r2.fq", ["a"])
+    with caplog.at_level("WARNING"):
+        assert combine_mates(r1, r2, tmp_path / "o.fq") == 3
+    assert "different read counts" in caplog.text
+    trunc = tmp_path / "t.fq"
+    trunc.write_text("@a\nACGT\n+\nIIII\n@b\nAC\n")
+    with pytest.raises(ConfigurationError, match="truncated"):
+        combine_mates(r1, trunc, tmp_path / "o2.fq")
+
+
+def test_grouping_uses_table_genus_without_metadata():
+    from metadarkmatter.core.novel_diversity.clustering import NovelDiversityAnalyzer
+
+    df = _cls_df([(f"a{i}", "A", 10.0, "Novel Species") for i in range(3)]
+                 + [(f"b{i}", "B", 10.0, "Novel Species") for i in range(3)])
+    df = df.with_columns(
+        pl.lit("G").alias("genus"),
+        pl.col("best_match_genome").replace_strict({"A": "G a", "B": "G b"}).alias("species"),
+    )
+    an = NovelDiversityAnalyzer(df)
+    clusters = an.cluster_novel_reads()
+    assert an.grouping == "genus"
+    assert [(c.read_count, c.nearest_genus) for c in clusters] == [(6, "G")]
+
+
+def test_report_generate_rejects_bad_alignment_mode(tmp_path):
+    cls = tmp_path / "c.csv"
+    _cls_df([("a", "A", 10.0, "Novel Species")]).write_csv(cls)
+    res = runner.invoke(app, ["report", "generate", "--classifications", str(cls),
+                              "--output", str(tmp_path / "r.html"), "--alignment-mode", "dna"])
+    assert res.exit_code == 2
+    assert "Invalid --alignment-mode" in res.output
+
+
+def test_run_pipeline_checks_extracted_reads_and_warns_on_ignored_reads(tmp_path):
+    g = tmp_path / "g"
+    g.mkdir()
+    (g / "GCF_000000001.1.fna").write_text(">c\nACGT\n")
+    base = ["run", "pipeline", "--genomes", str(g), "--output-dir", str(tmp_path / "o"),
+            "--no-report", "--dry-run"]
+    res = runner.invoke(app, [*base, "--extracted-reads-1", str(tmp_path / "missing.fq")])
+    assert res.exit_code != 0
+    assert "does not exist" in (res.output + str(res.exception))
+    r1 = _fq(tmp_path / "x_R1.fq", ["x"])
+    raw = _fq(tmp_path / "raw_R1.fq", ["x"])
+    res = runner.invoke(app, [*base, "--extracted-reads-1", str(r1), "--reads-1", str(raw)])
+    assert res.exit_code == 0, res.output
+    assert "are ignored" in res.output

@@ -147,6 +147,23 @@ Production-readiness and UX hardening pass.
 
 ### Fixed
 
+- `ANIWeightedClassifier` (programmatic API) now applies the same Stage 2
+  steps as the CLI classifier: ambiguity scope with the Conserved Region
+  refinement, genus uncertainty over the bitscore window, and the
+  clade-novelty and single-hit novelty rules. Agreement with
+  `VectorizedClassifier` on the Francisellaceae example rose from 83.2% to
+  99.8% of reads; the remaining differences come from the CLI's alignment
+  filters, which the programmatic classifier does not apply.
+- Paired-end combining (`blast align` / `mmseqs2 search --query-1/--query-2`)
+  rejects a truncated or malformed FASTQ record instead of writing a broken
+  read, and warns when R1 and R2 have different read counts.
+- Novel lineage grouping uses the classification table's own
+  species/genus/family columns (written by `score classify --metadata`) when
+  `--metadata` is not passed to `report generate` / `report summarize`, so
+  it groups by genus instead of falling back to nearest reference.
+- `report generate --alignment-mode` is validated; `run pipeline` checks
+  that `--extracted-reads-1/-2` exist before running any step and warns that
+  `--reads-1/--reads-2` are ignored when extracted reads are given.
 - Round-3 audit, data safety: `blast align`, `blastx align` and `mmseqs2
   search` with a compressed `--output` such as `res.blast.gz` wrote to and
   then deleted an unrelated `res.tsv`; the temp file is now

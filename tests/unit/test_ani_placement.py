@@ -396,13 +396,11 @@ class TestClassificationThresholds:
         assert classification.novelty_index == 2.0
 
     def test_novel_species_boundary_novelty_5(self, boundary_classifier):
-        """Novelty = 5.0 (boundary) with single hit: Bayesian assigns Known Species.
+        """Novelty = 5.0 with a single hit: Novel Species via the single-hit rule.
 
-        At the Known/Novel Species boundary (N=5.0), the Known Species Gaussian
-        (mean=2.0) is closer than Novel Species (mean=12.0). With a single hit,
-        the classifier appropriately assigns this as Known Species — the read
-        is at the boundary and the evidence (single hit) does not strongly
-        support novel species classification.
+        The Known Species Gaussian (mean 2.0) is closer than Novel Species
+        (mean 12.0), so the Bayesian MAP is Known Species; the single-hit
+        novelty rule then applies (as in VectorizedClassifier).
         """
         hit = BlastHit(
             qseqid="read_001",
@@ -423,8 +421,18 @@ class TestClassificationThresholds:
         classification = boundary_classifier.classify_read(result)
 
         assert classification.novelty_index == 5.0
-        # Bayesian: at the boundary with single hit, Known Species wins
-        assert classification.taxonomic_call == TaxonomicCall.KNOWN_SPECIES
+        # The Bayesian MAP is Known Species here, but the single-hit novelty
+        # rule (on by default, as in the CLI classifier) calls single-reference
+        # reads with N >= novelty_known_max (4%) Novel Species.
+        assert classification.taxonomic_call == TaxonomicCall.NOVEL_SPECIES
+
+        off = ANIWeightedClassifier(
+            boundary_classifier.ani_matrix,
+            config=ScoringConfig(
+                single_hit_uncertainty_threshold=100.0, single_hit_novel_species=False
+            ),
+        )
+        assert off.classify_read(result).taxonomic_call == TaxonomicCall.KNOWN_SPECIES
 
     def test_novel_species_midrange_novelty_15(self, boundary_classifier):
         """Novelty = 15.0 should be novel species (mid-range, well below 20% boundary)."""

@@ -158,6 +158,19 @@ def run_pipeline(
     if extracted_reads_2 is not None and cfg.extracted_reads_1 is None:
         raise ValueError("--extracted-reads-2 requires --extracted-reads-1.")
 
+    # Check pre-extracted reads up front: a typo otherwise surfaces only at
+    # the align step, after reference download/makedb/ANI have run.
+    for label, path in (("--extracted-reads-1", cfg.extracted_reads_1),
+                        ("--extracted-reads-2", extracted_reads_2)):
+        if path is not None and not Path(path).is_file():
+            raise ValueError(f"{label} file does not exist: {path}")
+    extra_warnings: list[str] = []
+    if cfg.extracted_reads_1 is not None and (cfg.reads_1 is not None or cfg.reads_2 is not None):
+        extra_warnings.append(
+            "--reads-1/--reads-2 are ignored because --extracted-reads-1 is given "
+            "(alignment uses the extracted reads; pass --extracted-reads-2 for R2)."
+        )
+
     if cfg.genomes_dir is not None and not cfg.genomes_dir.is_dir():
         raise ValueError(f"--genomes path does not exist or is not a directory: {cfg.genomes_dir}")
 
@@ -173,7 +186,7 @@ def run_pipeline(
         extracted_reads_2=extracted_reads_2,
     )
 
-    for msg in dict.fromkeys([*yaml_msgs, *getattr(pipeline, "warnings", [])]):
+    for msg in dict.fromkeys([*yaml_msgs, *extra_warnings, *getattr(pipeline, "warnings", [])]):
         console.print(f"[yellow]Warning:[/yellow] {msg}")
 
     if effective_dry_run:
