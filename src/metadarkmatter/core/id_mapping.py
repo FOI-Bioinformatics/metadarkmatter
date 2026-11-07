@@ -15,6 +15,7 @@ from pathlib import Path
 
 import polars as pl
 
+from metadarkmatter.core.exceptions import ConfigurationError
 from metadarkmatter.core.genome_utils import extract_accession_from_filename
 
 logger = logging.getLogger(__name__)
@@ -120,18 +121,27 @@ class ContigIdMapping:
 
             try:
                 with open_func(genome_file, "rt") as f:
-                    for line in f:
+                    for line_no, line in enumerate(f, start=1):
                         if line.startswith(">"):
                             # Extract contig ID (first word after >)
                             header = line[1:].strip()
+                            if not header:
+                                raise ConfigurationError(
+                                    f"Empty FASTA header at line {line_no} of {genome_file}.",
+                                    suggestion="Give every sequence an ID after '>'.",
+                                )
                             contig_id = header.split()[0]
 
                             if contig_id in mapping:
                                 duplicates.append(contig_id)
                             mapping[contig_id] = accession
-            except Exception as e:
-                logger.warning("Error reading %s: %s", genome_file, e)
-                continue
+            except (OSError, EOFError, UnicodeDecodeError) as e:
+                # Unreadable or truncated file: a partial mapping would make
+                # later contigs map to "unknown" without any sign of it.
+                raise ConfigurationError(
+                    f"Could not read genome file {genome_file}: {e}",
+                    suggestion="Check that the file is complete (e.g. 'gzip -t').",
+                ) from e
 
         if duplicates:
             if not allow_duplicates:

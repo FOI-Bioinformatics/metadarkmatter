@@ -139,8 +139,9 @@ class AccessionList(BaseModel):
         accessions = [
             GenomeAccession(
                 accession=row["accession"],
-                gtdb_taxonomy=row.get("gtdb_taxonomy", ""),
-                species=row.get("species", ""),
+                # Empty cells are read as null; to_tsv writes "" for them.
+                gtdb_taxonomy=row.get("gtdb_taxonomy") or "",
+                species=row.get("species") or "",
                 genome_size=row.get("genome_size"),
                 is_representative=(
                     row.get("representative", "") == row["accession"]
