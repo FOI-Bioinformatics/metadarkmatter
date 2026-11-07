@@ -131,9 +131,17 @@ def evaluate_classifications(
     bin_accs: list[float] = []
     bin_counts: list[int] = []
     if confidence_column is not None and confidence_column in df.columns:
-        conf = df[confidence_column].to_numpy().astype(float)
+        conf = df[confidence_column].cast(pl.Float64, strict=False).to_numpy().astype(float)
         # Clip out-of-range confidences so binning is well-defined.
         conf = np.clip(conf, 0.0, 100.0)
+        # Rows without a confidence (null/NaN) fall in no bin; weight the
+        # bins by the scored rows only, or they would count as zero error.
+        n_scored = int(np.isfinite(conf).sum())
+        if n_scored < n_rows:
+            logger.warning(
+                "%d of %d rows have no %s and are left out of the ECE.",
+                n_rows - n_scored, n_rows, confidence_column,
+            )
         edges = np.linspace(0.0, 100.0, n_confidence_bins + 1)
         ece_sum = 0.0
         for i in range(n_confidence_bins):
@@ -156,8 +164,8 @@ def evaluate_classifications(
             bin_centers.append(float((lo + hi) / 2))
             bin_accs.append(bin_acc)
             bin_counts.append(count)
-            ece_sum += (count / n_rows) * gap
-        ece = ece_sum
+            ece_sum += (count / n_scored) * gap if n_scored else 0.0
+        ece = ece_sum if n_scored else None
 
     return EvaluationResult(
         n_rows=n_rows,

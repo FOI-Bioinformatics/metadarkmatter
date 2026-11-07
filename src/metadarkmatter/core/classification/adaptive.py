@@ -26,6 +26,12 @@ if TYPE_CHECKING:
     from metadarkmatter.core.classification.ani_matrix import ANIMatrix
     from metadarkmatter.models.config import ScoringConfig
 
+
+# Plausible range for a prokaryotic species boundary (% ANI). Detected
+# boundaries outside it fall back to the default.
+SPECIES_BOUNDARY_MIN = 92.0
+SPECIES_BOUNDARY_MAX = 99.0
+
 logger = logging.getLogger(__name__)
 
 
@@ -168,8 +174,23 @@ def detect_species_boundary(
         w_high = 1.0 / (high_std + 1e-10)
         boundary = (low_mean * w_low + high_mean * w_high) / (w_low + w_high)
 
-        # Clamp to reasonable range (80-99% ANI)
-        boundary = max(80.0, min(99.0, boundary))
+        # A species boundary lies roughly at 92-99% ANI. A 2-component split
+        # below that separates genera or more distant groups (for example
+        # the pairwise ANIs of one family), not species, so fall back.
+        if not SPECIES_BOUNDARY_MIN <= boundary <= SPECIES_BOUNDARY_MAX:
+            logger.warning(
+                "Adaptive species boundary %.1f%% ANI is outside the plausible "
+                "range %.0f-%.0f%%; the ANI matrix probably does not contain "
+                "within-species pairs. Using the default boundary %.1f%%.",
+                boundary, SPECIES_BOUNDARY_MIN, SPECIES_BOUNDARY_MAX, default_boundary,
+            )
+            return AdaptiveThresholds(
+                species_boundary=default_boundary,
+                novelty_known_max=NOVELTY_KNOWN_MAX,
+                confidence=0.0,
+                method="fallback",
+                ani_values_used=len(ani_values),
+            )
         novelty_max = 100.0 - boundary
 
         confidence = min(1.0, separation / 3.0)
@@ -447,6 +468,15 @@ def build_adaptive_config(
     # target family, filters, Bayesian/YAML config, ...) are preserved;
     # only the novelty boundary is replaced. model_validate re-runs checks.
     data = base_config.model_dump()
+    if adaptive.novelty_known_max >= base_config.novelty_novel_species_max:
+        # The boundary would leave no Novel Species range (a preset with a
+        # low species/genus boundary); keep the configured thresholds.
+        logger.warning(
+            "Adaptive novelty boundary %.1f%% is not below the configured Novel "
+            "Species maximum %.1f%%; keeping the configured thresholds.",
+            adaptive.novelty_known_max, base_config.novelty_novel_species_max,
+        )
+        return base_config
     data.update(
         novelty_known_max=adaptive.novelty_known_max,
         novelty_novel_species_min=adaptive.novelty_known_max,  # Continuous boundary
