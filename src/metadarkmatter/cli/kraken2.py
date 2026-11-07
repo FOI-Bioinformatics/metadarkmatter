@@ -143,8 +143,9 @@ def classify_reads(
     if sample_name is None:
         sample_name = extract_sample_name_from_reads(reads_1)
 
-    # Setup output paths
-    output.mkdir(parents=True, exist_ok=True)
+    # Setup output paths (a dry run creates nothing)
+    if not (dry_run or is_dry_run()):
+        output.mkdir(parents=True, exist_ok=True)
 
     kraken_output = output / f"{sample_name}.kraken"
     kraken_report = output / f"{sample_name}.kreport"
@@ -359,8 +360,9 @@ def extract_reads(
             console.print(f"  Or: {kraken_output.parent / f'{sample_name}.kreport'}")
             raise typer.Exit(code=1) from None
 
-    # Setup output paths
-    output.mkdir(parents=True, exist_ok=True)
+    # Setup output paths (a dry run creates nothing)
+    if not (dry_run or is_dry_run()):
+        output.mkdir(parents=True, exist_ok=True)
 
     # Determine output filenames (compressed or not)
     suffix = ".fastq.gz" if compress else ".fastq"
@@ -400,8 +402,17 @@ def extract_reads(
     if not (dry_run or is_dry_run()):
         try:
             report = KrakenReport(kraken_report)
-            clade_reads = report.get_clade_reads(taxid)
-            out.print(f"  Expected reads:   {clade_reads:,}")
+            # --exact-match extracts reads assigned to the taxon itself only.
+            expected = (
+                report.get_clade_reads(taxid) if include_children
+                else report.get_taxon_reads(taxid)
+            )
+            out.print(f"  Expected reads:   {expected:,}")
+            if expected == 0:
+                console.print(
+                    f"[yellow]Warning: the Kraken report has no reads for taxid {taxid}; "
+                    "the extracted files will be empty.[/yellow]"
+                )
         except Exception as e:
             if verbose:
                 out.print(f"  [dim]Could not estimate reads: {e}[/dim]")

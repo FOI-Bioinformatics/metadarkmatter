@@ -12,6 +12,8 @@ formats, and bad quality strings.
 from __future__ import annotations
 
 import gzip
+import zlib
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO
@@ -42,6 +44,18 @@ def _open_text(path: Path) -> IO[str]:
     if path.suffix == ".gz":
         return gzip.open(path, "rt", encoding="utf-8", errors="replace")
     return path.open("rt", encoding="utf-8", errors="replace")
+
+
+def _safe_lines(handle: IO[str], result: ValidationResult) -> Iterator[str]:
+    """Yield lines; a truncated or corrupt file becomes a reported issue.
+
+    gzip and decoding errors surface while iterating, not when opening, and
+    finding such files is part of what the validators are for.
+    """
+    try:
+        yield from handle
+    except (EOFError, OSError, zlib.error, UnicodeDecodeError) as exc:
+        result.issues.append(f"Could not read the whole file (truncated or corrupt?): {exc}")
 
 
 def validate_fasta(
@@ -84,7 +98,7 @@ def validate_fasta(
         return result
 
     with handle:
-        for lineno, raw_line in enumerate(handle, start=1):
+        for lineno, raw_line in enumerate(_safe_lines(handle, result), start=1):
             line = raw_line.rstrip("\r\n")
             if not line:
                 continue
@@ -143,7 +157,8 @@ def validate_fastq(
     """Validate a FASTQ file (4-line record structure).
 
     Streams the file and checks that records follow the
-    ``@header / sequence / + / quality`` layout, that sequence and
+    ``@header / sequence / + / quality`` layout, that sequences are
+    non-empty and use nucleotide characters, that sequence and
     quality strings are equal length, and that quality scores fall in
     the printable-ASCII range (33-126, covering Phred+33 and Phred+64).
 
@@ -169,8 +184,10 @@ def validate_fastq(
     with handle:
         record_lines: list[str] = []
         lineno = 0
-        for lineno, raw_line in enumerate(handle, start=1):
+        for lineno, raw_line in enumerate(_safe_lines(handle, result), start=1):
             line = raw_line.rstrip("\r\n")
+            if not line and not record_lines:
+                continue  # blank line between records or at end of file
             record_lines.append(line)
             if len(record_lines) == 4:
                 header, seq, plus, qual = record_lines
@@ -186,6 +203,14 @@ def validate_fastq(
                     result.issues.append(
                         f"Line {lineno - 1}: third line must start with '+', got "
                         f"'{plus[:20]}'"
+                    )
+                if not seq and len(result.issues) < 20:
+                    result.issues.append(f"Record {result.record_count}: empty sequence")
+                bad_chars = set(seq) - _NUCLEOTIDE_CHARS
+                if bad_chars and len(result.issues) < 20:
+                    result.issues.append(
+                        f"Line {lineno - 2}: invalid nucleotide characters: "
+                        f"{sorted(bad_chars)[:5]}"
                     )
                 if len(seq) != len(qual):
                     result.issues.append(

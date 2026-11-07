@@ -121,3 +121,79 @@ def test_empty_fasta_header_is_an_error(tmp_path):
     res = runner.invoke(app, ["util", "generate-mapping", "-g", str(g),
                               "-o", str(tmp_path / "m.tsv")])
     assert res.exit_code != 0
+
+
+# ------------------------------------------------- validators, seed, kraken2
+
+
+def _validate(tmp_path, name, content: bytes, kind="fastq"):
+    p = tmp_path / name
+    p.write_bytes(content)
+    return runner.invoke(app, ["validate", kind, "-i", str(p)])
+
+
+def test_fastq_trailing_blank_line_is_valid(tmp_path):
+    res = _validate(tmp_path, "t.fq", b"@r1\nACGT\n+\nIIII\n\n")
+    assert res.exit_code == 0, res.output
+
+
+@pytest.mark.parametrize("content", [b"@r1\nACGT\n+\nIIII\n@r2\n\n+\n\n",
+                                     b"@r1\nAC>GT\n+\nIIIII\n"])
+def test_fastq_empty_or_invalid_sequence_rejected(tmp_path, content):
+    assert _validate(tmp_path, "e.fq", content).exit_code == 1
+
+
+@pytest.mark.parametrize("kind,record", [("fasta", b">a\nACGT\n" * 200),
+                                         ("fastq", b"@a\nACGT\n+\nIIII\n" * 200)])
+def test_truncated_gzip_reported_as_issue(tmp_path, kind, record):
+    import gzip
+
+    data = gzip.compress(record)
+    res = _validate(tmp_path, f"x.{kind}.gz", data[: len(data) // 2], kind)
+    assert res.exit_code == 1
+    assert "truncated or corrupt" in res.output
+    assert "Unexpected error" not in res.output
+
+
+@pytest.mark.parametrize("raw", ["-5", "99999999999999999999"])
+def test_out_of_range_seed_falls_back(monkeypatch, raw):
+    from metadarkmatter.core.random import DEFAULT_SEED, get_seed
+
+    monkeypatch.setenv("METADARKMATTER_SEED", raw)
+    assert get_seed() == DEFAULT_SEED
+
+
+def _kraken_inputs(tmp_path):
+    kr = tmp_path / "s.kraken"
+    kr.write_text("C\tr1\t263\t150\t263:116\nC\tr2\t262\t150\t262:116\n"
+                  "C\tr3\t262\t150\t262:116\n")
+    (tmp_path / "s.kreport").write_text(
+        " 100.00\t3\t0\tF\t34064\tFrancisellaceae\n"
+        "100.00\t3\t2\tG\t262\t  Francisella\n"
+        " 33.33\t1\t1\tS\t263\t    Francisella tularensis\n")
+    reads = tmp_path / "s_R1.fastq"
+    reads.write_text("".join(f"@r{i}\nACGT\n+\nIIII\n" for i in (1, 2, 3)))
+    return kr, reads
+
+
+def test_kraken_extract_dry_run_creates_nothing(tmp_path):
+    from metadarkmatter.external.base import ExternalTool
+
+    kr, reads = _kraken_inputs(tmp_path)
+    ExternalTool.set_executable_resolver(lambda name: f"/usr/bin/{name}")
+    ExternalTool.clear_cache()
+    try:
+        res = runner.invoke(app, ["kraken2", "extract", "-k", str(kr), "-1", str(reads),
+                                  "-t", "262", "-o", str(tmp_path / "out"), "--dry-run"])
+    finally:
+        ExternalTool.reset_executable_resolver()
+    assert res.exit_code == 0, res.output
+    assert not (tmp_path / "out").exists()
+
+
+def test_kraken_exact_match_expected_reads(tmp_path):
+    from metadarkmatter.external.kraken import KrakenReport
+
+    _kraken_inputs(tmp_path)
+    report = KrakenReport(tmp_path / "s.kreport")
+    assert (report.get_taxon_reads(262), report.get_clade_reads(262)) == (2, 3)
