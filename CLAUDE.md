@@ -290,7 +290,8 @@ src/metadarkmatter/
 │   ├── random.py             # METADARKMATTER_SEED resolution (v0.2.0)
 │   ├── runtime.py            # Process-wide --dry-run via MDM_DRY_RUN (v0.2.0)
 │   ├── sequence_validation.py # FASTA/FASTQ streaming validators (v0.2.0)
-│   ├── pipeline/orchestrator.py # 'mdm run pipeline' steps, checkpointing, run_manifest.json
+│   ├── pipeline/orchestrator.py # 'mdm run pipeline' steps, dependency-based checkpointing (_Step.depends_on), run_manifest.json with tool_versions
+│   ├── tool_versions.py      # External tool version probes (doctor + pipeline manifest)
 │   ├── classification/       # Classification pipeline
 │   │   ├── bayesian.py       # Bayesian-primary classifier (6-cat 2D Gaussians + Stage 2)
 │   │   ├── thresholds.py     # Legacy threshold cascade + apply_legacy_thresholds()

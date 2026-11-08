@@ -21,7 +21,7 @@ import json
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from enum import Enum, StrEnum
@@ -184,6 +184,8 @@ class RunManifest:
     started_at: str | None = None
     finished_at: str | None = None
     warnings: list[str] = field(default_factory=list)
+    # {executable: version line} for the external tools the run's steps use
+    tool_versions: dict[str, str] = field(default_factory=dict)
 
     def to_json(self) -> str:
         return json.dumps(
@@ -194,6 +196,7 @@ class RunManifest:
                 "started_at": self.started_at,
                 "finished_at": self.finished_at,
                 "config": self.config,
+                "tool_versions": self.tool_versions,
                 "warnings": self.warnings,
                 "steps": [s.to_dict() for s in self.steps],
             },
@@ -266,6 +269,12 @@ class _Step:
     inputs: list[Path] = field(default_factory=list)
     # True when the step belongs to another pipeline of the same cohort run.
     out_of_scope: bool = False
+    # Steps whose re-run makes this step re-run (in addition to its own
+    # fingerprint changing). Not a linear cascade: new reads must not
+    # re-run the genome-only ANI step.
+    depends_on: tuple[PipelineStep, ...] = ()
+    # External executables the step runs (recorded with versions).
+    tools: tuple[str, ...] = ()
 
 
 class Pipeline:
@@ -282,8 +291,10 @@ class Pipeline:
         log: Callable[[str], None] | None = None,
         extracted_reads_2: Path | None = None,
         only_steps: frozenset[PipelineStep] | None = None,
+        record_tool_versions: bool = True,
     ) -> None:
         self.config = config
+        self.record_tool_versions = record_tool_versions
         # ``only_steps`` restricts the run to a subset of steps (cohort runs
         # split the shared-reference steps from the per-sample steps).
         self.only_steps = only_steps
@@ -302,6 +313,19 @@ class Pipeline:
     def _collect_warnings(self) -> list[str]:
         cfg = self.config
         warnings: list[str] = []
+        if (
+            cfg.genomes_dir is not None
+            and cfg.metadata is None
+            and not _is_present(self.layout.metadata_tsv)
+        ):
+            warnings.append(
+                "--genomes was given without --metadata: ANI is computed for every "
+                "genome (not species representatives), the target family cannot be "
+                "inferred (no off-target detection), the classification table has "
+                "no species/genus columns and the report groups novel reads by "
+                "nearest reference instead of genus. Pass the genome_metadata.tsv "
+                "written by 'download genomes list' with --metadata."
+            )
         if cfg.compute_aai:
             warnings.append(
                 "compute_aai is set but AAI computation is not implemented in "
@@ -389,7 +413,10 @@ class Pipeline:
         # download writes genome_metadata.tsv next to genomes.tsv, so it will
         # exist by the time later steps run even though it is absent now.
         download_enabled = cfg.genomes_dir is None
-        use_metadata = download_enabled or _is_present(lay.metadata_tsv)
+        metadata_tsv = cfg.metadata if cfg.metadata is not None else lay.metadata_tsv
+        use_metadata = (
+            cfg.metadata is not None or download_enabled or _is_present(metadata_tsv)
+        )
 
         db = lay.database(cfg.aligner)
         alignment = lay.alignment(cfg.aligner)
@@ -431,6 +458,7 @@ class Pipeline:
                 outputs=[lay.kraken_output, lay.kraken_report],
                 present=lambda: _is_present(lay.kraken_output) and _is_present(lay.kraken_report),
                 inputs=[p for p in (cfg.reads_1, cfg.reads_2, cfg.kraken_db) if p is not None],
+                tools=("kraken2",),
             )
         )
 
@@ -454,6 +482,7 @@ class Pipeline:
                 inputs=[
                     p for p in (kraken_output, cfg.reads_1, cfg.reads_2) if p is not None
                 ],
+                depends_on=(PipelineStep.KRAKEN_CLASSIFY,),
             )
         )
 
@@ -476,6 +505,8 @@ class Pipeline:
                 outputs=[db],
                 present=lambda: _db_present(db, cfg.aligner),
                 inputs=[genomes_dir],
+                depends_on=(PipelineStep.DOWNLOAD,),
+                tools=("makeblastdb",) if cfg.aligner == Aligner.BLAST else ("mmseqs",),
             )
         )
 
@@ -510,6 +541,8 @@ class Pipeline:
                     *([reads_2] if reads_2 is not None else []),
                     db.parent,
                 ],
+                depends_on=(PipelineStep.MAKEDB, PipelineStep.KRAKEN_EXTRACT),
+                tools=("blastn",) if cfg.aligner == Aligner.BLAST else ("mmseqs",),
             )
         )
 
@@ -522,7 +555,7 @@ class Pipeline:
         if cfg.ani_backend != "auto":
             ani_argv += ["--backend", cfg.ani_backend]
         if use_metadata:
-            ani_argv += ["--metadata", str(lay.metadata_tsv), "--representatives-only"]
+            ani_argv += ["--metadata", str(metadata_tsv), "--representatives-only"]
         steps.append(
             _Step(
                 step=PipelineStep.ANI,
@@ -530,7 +563,12 @@ class Pipeline:
                 argv=ani_argv,
                 outputs=[lay.ani_matrix],
                 present=lambda: _is_present(lay.ani_matrix),
-                inputs=[genomes_dir, *([lay.metadata_tsv] if use_metadata else [])],
+                inputs=[genomes_dir, *([metadata_tsv] if use_metadata else [])],
+                # Genomes (and metadata) only: new reads do not re-run ANI.
+                depends_on=(PipelineStep.DOWNLOAD,),
+                tools={"fastani": ("fastANI",), "skani": ("skani",)}.get(
+                    cfg.ani_backend, ("skani", "fastANI")
+                ),
             )
         )
 
@@ -541,7 +579,7 @@ class Pipeline:
             "--output", str(lay.classifications), "--summary", str(lay.summary_json),
         ]
         if use_metadata:
-            classify_argv += ["--metadata", str(lay.metadata_tsv)]
+            classify_argv += ["--metadata", str(metadata_tsv)]
         steps.append(
             _Step(
                 step=PipelineStep.CLASSIFY,
@@ -549,7 +587,8 @@ class Pipeline:
                 argv=classify_argv,
                 outputs=[lay.classifications],
                 present=lambda: _is_present(lay.classifications),
-                inputs=[alignment, lay.ani_matrix, *([lay.metadata_tsv] if use_metadata else [])],
+                inputs=[alignment, lay.ani_matrix, *([metadata_tsv] if use_metadata else [])],
+                depends_on=(PipelineStep.ALIGN, PipelineStep.ANI, PipelineStep.DOWNLOAD),
             )
         )
 
@@ -560,7 +599,7 @@ class Pipeline:
             "--output", str(lay.report), "--report-mode", "offline",
         ]
         if use_metadata:
-            report_argv += ["--metadata", str(lay.metadata_tsv)]
+            report_argv += ["--metadata", str(metadata_tsv)]
         steps.append(
             _Step(
                 step=PipelineStep.REPORT,
@@ -571,8 +610,9 @@ class Pipeline:
                 inputs=[
                     lay.classifications,
                     lay.ani_matrix,
-                    *([lay.metadata_tsv] if use_metadata else []),
+                    *([metadata_tsv] if use_metadata else []),
                 ],
+                depends_on=(PipelineStep.CLASSIFY, PipelineStep.ANI, PipelineStep.DOWNLOAD),
             )
         )
 
@@ -609,9 +649,14 @@ class Pipeline:
             started_at=_now_iso(),
             warnings=list(self.warnings),
         )
+        if not self.dry_run and self.record_tool_versions:
+            manifest.tool_versions = _probe_versions(
+                tool for st in plan if st.enabled for tool in st.tools
+            )
 
-        # Once a step runs (or would run), every later step must re-run too.
-        upstream_ran = False
+        # Steps that ran (or would run, in a dry run); a step re-runs when one
+        # of its dependencies is in here or its own fingerprint changed.
+        ran: set[PipelineStep] = set()
 
         for step in plan:
             step_idx = order.index(step.step)
@@ -656,8 +701,9 @@ class Pipeline:
             reason: str | None = None
             if forced:
                 reason = "forced"
-            elif upstream_ran:
-                reason = "an upstream step was re-run"
+            elif ran.intersection(step.depends_on):
+                names = ", ".join(sorted(d.value for d in ran.intersection(step.depends_on)))
+                reason = f"an upstream step was re-run ({names})"
             elif not step.present():
                 reason = "outputs missing"
             elif marker is None:
@@ -673,7 +719,7 @@ class Pipeline:
                                                  fingerprint=fingerprint))
                 continue
 
-            upstream_ran = True
+            ran.add(step.step)
 
             if self.dry_run:
                 self._log(f"[dry-run] {step.step.value}: {command_str}")
@@ -749,6 +795,13 @@ class Pipeline:
                 n += 1
             path.rename(archive)
         path.write_text(manifest.to_json())
+
+
+def _probe_versions(tools: Iterable[str]) -> dict[str, str]:
+    """Version line of each distinct tool (sorted; "not found" when absent)."""
+    from metadarkmatter.core.tool_versions import probe_tool
+
+    return {tool: probe_tool(tool)[1] for tool in sorted(set(tools))}
 
 
 def _now_iso() -> str:

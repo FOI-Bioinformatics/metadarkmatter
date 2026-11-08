@@ -67,6 +67,15 @@ def run_pipeline(
         None, "--genomes", "-g", help="Pre-downloaded reference genomes dir (skips download).",
         file_okay=False,
     ),
+    metadata: Path | None = typer.Option(
+        None, "--metadata",
+        help=(
+            "genome_metadata.tsv for the --genomes directory (written by 'download "
+            "genomes list'). Enables representative-only ANI, family inference and "
+            "species/genus columns. Not needed when the pipeline downloads genomes."
+        ),
+        exists=True, dir_okay=False,
+    ),
     kraken_output: Path | None = typer.Option(
         None, "--kraken-output", help="Pre-computed .kraken file (skips kraken classify).",
         dir_okay=False,
@@ -134,6 +143,7 @@ def run_pipeline(
         "reads_2": reads_2,
         "kraken_db": kraken_db,
         "genomes_dir": genomes,
+        "metadata": metadata,
         "kraken_output": kraken_output,
         "extracted_reads_1": extracted_reads_1,
         "output_dir": output_dir,
@@ -272,6 +282,15 @@ def run_cohort(
         None, "--genomes", "-g", help="Pre-downloaded reference genomes dir (skips download).",
         file_okay=False,
     ),
+    metadata: Path | None = typer.Option(
+        None, "--metadata",
+        help=(
+            "genome_metadata.tsv for the --genomes directory (written by 'download "
+            "genomes list'). Enables representative-only ANI, family inference and "
+            "species/genus columns. Not needed when the pipeline downloads genomes."
+        ),
+        exists=True, dir_okay=False,
+    ),
     aligner: Aligner = typer.Option(
         Aligner.BLAST, "--aligner", help="Aligner for the alignment step.",
     ),
@@ -326,6 +345,7 @@ def run_cohort(
         "family_taxid": family_taxid,
         "kraken_db": kraken_db,
         "genomes_dir": genomes,
+        "metadata": metadata,
         "threads": threads,
         "ani_backend": ani_backend,
     }

@@ -1296,6 +1296,7 @@ Run the complete pipeline from reads (or extracted reads) to an HTML report.
 | `--reads-2` | `-2` | PATH | - | R2 reads for paired-end input. |
 | `--kraken-db` |  | PATH | - | Kraken2 database directory. |
 | `--genomes` | `-g` | PATH | - | Pre-downloaded reference genomes dir (skips download). |
+| `--metadata` |  | PATH | - | `genome_metadata.tsv` for the `--genomes` directory. Enables representative-only ANI, target-family inference and species/genus columns; without it a warning lists what is lost. Not needed when the pipeline downloads genomes. |
 | `--kraken-output` |  | PATH | - | Pre-computed .kraken file (skips kraken classify). |
 | `--extracted-reads-1` |  | PATH | - | Pre-extracted family R1 reads (skips both kraken steps). |
 | `--extracted-reads-2` |  | PATH | - | Pre-extracted family R2 reads (paired-end; both aligners align both mates). |
@@ -1313,7 +1314,7 @@ Run the complete pipeline from reads (or extracted reads) to an HTML report.
 
 For `run pipeline`, values in the `--config` YAML (e.g. aligner, threads, output_dir) apply unless the corresponding flag is passed explicitly. `--from STEP` re-runs that step and all later steps even when their outputs exist. The run manifest records start and finish times for each step. With either aligner, R2 reads (`--reads-2` / `--extracted-reads-2`) are aligned together with R1 (mates get `/1` and `/2` ID suffixes). Unknown keys in the `--config` YAML produce a warning.
 
-**Checkpointing.** A step is skipped on re-run only if a completion marker (`.mdm_steps/<step>.done.json`, written after the step exits 0) exists and its fingerprint (the step's command line plus size and modification time of its input files) matches. A changed fingerprint, or a step that was interrupted, re-runs that step and every later step. The previous `run_manifest.json` is kept as `run_manifest.<timestamp>.json`.
+**Checkpointing.** A step is skipped on re-run only if a completion marker (`.mdm_steps/<step>.done.json`, written after the step exits 0) exists and its fingerprint (the step's command line plus size and modification time of its input files) matches. A changed fingerprint, or a step that was interrupted, re-runs that step and the steps that depend on it: kraken-extract on kraken-classify; makedb and ANI on download; align on makedb and kraken-extract; classify on align, ANI and download; report on classify, ANI and download. New reads therefore re-run align, classify and report but keep the database and the ANI matrix; new genomes re-run everything from makedb. `--threads` is not part of the fingerprint. The manifest records the versions of the external tools the steps use (`tool_versions`). The previous `run_manifest.json` is kept as `run_manifest.<timestamp>.json`.
 
 
 ### `metadarkmatter run cohort`
@@ -1333,7 +1334,7 @@ mdm run cohort --samples samples.tsv --family f__Francisellaceae --family-taxid 
 |--------|-------|------|---------|-------------|
 | `--samples` | `-s` | PATH | required | Sample sheet TSV: `sample`, `reads_1`, optional `reads_2`; or `extracted_reads_1`, optional `extracted_reads_2` (skips Kraken2). `#` lines are ignored. |
 | `--output-dir` | `-o` | PATH | required | Cohort root directory. |
-| `--family`, `--family-taxid`, `--kraken-db`, `--genomes` | | | - | As for `run pipeline`. |
+| `--family`, `--family-taxid`, `--kraken-db`, `--genomes`, `--metadata` | | | - | As for `run pipeline`. |
 | `--aligner` | | CHOICE | blast | blast or mmseqs2. |
 | `--ani-backend` | | TEXT | auto | auto, fastani or skani. |
 | `--no-report` | | FLAG | off | Skip per-sample reports and the cohort report. |

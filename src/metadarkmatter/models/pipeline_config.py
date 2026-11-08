@@ -89,6 +89,14 @@ class PipelineConfig(BaseModel):
         default=None,
         description="Pre-extracted family R1 reads; when set, both kraken steps are skipped.",
     )
+    metadata: Path | None = Field(
+        default=None,
+        description=(
+            "Genome metadata TSV (as written by 'download genomes list'). Used with "
+            "genomes_dir; downloads write their own. Enables representative-only "
+            "ANI, family inference and species/genus columns."
+        ),
+    )
 
     # Output + execution
     output_dir: Path = Field(description="Root output directory for the run.")
