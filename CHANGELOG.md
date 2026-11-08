@@ -10,6 +10,14 @@ Production-readiness and UX hardening pass.
 
 ### Added
 
+- `run pipeline` / `run cohort --metadata PATH`: use a `genome_metadata.tsv`
+  with `--genomes` (representative-only ANI, target-family inference,
+  species/genus columns and genus grouping in the report). Without it, a
+  warning lists what is lost; before, there was no way to pass metadata
+  when genomes were supplied.
+- `run_manifest.json` records `tool_versions` for the external tools the
+  run's steps use (BLAST/MMseqs2, fastANI/skani, Kraken2). The version probe
+  is shared with `mdm doctor` (`core/tool_versions.py`).
 - `blast align --query-1/--query-2`: paired-end BLAST. Both mates are aligned
   in one run into one output file with `/1` and `/2` mate ID suffixes (same
   convention as `mmseqs2 search`; the helper now lives in
@@ -93,6 +101,11 @@ Production-readiness and UX hardening pass.
 
 ### Changed
 
+- Pipeline caching follows step dependencies instead of re-running every
+  later step: new reads re-run align, classify and report but keep the
+  alignment database and the ANI matrix (often the slowest step); new
+  genomes still re-run everything from makedb. `--from` still forces the
+  named step and all later steps.
 - Novel Diversity grouping (report and `report summarize`): novel reads are
   now grouped into "novel lineage groups" by the GTDB genus of their nearest
   reference, split within a genus at 80% ANI, instead of by (80% ANI

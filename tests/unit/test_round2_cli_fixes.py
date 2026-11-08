@@ -238,7 +238,7 @@ def test_blast_with_r2_aligns_both_mates_without_warning(tmp_path: Path):
     assert align.argv[align.argv.index("--query-2") + 1] == str(r2)
     assert "--query" not in align.argv
     m = p.run()
-    assert not m.warnings
+    assert not any("single-end" in w for w in m.warnings)
     assert "single-end" not in lay.manifest.read_text()
 
 
@@ -477,9 +477,9 @@ def test_recruitment_extensionless_output_gets_extension(mock_load, mock_st, tmp
 # 10: doctor
 # ---------------------------------------------------------------------------
 def test_doctor_lists_optional_tools_and_strict_flag(monkeypatch: pytest.MonkeyPatch):
-    from metadarkmatter.cli import doctor as doc
+    from metadarkmatter.core import tool_versions
 
-    monkeypatch.setattr(doc.shutil, "which", lambda exe: None)
+    monkeypatch.setattr(tool_versions.shutil, "which", lambda exe: None)
     res = runner.invoke(app, ["doctor"])
     assert res.exit_code == 0
     for tool in ("bowtie2", "samtools", "prodigal"):
@@ -492,8 +492,9 @@ def test_doctor_lists_optional_tools_and_strict_flag(monkeypatch: pytest.MonkeyP
 
 def test_doctor_strict_passes_when_required_tools_present(monkeypatch: pytest.MonkeyPatch):
     from metadarkmatter.cli import doctor as doc
+    from metadarkmatter.core import tool_versions
 
-    monkeypatch.setattr(doc.shutil, "which", lambda exe: f"/bin/{exe}")
+    monkeypatch.setattr(tool_versions.shutil, "which", lambda exe: f"/bin/{exe}")
     monkeypatch.setattr(doc, "_probe_tool", lambda exe, args: (f"/bin/{exe}", "v1"))
     res = runner.invoke(app, ["doctor", "--strict"])
     assert res.exit_code == 0, res.output

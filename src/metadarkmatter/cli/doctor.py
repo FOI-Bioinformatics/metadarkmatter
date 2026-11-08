@@ -12,8 +12,6 @@ from __future__ import annotations
 
 import os
 import platform
-import shutil
-import subprocess
 import sys
 from importlib import metadata as importlib_metadata
 from pathlib import Path
@@ -120,34 +118,10 @@ _PYTHON_PACKAGES: tuple[str, ...] = (
 
 
 def _probe_tool(executable: str, version_args: list[str]) -> tuple[str, str]:
-    """Return (path, version_string) for the given external tool.
+    """Return (path, version_string) for the given external tool (see core.tool_versions)."""
+    from metadarkmatter.core.tool_versions import probe_tool
 
-    Returns ("", "not found") when the tool is not on PATH. The version string
-    is the first non-empty line of combined stdout/stderr, truncated to keep
-    the report scannable.
-    """
-    path = shutil.which(executable)
-    if path is None:
-        return ("", "not found")
-
-    try:
-        result = subprocess.run(
-            [path, *version_args],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        return (path, f"probe failed: {exc}")
-
-    combined = (result.stdout or "") + (result.stderr or "")
-    first_line = next((line.strip() for line in combined.splitlines() if line.strip()), "")
-    if not first_line:
-        first_line = f"exit {result.returncode}"
-    if len(first_line) > 120:
-        first_line = first_line[:117] + "..."
-    return (path, first_line)
+    return probe_tool(executable, version_args)
 
 
 def _probe_package(name: str) -> str:
