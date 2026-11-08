@@ -477,6 +477,7 @@ class TestLoadRecruitmentData:
             "mapq",
             "percent_identity",
             "alignment_length",
+            "genome_position",  # contig position offset along the genome
         }
         assert set(df.columns) == expected_cols
         assert len(df) == 1

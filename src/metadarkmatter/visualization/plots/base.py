@@ -8,6 +8,7 @@ for all visualization components.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
@@ -164,10 +165,32 @@ class ThresholdConfig:
     uncertainty_novel_genus_max: float = 1.5
     uncertainty_conserved_min: float = 5.0
 
-    # Identity thresholds (for recruitment plots)
-    identity_known_min: float = 98.0
+    # Identity thresholds (100 - the novelty thresholds above)
+    identity_known_min: float = 96.0
     identity_novel_species_min: float = 80.0
     identity_novel_genus_min: float = 75.0
+
+    @classmethod
+    def from_effective(cls, eff: Mapping[str, Any]) -> ThresholdConfig:
+        """Plot thresholds from ``ScoringConfig.get_effective_thresholds()``.
+
+        Keeps report plots on the thresholds actually used, e.g. the wider
+        protein-mode thresholds with ``--alignment-mode protein``.
+        """
+        return cls(
+            novelty_known_max=eff["novelty_known_max"],
+            novelty_novel_species_min=eff["novelty_novel_species_min"],
+            novelty_novel_species_max=eff["novelty_novel_species_max"],
+            novelty_novel_genus_min=eff["novelty_novel_genus_min"],
+            novelty_novel_genus_max=eff["novelty_novel_genus_max"],
+            uncertainty_known_max=eff["uncertainty_known_max"],
+            uncertainty_novel_species_max=eff["uncertainty_novel_species_max"],
+            uncertainty_novel_genus_max=eff["uncertainty_novel_genus_max"],
+            uncertainty_conserved_min=eff["uncertainty_conserved_min"],
+            identity_known_min=100.0 - eff["novelty_known_max"],
+            identity_novel_species_min=100.0 - eff["novelty_novel_species_max"],
+            identity_novel_genus_min=100.0 - eff["novelty_novel_genus_max"],
+        )
 
 
 # =============================================================================

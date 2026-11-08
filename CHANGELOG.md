@@ -147,6 +147,30 @@ Production-readiness and UX hardening pass.
 
 ### Fixed
 
+- Round-5 audit, genome inputs: a directory mixing `.fna` and `.fna.gz`
+  (or other supported extensions) now uses every genome in `blast/mmseqs2
+  makedb`, `ani compute`, `proteins predict` and ID mapping (gzipped genomes
+  were silently left out when any `.fna` file existed); `aai compute`'s
+  default again includes `*.faa.gz` (regression from round 4). Two files
+  with one accession, text before the first FASTA header, all-empty genome
+  sets and corrupt gzip are clear errors; empty genome files are skipped
+  with a warning. `proteins predict` names outputs by accession.
+- Round-5 audit, tools: `mmseqs2/blastx makedb --dry-run` work and create
+  nothing; `blast makedb` rejects output paths with spaces before writing;
+  tool failures run without output capture report the tool's own stderr.
+- Round-5 audit, reports: `--alignment-mode protein` reports draw protein
+  thresholds (nucleotide ones were always drawn); scatter legends give
+  counts for all reads and say how many points are shown when subsampled;
+  the extended ANI/AAI matrix aligns columns by label and fills
+  one-directional pairs; recruitment plots place contigs along the genome
+  instead of overlaying them, do not cut reads below 65% identity, and use
+  identity bands from the scoring thresholds (96/80/75%, were 98/85/75%);
+  `report multi` accepts tables without `placement_uncertainty`; NaN/inf
+  values no longer abort `report generate`.
+- Round-5 audit, bookkeeping: `run_manifest.json` records
+  `extracted_reads_2`; provenance records `mdm` rather than `main.py` as the
+  command; matrix files with commas in tab-separated genome names are read
+  as TSV.
 - Round-4 audit, regressions from the round-3 threshold validation:
   `--adaptive-thresholds` with presets whose Novel Species range ends below
   the detected boundary (conservative, gtdb-strict, ...) crashed, and

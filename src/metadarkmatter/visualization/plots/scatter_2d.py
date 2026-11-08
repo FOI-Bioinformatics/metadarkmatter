@@ -94,10 +94,21 @@ class NoveltyUncertaintyScatter(BasePlot):
 
         # Subsample if needed for performance. Off-target rows carry
         # placement_uncertainty=null and cannot be placed on this plot.
-        plot_data = subsample_dataframe(
-            self.data.drop_nulls(subset=["novelty_index", "placement_uncertainty"]),
-            self.max_points,
-        )
+        full_data = self.data.drop_nulls(subset=["novelty_index", "placement_uncertainty"])
+        plot_data = subsample_dataframe(full_data, self.max_points)
+        subsampled = len(plot_data) < len(full_data)
+        # A null hit count is treated as single-hit, so no row falls out of
+        # both the single- and the multi-hit trace.
+        hits = pl.col("num_ambiguous_hits").fill_null(1)
+
+        def full_count(category: str, kind: str) -> int:
+            """Reads of the category in the full table (legend labels)."""
+            sub = full_data.filter(pl.col("taxonomic_call") == category)
+            if kind == "single":
+                sub = sub.filter(hits <= 1)
+            elif kind == "multi":
+                sub = sub.filter(hits > 1)
+            return len(sub)
 
         fig = go.Figure()
 
@@ -123,8 +134,8 @@ class NoveltyUncertaintyScatter(BasePlot):
 
             if use_toggle:
                 # Split into single-hit and multi-hit traces
-                single_hit = category_data.filter(pl.col("num_ambiguous_hits") <= 1)
-                multi_hit = category_data.filter(pl.col("num_ambiguous_hits") > 1)
+                single_hit = category_data.filter(hits <= 1)
+                multi_hit = category_data.filter(hits > 1)
 
                 # Add multi-hit trace (always visible)
                 if len(multi_hit) > 0:
@@ -133,7 +144,7 @@ class NoveltyUncertaintyScatter(BasePlot):
                             x=multi_hit["novelty_index"].to_list(),
                             y=multi_hit["placement_uncertainty"].to_list(),
                             mode="markers",
-                            name=f"{category} multi-hit ({len(multi_hit):,})",
+                            name=f"{category} multi-hit ({full_count(category, 'multi'):,})",
                             legendgroup=category,
                             marker={
                                 "color": color,
@@ -157,7 +168,7 @@ class NoveltyUncertaintyScatter(BasePlot):
                             x=single_hit["novelty_index"].to_list(),
                             y=single_hit["placement_uncertainty"].to_list(),
                             mode="markers",
-                            name=f"{category} single-hit ({len(single_hit):,})",
+                            name=f"{category} single-hit ({full_count(category, 'single'):,})",
                             legendgroup=category,
                             marker={
                                 "color": color,
@@ -181,7 +192,7 @@ class NoveltyUncertaintyScatter(BasePlot):
                         x=category_data["novelty_index"].to_list(),
                         y=category_data["placement_uncertainty"].to_list(),
                         mode="markers",
-                        name=f"{category} ({len(category_data):,})",
+                        name=f"{category} ({full_count(category, 'all'):,})",
                         marker={
                             "color": color,
                             "size": 5,
@@ -254,6 +265,11 @@ class NoveltyUncertaintyScatter(BasePlot):
         # Legend outside the plot area so it never covers data points
         if self.show_legend:
             place_legend_below(fig)
+            if subsampled:
+                # Counts in the legend are for all reads; say that fewer are drawn.
+                fig.update_layout(legend_title_text=(
+                    f"Read counts (points shown: {len(plot_data):,} of {len(full_data):,})"
+                ))
         return fig
 
     def _add_classification_regions(self, fig: go.Figure) -> None:
@@ -366,7 +382,19 @@ class ConfidenceNoveltyScatter(BasePlot):
             return fig
 
         # Subsample if needed for performance
-        plot_data = subsample_dataframe(self.data, self.max_points)
+        full_data = self.data
+        plot_data = subsample_dataframe(full_data, self.max_points)
+        subsampled = len(plot_data) < len(full_data)
+        hits = pl.col("num_ambiguous_hits").fill_null(1)
+
+        def full_count(category: str, kind: str) -> int:
+            """Reads of the category in the full table (legend labels)."""
+            sub = full_data.filter(pl.col("taxonomic_call") == category)
+            if kind == "single":
+                sub = sub.filter(hits <= 1)
+            elif kind == "multi":
+                sub = sub.filter(hits > 1)
+            return len(sub)
 
         fig = go.Figure()
 
@@ -388,8 +416,8 @@ class ConfidenceNoveltyScatter(BasePlot):
 
             if use_toggle:
                 # Split into single-hit and multi-hit traces
-                single_hit = category_data.filter(pl.col("num_ambiguous_hits") <= 1)
-                multi_hit = category_data.filter(pl.col("num_ambiguous_hits") > 1)
+                single_hit = category_data.filter(hits <= 1)
+                multi_hit = category_data.filter(hits > 1)
 
                 # Add multi-hit trace (always visible)
                 if len(multi_hit) > 0:
@@ -398,7 +426,7 @@ class ConfidenceNoveltyScatter(BasePlot):
                             x=multi_hit["novelty_index"].to_list(),
                             y=multi_hit["confidence_score"].to_list(),
                             mode="markers",
-                            name=f"{category} multi-hit ({len(multi_hit):,})",
+                            name=f"{category} multi-hit ({full_count(category, 'multi'):,})",
                             legendgroup=category,
                             marker={
                                 "color": color,
@@ -422,7 +450,7 @@ class ConfidenceNoveltyScatter(BasePlot):
                             x=single_hit["novelty_index"].to_list(),
                             y=single_hit["confidence_score"].to_list(),
                             mode="markers",
-                            name=f"{category} single-hit ({len(single_hit):,})",
+                            name=f"{category} single-hit ({full_count(category, 'single'):,})",
                             legendgroup=category,
                             marker={
                                 "color": color,
@@ -446,7 +474,7 @@ class ConfidenceNoveltyScatter(BasePlot):
                         x=category_data["novelty_index"].to_list(),
                         y=category_data["confidence_score"].to_list(),
                         mode="markers",
-                        name=f"{category} ({len(category_data):,})",
+                        name=f"{category} ({full_count(category, 'all'):,})",
                         marker={
                             "color": color,
                             "size": 5,
@@ -531,6 +559,11 @@ class ConfidenceNoveltyScatter(BasePlot):
         # Legend outside the plot area so it never covers data points
         if self.show_legend:
             place_legend_below(fig)
+            if subsampled:
+                # Counts in the legend are for all reads; say that fewer are drawn.
+                fig.update_layout(legend_title_text=(
+                    f"Read counts (points shown: {len(plot_data):,} of {len(full_data):,})"
+                ))
         return fig
 
 

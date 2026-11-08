@@ -1258,8 +1258,8 @@ Create recruitment plot from BAM alignment data.
 | `--min-identity` |  | FLOAT | 70.0 | Minimum percent identity to include |
 | `--min-mapq` |  | INT | 0 | Minimum mapping quality to include |
 | `--show-bands/--hide-bands` |  | FLAG | on | Show identity threshold bands |
-| `--known-threshold` |  | FLOAT | 98.0 | Identity threshold for known species |
-| `--novel-species-threshold` |  | FLOAT | 85.0 | Identity threshold for novel species |
+| `--known-threshold` |  | FLOAT | 96.0 | Identity threshold for known species (100 - novelty_known_max) |
+| `--novel-species-threshold` |  | FLOAT | 80.0 | Identity threshold for novel species (100 - novelty_novel_species_max) |
 | `--novel-genus-threshold` |  | FLOAT | 75.0 | Identity threshold for novel genus |
 | `--max-points` |  | INT | 100000 | Maximum points to plot (subsamples if exceeded) |
 | `--width` |  | INT | 1200 | Plot width in pixels |

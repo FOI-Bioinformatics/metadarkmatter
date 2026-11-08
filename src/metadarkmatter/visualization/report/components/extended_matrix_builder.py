@@ -66,11 +66,24 @@ def build_extended_similarity_matrix(
     # Extract genome accessions from similarity matrix
     matrix_cols = similarity_matrix.columns
     if "genome" in matrix_cols:
-        all_genomes = similarity_matrix["genome"].to_list()
-        z_data = similarity_matrix.drop("genome").to_numpy()
+        import polars as pl
+
+        all_genomes = [str(g) for g in similarity_matrix["genome"].to_list()]
+        # Select value columns by label so a column order different from the
+        # row order cannot misalign values (missing columns read as 0).
+        z_data = np.column_stack([
+            similarity_matrix[g].cast(pl.Float64, strict=False).fill_null(0.0).to_numpy()
+            if g in matrix_cols else np.zeros(len(all_genomes))
+            for g in all_genomes
+        ]) if all_genomes else np.zeros((0, 0))
     else:
         all_genomes = list(matrix_cols)
-        z_data = similarity_matrix.to_numpy()
+        z_data = similarity_matrix.to_numpy().astype(float)
+    # One-directional (triangle-only) matrices: fill a missing direction
+    # (0 or NaN) from the other, as the ANI/AAI heatmap does.
+    if z_data.size:
+        z_data = np.where(np.isfinite(z_data), z_data, 0.0)
+        z_data = np.where(z_data > 0.0, z_data, z_data.T)
 
     # Build similarity lookup dictionary for fast access
     sim_dict = _build_similarity_dict(all_genomes, z_data, default_value)

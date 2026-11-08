@@ -129,18 +129,19 @@ class TestDefaultBands:
 
     def test_known_species_band_range(self):
         known = next(b for b in DEFAULT_BANDS if b.name == "Known Species")
-        assert known.min_identity == 98.0
+        # 100 - novelty_known_max (4%): the scoring threshold, not 98%
+        assert known.min_identity == 96.0
         assert known.max_identity == 100.0
 
     def test_novel_species_band_range(self):
         novel_sp = next(b for b in DEFAULT_BANDS if b.name == "Novel Species")
-        assert novel_sp.min_identity == 85.0
-        assert novel_sp.max_identity == 98.0
+        assert novel_sp.min_identity == 80.0
+        assert novel_sp.max_identity == 96.0
 
     def test_novel_genus_band_range(self):
         novel_gen = next(b for b in DEFAULT_BANDS if b.name == "Novel Genus")
         assert novel_gen.min_identity == 75.0
-        assert novel_gen.max_identity == 85.0
+        assert novel_gen.max_identity == 80.0
 
     def test_bands_are_contiguous(self):
         """The top of Novel Genus should meet the bottom of Novel Species, etc."""
