@@ -232,16 +232,11 @@ def mashtree_to_newick(
         FileNotFoundError: If no genome files found matching the pattern.
         ValueError: If fewer than 3 genome files found.
     """
+    # Find genome files, trying multiple patterns if primary fails
+    from metadarkmatter.core.genome_utils import find_genome_files
     from metadarkmatter.external.mashtree import Mashtree
 
-    # Find genome files, trying multiple patterns if primary fails
-    genome_files = sorted(genome_dir.glob(genome_pattern))
-    if not genome_files:
-        for alt in ("*.fna", "*.fa", "*.fasta", "*.fna.gz", "*.fa.gz"):
-            if alt != genome_pattern:
-                genome_files = sorted(genome_dir.glob(alt))
-                if genome_files:
-                    break
+    genome_files = find_genome_files(genome_dir, genome_pattern)
 
     if not genome_files:
         raise FileNotFoundError(

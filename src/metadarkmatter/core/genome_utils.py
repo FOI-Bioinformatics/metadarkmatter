@@ -8,10 +8,16 @@ contig identifiers that enable reliable mapping back to source genomes.
 from __future__ import annotations
 
 import gzip
+import logging
 import re
+import zlib
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import polars as pl
+
+logger = logging.getLogger(__name__)
 
 
 def extract_accession_from_filename(filename: str) -> str:
@@ -52,6 +58,42 @@ def extract_accession_from_filename(filename: str) -> str:
     return stem.removesuffix("_genomic")
 
 
+# Genome FASTA extensions recognised throughout the package.
+GENOME_PATTERNS: tuple[str, ...] = (
+    "*.fna", "*.fa", "*.fasta", "*.fna.gz", "*.fa.gz", "*.fasta.gz",
+)
+DEFAULT_GENOME_PATTERN = "*.fna"
+
+
+def find_genome_files(genome_dir: Path, pattern: str = DEFAULT_GENOME_PATTERN) -> list[Path]:
+    """Genome FASTA files in ``genome_dir`` (sorted, regular files only).
+
+    With the default pattern every supported extension is included, so a
+    directory that mixes plain and gzipped genomes keeps all of them (the
+    alignment database and the ANI matrix must see the same genome set).
+    Any other pattern is used as given; when it matches nothing, all
+    supported extensions are tried.
+    """
+    found = set() if pattern == DEFAULT_GENOME_PATTERN else set(genome_dir.glob(pattern))
+    if not found:
+        # Default pattern, or an explicit pattern that matched nothing.
+        found = {f for pat in GENOME_PATTERNS for f in genome_dir.glob(pat)}
+    return sorted(f for f in found if f.is_file())
+
+
+def _read_lines(handle: Any, path: Path) -> Iterator[str]:
+    """Yield lines; an unreadable/truncated/corrupt file is a ConfigurationError."""
+    from metadarkmatter.core.exceptions import ConfigurationError
+
+    try:
+        yield from handle
+    except (OSError, EOFError, UnicodeDecodeError, zlib.error) as e:
+        raise ConfigurationError(
+            f"Could not read genome file {path}: {e}",
+            suggestion="Check that the file is complete (e.g. 'gzip -t').",
+        ) from e
+
+
 def concatenate_genomes_with_mapping(
     genome_dir: Path,
     output_fasta: Path,
@@ -79,34 +121,49 @@ def concatenate_genomes_with_mapping(
     Returns:
         Tuple of (genome_count, contig_count)
     """
-    genome_files = sorted(genome_dir.glob(pattern))
+    from metadarkmatter.core.exceptions import ConfigurationError
 
-    # Try alternative patterns if none found
-    if not genome_files:
-        for alt_pattern in ["*.fa", "*.fasta", "*.fna.gz", "*.fa.gz", "*.fasta.gz"]:
-            genome_files = sorted(genome_dir.glob(alt_pattern))
-            if genome_files:
-                break
-
+    genome_files = find_genome_files(genome_dir, pattern)
     if not genome_files:
         return 0, 0
+
+    # Two files with one accession (e.g. GCF_x.1.fna and GCF_x.1_ASM_genomic.fna)
+    # would give duplicate sequence IDs: makeblastdb fails obscurely and
+    # MMseqs2 silently builds an ambiguous database.
+    by_accession: dict[str, Path] = {}
+    for genome_file in genome_files:
+        acc = extract_accession_from_filename(genome_file.name)
+        if acc in by_accession:
+            raise ConfigurationError(
+                f"Two genome files map to accession {acc}: "
+                f"{by_accession[acc].name} and {genome_file.name}.",
+                suggestion="Keep one file per genome in the directory.",
+            )
+        by_accession[acc] = genome_file
 
     mappings: list[dict[str, str]] = []
     contig_count = 0
 
+    empty_genomes: list[str] = []
     with output_fasta.open("w") as out_f:
         for genome_file in genome_files:
             accession = extract_accession_from_filename(genome_file.name)
+            contigs_before = contig_count
 
             # Handle gzipped files
             open_func = gzip.open if genome_file.suffix == ".gz" else Path.open
             with open_func(genome_file, "rt") as in_f:
-                for line_no, line in enumerate(in_f, start=1):
+                for line_no, line in enumerate(_read_lines(in_f, genome_file), start=1):
+                    if contig_count == contigs_before and line.strip() and not line.startswith(">"):
+                        # Text before the first header would be appended to
+                        # the previous genome's last contig.
+                        raise ConfigurationError(
+                            f"{genome_file} line {line_no}: data before the first FASTA "
+                            "header; the file is not FASTA (or is truncated at the start).",
+                        )
                     if line.startswith(">"):
                         original_header = line[1:].strip()
                         if not original_header:
-                            from metadarkmatter.core.exceptions import ConfigurationError
-
                             raise ConfigurationError(
                                 f"Empty FASTA header at line {line_no} of {genome_file}.",
                                 suggestion="Give every sequence an ID after '>'.",
@@ -132,13 +189,27 @@ def concatenate_genomes_with_mapping(
                         # newline does not glue the next genome's header onto
                         # its last sequence line.
                         out_f.write(line if line.endswith("\n") else line + "\n")
+            if contig_count == contigs_before:
+                empty_genomes.append(genome_file.name)
+
+    if contig_count == 0:
+        output_fasta.unlink(missing_ok=True)
+        raise ConfigurationError(
+            f"No FASTA records in the {len(genome_files)} genome file(s) in {genome_dir}.",
+            suggestion="Check that the genome files are complete FASTA files.",
+        )
+    if empty_genomes:
+        logger.warning(
+            "%d genome file(s) contain no sequences and were skipped: %s",
+            len(empty_genomes), ", ".join(empty_genomes[:5]),
+        )
 
     # Write contig mapping
     if mappings:
         df = pl.DataFrame(mappings)
         df.write_csv(contig_mapping_path, separator="\t")
 
-    return len(genome_files), contig_count
+    return len(genome_files) - len(empty_genomes), contig_count
 
 
 def extract_accession_from_contig_id(contig_id: str) -> str:

@@ -107,18 +107,10 @@ def _find_genome_files(
     genome_dir: Path,
     pattern: str,
 ) -> list[Path]:
-    """Find genome files in directory, trying multiple patterns if needed."""
-    genome_files = sorted(genome_dir.glob(pattern))
+    """Find genome files (all supported extensions for the default pattern)."""
+    from metadarkmatter.core.genome_utils import find_genome_files
 
-    if not genome_files:
-        # Try alternative patterns
-        for alt_pattern in ["*.fna", "*.fa", "*.fasta", "*.fna.gz", "*.fa.gz"]:
-            if alt_pattern != pattern:
-                genome_files = sorted(genome_dir.glob(alt_pattern))
-                if genome_files:
-                    break
-
-    return genome_files
+    return find_genome_files(genome_dir, pattern)
 
 
 class ANISensitivity(StrEnum):

@@ -1757,7 +1757,7 @@ class TestAAIFindProteinFiles:
         (tmp_path / "g1.faa").write_text(">p1\nM\n")
         (tmp_path / "g2.faa").write_text(">p2\nM\n")
         files, used = _find_protein_files(tmp_path, "*.faa")
-        assert len(files) == 2 and used == "*.faa"
+        assert len(files) == 2 and used == ["*.faa", "*.faa.gz"]
 
     def test_fallback_pattern(self, tmp_path: Path) -> None:
         from metadarkmatter.cli.aai import _find_protein_files
@@ -1765,7 +1765,7 @@ class TestAAIFindProteinFiles:
         (tmp_path / "g1.faa.gz").write_text("")
         (tmp_path / "g2.fasta").write_text(">c\nACGT\n")  # nucleotide: never a fallback
         files, used = _find_protein_files(tmp_path, "*.xyz")
-        assert [f.name for f in files] == ["g1.faa.gz"] and used == "*.faa.gz"
+        assert [f.name for f in files] == ["g1.faa.gz"] and used == ["*.faa", "*.faa.gz"]
 
     def test_no_files(self, tmp_path: Path) -> None:
         from metadarkmatter.cli.aai import _find_protein_files

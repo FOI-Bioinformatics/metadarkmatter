@@ -157,7 +157,9 @@ class Diamond(ExternalTool):
             msg = "database is required for makedb mode"
             raise ValueError(msg)
 
-        input_fasta = validate_path_safe(input_fasta, must_exist=True)
+        # must_exist=False: in a dry run the concatenated FASTA is not written
+        # (the tool reports a missing input in a real run).
+        input_fasta = validate_path_safe(input_fasta, must_exist=False)
         database = validate_path_safe(database, must_exist=False)
 
         return [

@@ -439,18 +439,25 @@ class ExternalTool(ABC):
                 stdout = result.stdout
                 stderr = result.stderr
             else:
-                # Redirect to DEVNULL to prevent pipe buffer blocking
-                # This is critical for tools like Diamond that write progress
-                # to stderr - without DEVNULL, the buffer fills and blocks
-                result = subprocess.run(
-                    command,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=timeout,
-                    text=True,  # keep CompletedProcess[str] consistent with the capture branch
-                )
+                # Not piped, so verbose tools (Diamond writes progress to
+                # stderr) cannot block on a full pipe buffer. stderr goes to
+                # a temporary file whose tail is kept, so a failure still
+                # reports the tool's own error message.
+                import tempfile
+
+                with tempfile.TemporaryFile(mode="w+b") as err_file:
+                    result = subprocess.run(
+                        command,
+                        stdout=subprocess.DEVNULL,
+                        stderr=err_file,
+                        timeout=timeout,
+                        text=True,  # keep CompletedProcess[str] consistent with the capture branch
+                    )
+                    err_file.seek(0, 2)
+                    size = err_file.tell()
+                    err_file.seek(max(0, size - 4000))
+                    stderr = err_file.read().decode("utf-8", errors="replace")
                 stdout = ""
-                stderr = ""
 
             elapsed = time.perf_counter() - start_time
 

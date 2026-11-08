@@ -601,7 +601,11 @@ class Pipeline:
             mdm_version=mdm_version,
             output_dir=str(self.layout.root),
             aligner=self.config.aligner.value,
-            config={k: _jsonable(v) for k, v in self.config.model_dump().items()},
+            config={
+                **{k: _jsonable(v) for k, v in self.config.model_dump().items()},
+                # passed separately from PipelineConfig; record it with the inputs
+                "extracted_reads_2": _jsonable(self.extracted_reads_2),
+            },
             started_at=_now_iso(),
             warnings=list(self.warnings),
         )

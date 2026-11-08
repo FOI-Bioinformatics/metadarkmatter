@@ -46,7 +46,9 @@ def sniff_matrix_separator(path: Path) -> str:
             header = handle.readline()
     except (OSError, EOFError, UnicodeDecodeError):
         header = ""
-    if header.count("\t") > header.count(","):
+    # A tab-separated header with several fields is TSV even when genome
+    # names contain commas ("A, sp. 1").
+    if len(header.rstrip("\r\n").split("\t")) >= 2:
         return "\t"
     if header.count(",") > 0:
         return ","

@@ -32,24 +32,27 @@ app = typer.Typer(
 console = Console()
 
 
+_PROTEIN_PATTERNS: tuple[str, ...] = ("*.faa", "*.faa.gz")
+
+
 def _find_protein_files(
     protein_dir: Path,
     pattern: str,
-) -> tuple[list[Path], str]:
-    """Find protein FASTA files; return them and the glob pattern that matched.
+) -> tuple[list[Path], list[str]]:
+    """Find protein FASTA files; return them and the glob patterns used.
 
-    Falls back to ``*.faa`` / ``*.faa.gz`` when ``pattern`` matches nothing.
-    ``*.fasta`` is not tried: genome directories also hold nucleotide FASTA.
+    The default ``*.faa`` also includes ``*.faa.gz``: downloaded proteins are
+    gzipped while ``proteins predict`` writes plain files, and a directory
+    mixing both must keep every genome. An explicit pattern is used as given
+    and falls back to the defaults when it matches nothing. ``*.fasta`` is
+    never tried: genome directories also hold nucleotide FASTA.
     """
-    protein_files = sorted(protein_dir.glob(pattern))
-    if protein_files:
-        return protein_files, pattern
-    for alt_pattern in ("*.faa", "*.faa.gz"):
-        if alt_pattern != pattern:
-            protein_files = sorted(protein_dir.glob(alt_pattern))
-            if protein_files:
-                return protein_files, alt_pattern
-    return [], pattern
+    if pattern != "*.faa":
+        files = sorted(protein_dir.glob(pattern))
+        if files:
+            return files, [pattern]
+    files = sorted({f for pat in _PROTEIN_PATTERNS for f in protein_dir.glob(pat)})
+    return files, list(_PROTEIN_PATTERNS)
 
 
 @app.command(name="compute")
@@ -179,7 +182,7 @@ def compute(
         raise typer.Exit(code=1) from None
 
     # Find protein files
-    protein_files, protein_pattern = _find_protein_files(genomes, protein_pattern)
+    protein_files, protein_patterns = _find_protein_files(genomes, protein_pattern)
 
     if not protein_files:
         console.print(
@@ -239,7 +242,7 @@ def compute(
                 evalue=evalue,
                 keep_intermediates=keep_intermediates,
                 sensitive=sensitive,
-                patterns=[protein_pattern],
+                patterns=protein_patterns,
             )
 
         except FileNotFoundError as e:

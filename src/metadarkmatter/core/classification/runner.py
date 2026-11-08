@@ -290,19 +290,26 @@ def run_classification(
             ) from None
 
         adaptive = detect_species_boundary(ani_matrix)
-        if adaptive.method == "gmm":
-            config = build_adaptive_config(config, adaptive)
+        adapted = build_adaptive_config(config, adaptive) if adaptive.method == "gmm" else config
+        if adaptive.method != "gmm":
+            log(
+                f"[yellow]Adaptive threshold detection fell back to default "
+                f"({adaptive.species_boundary:.1f}% ANI)[/yellow]\n"
+            )
+        elif adapted is config:
+            log(
+                f"[yellow]Adaptive boundary {adaptive.species_boundary:.1f}% ANI is "
+                "outside the configured Novel Species range; keeping the "
+                "configured thresholds.[/yellow]\n"
+            )
+        else:
             log(
                 f"[green]Adaptive threshold:[/green] species boundary at "
                 f"{adaptive.species_boundary:.1f}% ANI "
                 f"(novelty_known_max={adaptive.novelty_known_max:.1f}%, "
                 f"confidence={adaptive.confidence:.2f})\n"
             )
-        else:
-            log(
-                f"[yellow]Adaptive threshold detection fell back to default "
-                f"({adaptive.species_boundary:.1f}% ANI)[/yellow]\n"
-            )
+        config = adapted
 
     # Load AAI matrix if provided (for genus-level classification)
     aai_matrix: AAIMatrix | None = None

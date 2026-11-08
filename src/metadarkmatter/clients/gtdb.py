@@ -11,6 +11,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -376,7 +377,9 @@ class GTDBClient:
                         # Seconds form only; an HTTP-date keeps the normal
                         # backoff. Capped so a server cannot stall the run.
                         with contextlib.suppress(ValueError):
-                            delay = min(max(float(retry_after), 0.0), 300.0)
+                            parsed = float(retry_after)
+                            if math.isfinite(parsed):
+                                delay = min(max(parsed, 0.0), 300.0)
 
                 # Retry on server errors (5xx) or rate limiting (429)
                 if attempt < self.max_retries:

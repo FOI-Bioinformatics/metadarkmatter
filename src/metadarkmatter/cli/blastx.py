@@ -199,8 +199,9 @@ def make_database(
         console.print("\n[dim]Install with: conda install -c bioconda diamond[/dim]")
         raise typer.Exit(code=1) from None
 
-    # Setup output directory
-    output.parent.mkdir(parents=True, exist_ok=True)
+    # Setup output directory (a dry run creates nothing)
+    if not (dry_run or is_dry_run()):
+        output.parent.mkdir(parents=True, exist_ok=True)
 
     # Check skip-if-exists
     db_file = _dmnd_path(output)
@@ -419,8 +420,9 @@ def align_reads(
         )
         raise typer.Exit(code=1) from None
 
-    # Setup output
-    output.parent.mkdir(parents=True, exist_ok=True)
+    # Setup output (a dry run creates nothing)
+    if not (dry_run or is_dry_run()):
+        output.parent.mkdir(parents=True, exist_ok=True)
 
     # Determine if output should be compressed
     should_compress = bool(compress) or output.suffix == ".gz"

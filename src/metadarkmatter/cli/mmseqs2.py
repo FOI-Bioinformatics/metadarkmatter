@@ -143,8 +143,9 @@ def make_database(
         console.print("\n[dim]Install with: conda install -c bioconda mmseqs2[/dim]")
         raise typer.Exit(code=1) from None
 
-    # Setup output directory
-    output.parent.mkdir(parents=True, exist_ok=True)
+    # Setup output directory (a dry run creates nothing)
+    if not (dry_run or is_dry_run()):
+        output.parent.mkdir(parents=True, exist_ok=True)
 
     # Check skip-if-exists
     # MMseqs2 database files have different extensions than BLAST
@@ -168,7 +169,9 @@ def make_database(
                 f"  [dim]Would create contig mapping at {contig_mapping_path}[/dim]"
             )
             input_fasta = pangenome_fasta
-            genome_count = len(list(genomes.glob(genome_pattern)))
+            from metadarkmatter.core.genome_utils import find_genome_files
+
+            genome_count = len(find_genome_files(genomes, genome_pattern))
         else:
             genome_count, contig_count = _concatenate_genomes(
                 genomes, pangenome_fasta, contig_mapping_path, genome_pattern

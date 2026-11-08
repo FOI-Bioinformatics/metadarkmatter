@@ -10,6 +10,7 @@ from __future__ import annotations
 import gzip
 import logging
 import re
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -84,20 +85,9 @@ class ContigIdMapping:
         if not genome_dir.exists():
             raise FileNotFoundError(f"Genome directory not found: {genome_dir}")
 
-        genome_files = sorted(genome_dir.glob(pattern))
+        from metadarkmatter.core.genome_utils import find_genome_files
 
-        # Try alternative patterns
-        if not genome_files:
-            for alt_pattern in [
-                "*.fa",
-                "*.fasta",
-                "*.fna.gz",
-                "*.fa.gz",
-                "*.fasta.gz",
-            ]:
-                genome_files = sorted(genome_dir.glob(alt_pattern))
-                if genome_files:
-                    break
+        genome_files = find_genome_files(genome_dir, pattern)
 
         if not genome_files:
             raise ValueError(
@@ -135,7 +125,7 @@ class ContigIdMapping:
                             if contig_id in mapping:
                                 duplicates.append(contig_id)
                             mapping[contig_id] = accession
-            except (OSError, EOFError, UnicodeDecodeError) as e:
+            except (OSError, EOFError, UnicodeDecodeError, zlib.error) as e:
                 # Unreadable or truncated file: a partial mapping would make
                 # later contigs map to "unknown" without any sign of it.
                 raise ConfigurationError(
