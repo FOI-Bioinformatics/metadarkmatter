@@ -17,6 +17,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from metadarkmatter.cli.utils import QuietConsole, extract_sample_name, spinner_progress
 from metadarkmatter.core.io_utils import read_dataframe
 from metadarkmatter.core.metadata import GenomeMetadata
+from metadarkmatter.models.config import ScoringConfig
 from metadarkmatter.visualization.report.provenance import (
     default_provenance_path,
     load_provenance,
@@ -307,6 +308,15 @@ def generate_report(
 
     out.print(f"  [green]Loaded {len(df):,} classifications[/green]")
 
+    # NaN/inf (only possible in edited tables) would print as "nan" or abort
+    # the JSON embedding; treat them as missing values.
+    float_cols = [c for c, t in df.schema.items() if t in (pl.Float32, pl.Float64)]
+    if float_cols:
+        df = df.with_columns(
+            pl.when(pl.col(c).is_finite()).then(pl.col(c)).otherwise(None).alias(c)
+            for c in float_cols
+        )
+
     if max_table_rows is None and len(df) > LARGE_TABLE_WARNING_ROWS:
         console.print(
             f"[yellow]Warning: embedding all {len(df):,} reads in the Data tab will "
@@ -443,7 +453,9 @@ def generate_report(
                 user_tree_path=tree,
                 report_mode=report_mode,
                 plot_config=PlotConfig(),
-                thresholds=ThresholdConfig(),
+                thresholds=ThresholdConfig.from_effective(
+                    ScoringConfig(alignment_mode=alignment_mode).get_effective_thresholds()
+                ),
             )
 
             generator = ReportGenerator(

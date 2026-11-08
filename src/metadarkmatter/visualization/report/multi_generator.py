@@ -190,8 +190,14 @@ class MultiSampleReportGenerator:
             "off_target": off_target,
             "other": other,
             "novel_percentage": (novel_sp + novel_gen) / total * 100 if total > 0 else 0,
-            "mean_novelty_index": df["novelty_index"].mean() or 0.0,
-            "mean_placement_uncertainty": df["placement_uncertainty"].mean() or 0.0,
+            # Optional columns: a table without them still gets a report row.
+            "mean_novelty_index": (
+                df["novelty_index"].mean() or 0.0 if "novelty_index" in df.columns else 0.0
+            ),
+            "mean_placement_uncertainty": (
+                df["placement_uncertainty"].mean() or 0.0
+                if "placement_uncertainty" in df.columns else 0.0
+            ),
         }
 
     def generate(self, output_path: Path | str) -> None:

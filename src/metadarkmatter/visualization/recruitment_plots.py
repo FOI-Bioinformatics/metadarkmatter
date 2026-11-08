@@ -14,6 +14,11 @@ from typing import Any, Literal, cast
 
 import polars as pl
 
+from metadarkmatter.core.constants import (
+    NOVELTY_KNOWN_MAX,
+    NOVELTY_NOVEL_GENUS_MAX,
+    NOVELTY_NOVEL_SPECIES_MAX,
+)
 from metadarkmatter.core.random import get_seed
 
 try:
@@ -37,27 +42,37 @@ class IdentityBand:
     opacity: float = 0.15
 
 
-# Default classification bands matching the scoring thresholds
+# Default classification bands from the default nucleotide scoring thresholds
+# (identity = 100 - novelty index): Known >= 96%, Novel Species 80-96%,
+# Novel Genus 75-80%.
 DEFAULT_BANDS = (
     IdentityBand(
         name="Known Species",
-        min_identity=98.0,
+        min_identity=100.0 - NOVELTY_KNOWN_MAX,
         max_identity=100.0,
         color="#2ecc71",  # Green
     ),
     IdentityBand(
         name="Novel Species",
-        min_identity=85.0,
-        max_identity=98.0,
+        min_identity=100.0 - NOVELTY_NOVEL_SPECIES_MAX,
+        max_identity=100.0 - NOVELTY_KNOWN_MAX,
         color="#f39c12",  # Orange
     ),
     IdentityBand(
         name="Novel Genus",
-        min_identity=75.0,
-        max_identity=85.0,
+        min_identity=100.0 - NOVELTY_NOVEL_GENUS_MAX,
+        max_identity=100.0 - NOVELTY_NOVEL_SPECIES_MAX,
         color="#e74c3c",  # Red
     ),
 )
+
+
+def _identity_axis_min(data: pl.DataFrame) -> float:
+    """Lower identity-axis bound: 65%, or lower so no loaded read is cut off."""
+    if data.is_empty() or "percent_identity" not in data.columns:
+        return 65.0
+    lowest = data["percent_identity"].min()
+    return min(65.0, float(lowest) - 2.0) if lowest is not None else 65.0  # type: ignore[arg-type]
 
 
 class RecruitmentPlotGenerator:
@@ -127,6 +142,11 @@ class RecruitmentPlotGenerator:
         if len(plot_data) > max_points:
             plot_data = plot_data.sample(n=max_points, seed=get_seed())
 
+        # Contigs are drawn along the concatenated genome when the loader
+        # provides genome_position; position alone is local to each contig.
+        x_col = "genome_position" if "genome_position" in plot_data.columns else "position"
+        y_min = _identity_axis_min(plot_data)
+
         # Create figure
         fig = go.Figure()
 
@@ -172,7 +192,7 @@ class RecruitmentPlotGenerator:
 
             fig.add_trace(
                 go.Scattergl(  # Use Scattergl for performance with large datasets
-                    x=genome_data["position"].to_list(),
+                    x=genome_data[x_col].to_list(),
                     y=genome_data["percent_identity"].to_list(),
                     mode="markers",
                     name=genome_name,
@@ -194,14 +214,14 @@ class RecruitmentPlotGenerator:
         fig.update_layout(
             title={"text": title, "x": 0.5, "xanchor": "center"},
             xaxis={
-                "title": "Genome Position (bp)",
+                "title": "Position along genome (bp; contigs concatenated)",
                 "showgrid": True,
                 "gridwidth": 1,
                 "gridcolor": "rgba(128,128,128,0.2)",
             },
             yaxis={
                 "title": "Percent Identity (%)",
-                "range": [65, 102],
+                "range": [y_min, 102],
                 "showgrid": True,
                 "gridwidth": 1,
                 "gridcolor": "rgba(128,128,128,0.2)",
@@ -269,6 +289,7 @@ class RecruitmentPlotGenerator:
 
         for i, genome_name in enumerate(genomes, 1):
             genome_data = self.data.filter(pl.col("genome_name") == genome_name)
+            x_col = "genome_position" if "genome_position" in genome_data.columns else "position"
 
             if len(genome_data) > max_points_per_genome:
                 genome_data = genome_data.sample(n=max_points_per_genome, seed=get_seed())
@@ -295,7 +316,7 @@ class RecruitmentPlotGenerator:
             # Add scatter
             fig.add_trace(
                 go.Scattergl(
-                    x=genome_data["position"].to_list(),
+                    x=genome_data[x_col].to_list(),
                     y=genome_data["percent_identity"].to_list(),
                     mode="markers",
                     name=genome_name,
@@ -317,7 +338,7 @@ class RecruitmentPlotGenerator:
             )
 
             # Update y-axis range
-            fig.update_yaxes(range=[65, 102], row=i, col=1)
+            fig.update_yaxes(range=[_identity_axis_min(self.data), 102], row=i, col=1)
 
         # Update layout
         total_height = height_per_genome * n_genomes + 100

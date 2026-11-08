@@ -287,7 +287,45 @@ def load_recruitment_data(
         if max_records and count >= max_records:
             break
 
-    return pl.DataFrame(records)
+    df = pl.DataFrame(records)
+    if df.height:
+        try:
+            lengths = get_contig_lengths(bam_path, samtools_path=samtools_path)
+        except (OSError, ValueError):
+            lengths = {}
+        df = add_genome_positions(df, lengths)
+    return df
+
+
+def add_genome_positions(df: pl.DataFrame, contig_lengths: dict[str, int]) -> pl.DataFrame:
+    """Add ``genome_position``: the position along the concatenated genome.
+
+    ``position`` is local to a contig, so the contigs of a draft genome would
+    all be drawn over the same range. Each contig is offset by the summed
+    lengths of the genome's earlier contigs (BAM header order; contigs
+    missing from the header use their largest observed position).
+    """
+    if df.is_empty() or not {"genome_name", "contig", "position"} <= set(df.columns):
+        return df
+    observed = dict(
+        df.group_by("contig").agg(pl.col("position").max()).iter_rows()
+    )
+    genome_of = dict(df.select("contig", "genome_name").unique().iter_rows())
+    order = list(contig_lengths) + sorted(c for c in observed if c not in contig_lengths)
+    offsets: dict[str, int] = {}
+    running: dict[str, int] = {}
+    for contig in order:
+        genome = genome_of.get(contig)
+        if genome is None:
+            continue  # contig without reads: no offset needed
+        offsets[contig] = running.get(genome, 0)
+        running[genome] = offsets[contig] + int(
+            contig_lengths.get(contig) or observed.get(contig) or 0
+        )
+    return df.with_columns(
+        (pl.col("position") + pl.col("contig").replace_strict(offsets, default=0))
+        .alias("genome_position")
+    )
 
 
 def get_contig_lengths(bam_path: Path, samtools_path: str = "samtools") -> dict[str, int]:

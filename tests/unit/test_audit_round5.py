@@ -169,3 +169,90 @@ def test_cli_command_normalises_module_argv(monkeypatch):
 
     monkeypatch.setattr("sys.argv", ["/x/metadarkmatter/cli/main.py", "score", "classify"])
     assert _cli_command() == ["mdm", "score", "classify"]
+
+
+# ------------------------------------------------------------ plots / report
+
+
+def test_report_thresholds_follow_alignment_mode():
+    from metadarkmatter.models.config import ScoringConfig
+    from metadarkmatter.visualization.plots.base import ThresholdConfig
+
+    t = ThresholdConfig.from_effective(
+        ScoringConfig(alignment_mode="protein").get_effective_thresholds())
+    assert t.novelty_known_max == 10.0 and t.uncertainty_known_max == 5.0
+    n = ThresholdConfig.from_effective(ScoringConfig().get_effective_thresholds())
+    assert (n.novelty_known_max, n.identity_known_min) == (4.0, 96.0)
+
+
+def test_scatter_legend_counts_use_all_reads():
+    import polars as pl
+
+    from metadarkmatter.visualization.plots.scatter_2d import NoveltyUncertaintyScatter
+
+    df = pl.DataFrame({
+        "read_id": [f"r{i}" for i in range(200)],
+        "novelty_index": [1.0] * 190 + [22.0] * 10,
+        "placement_uncertainty": [0.2] * 200,
+        "num_ambiguous_hits": [2] * 200,
+        "taxonomic_call": ["Known Species"] * 190 + ["Novel Genus"] * 10,
+    })
+    fig = NoveltyUncertaintyScatter(df, max_points=50).create_figure()
+    names = [t.name for t in fig.data if t.name]
+    assert any("(190)" in n for n in names) and any("(10)" in n for n in names)
+    assert "points shown: 50 of 200" in (fig.layout.legend.title.text or "")
+
+
+def test_extended_matrix_aligns_columns_and_fills_triangle():
+    import polars as pl
+
+    from metadarkmatter.visualization.report.components.extended_matrix_builder import (
+        build_extended_similarity_matrix,
+    )
+
+    m = pl.DataFrame({"genome": ["A", "B", "C"], "C": [90.0, 85.0, 100.0],
+                      "B": [95.0, 100.0, 0.0], "A": [100.0, 0.0, 0.0]})
+    mat, labels, _ = build_extended_similarity_matrix(m, [], {}, max_references=3)
+    idx = {lab: i for i, lab in enumerate(labels)}
+    assert mat[idx["A"], idx["B"]] == mat[idx["B"], idx["A"]] == 95.0
+    assert mat[idx["B"], idx["C"]] == mat[idx["C"], idx["B"]] == 85.0
+
+
+def test_genome_positions_offset_contigs():
+    import polars as pl
+
+    from metadarkmatter.core.recruitment import add_genome_positions
+
+    df = pl.DataFrame({"genome_name": ["G", "G", "H"], "contig": ["G|c1", "G|c2", "H|c1"],
+                       "position": [10, 10, 5]})
+    out = add_genome_positions(df, {"G|c1": 1000, "G|c2": 500, "H|c1": 300})
+    assert out["genome_position"].to_list() == [10, 1010, 5]
+
+
+def test_multi_report_without_placement_uncertainty(tmp_path):
+    import polars as pl
+
+    d = tmp_path / "multi"
+    d.mkdir()
+    for s in ("s1", "s2"):
+        pl.DataFrame({"read_id": ["a", "b"], "best_match_genome": ["G", "G"],
+                      "novelty_index": [1.0, 10.0],
+                      "taxonomic_call": ["Known Species", "Novel Species"]}).write_csv(
+            d / f"{s}_classifications.csv")
+    res = runner.invoke(app, ["report", "multi", "-i", str(d), "-o", str(tmp_path / "m.html")])
+    assert res.exit_code == 0, res.output
+
+
+def test_report_with_inf_and_nan_values(tmp_path):
+    import polars as pl
+
+    cls = tmp_path / "c.csv"
+    pl.DataFrame({"read_id": ["a", "b", "c"], "best_match_genome": ["G", "G", "G"],
+                  "top_hit_identity": [99.0, 90.0, 85.0],
+                  "novelty_index": [1.0, float("inf"), float("nan")],
+                  "placement_uncertainty": [0.1, 0.2, 0.3],
+                  "taxonomic_call": ["Known Species", "Novel Species", "Novel Species"]}
+                 ).write_csv(cls)
+    res = runner.invoke(app, ["report", "generate", "-c", str(cls),
+                              "-o", str(tmp_path / "r.html")])
+    assert res.exit_code == 0, res.output
