@@ -383,7 +383,14 @@ def build_classify_config(opts: _ClassifyOptions) -> tuple[ScoringConfig, list[s
 
 def _cli_command() -> list[str]:
     """Command line recorded in provenance: program basename plus arguments."""
-    return [Path(sys.argv[0]).name, *sys.argv[1:]] if sys.argv else []
+    if not sys.argv:
+        return []
+    prog = Path(sys.argv[0]).name
+    # 'python -m metadarkmatter.cli.main' (as run pipeline invokes it)
+    # leaves the module file as argv[0]; record the runnable command name.
+    if prog in ("main.py", "__main__.py", "-m") or prog.endswith(".py"):
+        prog = "mdm"
+    return [prog, *sys.argv[1:]]
 
 
 def _build_run_provenance(

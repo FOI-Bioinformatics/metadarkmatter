@@ -23,6 +23,7 @@ from rich.progress import (
 from rich.table import Table
 
 from metadarkmatter.cli.utils import QuietConsole
+from metadarkmatter.core.genome_utils import extract_accession_from_filename
 from metadarkmatter.core.runtime import is_dry_run
 
 app = typer.Typer(
@@ -35,18 +36,10 @@ console = Console()
 
 
 def _find_genome_files(genome_dir: Path, pattern: str) -> list[Path]:
-    """Find genome FASTA files in directory."""
-    genome_files = sorted(genome_dir.glob(pattern))
+    """Find genome FASTA files (all supported extensions for the default pattern)."""
+    from metadarkmatter.core.genome_utils import find_genome_files
 
-    if not genome_files:
-        # Try alternative patterns
-        for alt_pattern in ["*.fna", "*.fa", "*.fasta", "*.fna.gz"]:
-            if alt_pattern != pattern:
-                genome_files = sorted(genome_dir.glob(alt_pattern))
-                if genome_files:
-                    break
-
-    return genome_files
+    return find_genome_files(genome_dir, pattern)
 
 
 def _find_missing_proteins(
@@ -65,10 +58,7 @@ def _find_missing_proteins(
     existing = []
 
     for genome_file in genome_files:
-        accession = genome_file.stem
-        # Handle .fna.gz -> .faa
-        if accession.endswith(".fna"):
-            accession = accession[:-4]
+        accession = extract_accession_from_filename(genome_file.name)
 
         protein_file = output_dir / f"{accession}.faa"
         protein_file_gz = output_dir / f"{accession}.faa.gz"
@@ -93,9 +83,7 @@ def _predict_single_genome(
     """
     from metadarkmatter.external.prodigal import Prodigal
 
-    accession = genome_file.stem
-    if accession.endswith(".fna"):
-        accession = accession[:-4]
+    accession = extract_accession_from_filename(genome_file.name)
 
     output_file = output_dir / f"{accession}.faa"
 
@@ -322,9 +310,7 @@ def predict(
         table.add_column("Output File")
 
         for genome_file in genomes_to_process[:20]:
-            accession = genome_file.stem
-            if accession.endswith(".fna"):
-                accession = accession[:-4]
+            accession = extract_accession_from_filename(genome_file.name)
             species = genome_species.get(accession, "")
             output_file = output_dir / f"{accession}.faa"
             table.add_row(accession, species, str(output_file.name))
@@ -375,9 +361,7 @@ def predict(
                 genome_file, protein_count, error = future.result()
                 results.append((genome_file, protein_count, error))
 
-                accession = genome_file.stem
-                if accession.endswith(".fna"):
-                    accession = accession[:-4]
+                accession = extract_accession_from_filename(genome_file.name)
 
                 if error:
                     errors.append((accession, error))

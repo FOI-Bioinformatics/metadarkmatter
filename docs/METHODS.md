@@ -782,7 +782,10 @@ The adaptive method falls back to the default threshold (96% ANI) when:
 - Fewer than 3 computed (non-zero) pairwise ANI values
 - GMM separation quality < 1.0
 - GMM fails to converge
+- The detected boundary is outside 92-99% ANI (no within-species pairs in the matrix)
 - scikit-learn is not installed
+
+A detected boundary at or above the configured `novelty_novel_species_max` (as with presets that end the Novel Species range at 15%) keeps the configured thresholds.
 
 **Dependency:** Requires `scikit-learn>=1.3.0` (install with `pip install metadarkmatter[adaptive]`).
 

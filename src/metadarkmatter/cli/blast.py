@@ -208,6 +208,14 @@ def make_database(
     """
     out = QuietConsole(console, quiet=quiet)
 
+    # makeblastdb cannot take a database name containing whitespace
+    # ("Please provide a database name using -out"); fail before writing.
+    if any(ch.isspace() for ch in str(output)):
+        console.print(
+            f"[red]Error: the BLAST database path must not contain spaces: {output}[/red]"
+        )
+        raise typer.Exit(code=1)
+
     out.print("\n[bold blue]Metadarkmatter BLAST Database Builder[/bold blue]\n")
 
     dry_run = dry_run or is_dry_run()

@@ -123,7 +123,7 @@ Run BLASTN competitive alignment for ANI-weighted placement.
 
 | Option | Short | Type | Description |
 |--------|-------|------|-------------|
-| `--query` | `-q` | PATH | Single-end query reads (FASTA/FASTQ). Use this OR `--query-1`/`--query-2` |
+| `--query` | | PATH | Single-end query reads (FASTA/FASTQ). Use this OR `--query-1`/`--query-2` |
 | `--query-1` | `-1` | PATH | Forward (R1) reads for paired-end input (gzip OK) |
 | `--query-2` | `-2` | PATH | Reverse reads for paired-end input (gzip OK) |
 | `--database` | `-d` | PATH | BLAST database prefix |
@@ -240,7 +240,7 @@ Run Diamond BLASTX alignment (DNA query vs protein database) for protein-level r
 
 | Option | Short | Type | Description |
 |--------|-------|------|-------------|
-| `--query` | `-q` | PATH | Query reads file (FASTA/FASTQ, optionally gzipped) |
+| `--query` | | PATH | Query reads file (FASTA/FASTQ, optionally gzipped) |
 | `--database` | `-d` | PATH | Diamond protein database prefix |
 | `--output` | `-o` | PATH | Output file for BLASTX results |
 

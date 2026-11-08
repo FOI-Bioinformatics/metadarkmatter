@@ -482,7 +482,11 @@ class TestExternalToolRun:
 
     @patch("metadarkmatter.external.base.subprocess.run")
     def test_capture_output_false(self, mock_run: MagicMock):
-        """Should redirect to DEVNULL when capture_output=False."""
+        """stdout is discarded and stderr goes to a temp file, never a pipe.
+
+        A pipe could block on verbose tools; the file keeps the error text
+        for ToolExecutionError (it was discarded via DEVNULL before).
+        """
         mock_run.return_value = MagicMock(returncode=0)
         tool = self._setup_tool()
         result = tool.run(capture_output=False)
@@ -492,7 +496,9 @@ class TestExternalToolRun:
         assert result.stderr == ""
         call_kwargs = mock_run.call_args
         assert call_kwargs.kwargs["stdout"] == subprocess.DEVNULL
-        assert call_kwargs.kwargs["stderr"] == subprocess.DEVNULL
+        stderr_target = call_kwargs.kwargs["stderr"]
+        assert stderr_target not in (subprocess.PIPE, subprocess.DEVNULL)
+        assert hasattr(stderr_target, "fileno")
 
     @patch("metadarkmatter.external.base.subprocess.run")
     def test_nonzero_exit_code(self, mock_run: MagicMock):
