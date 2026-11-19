@@ -41,6 +41,11 @@ app = typer.Typer(
 
 console = Console()
 
+_MAX_READ_PAIRS_EXTRACTED_WARNING = (
+    "--max-read-pairs only acts on the extraction step and is ignored with "
+    "--extracted-reads-1 (subsample the extracted reads before passing them in)."
+)
+
 _SUBSPECIES_WITH_GENOMES_WARNING = (
     "--ncbi-subspecies only acts on the download step and is ignored with "
     "--genomes. To use subspecies labels, point --metadata to a "
@@ -100,6 +105,17 @@ def run_pipeline(
             "Genomes kept per NCBI species that has more than 50 genomes in the "
             "GTDB species (default 3)."
         ),
+    ),
+    max_read_pairs: int | None = typer.Option(
+        None, "--max-read-pairs", min=1,
+        help=(
+            "Randomly keep at most this many read pairs after Kraken2 extraction "
+            "(default: keep all). Acts only on the extraction step."
+        ),
+    ),
+    seed: int | None = typer.Option(
+        None, "--seed",
+        help="Random seed for --max-read-pairs (default: METADARKMATTER_SEED or 42).",
     ),
     kraken_output: Path | None = typer.Option(
         None, "--kraken-output", help="Pre-computed .kraken file (skips kraken classify).",
@@ -172,6 +188,8 @@ def run_pipeline(
         "ncbi_subspecies": ncbi_subspecies or None,
         "per_subspecies": per_subspecies,
         "per_subspecies_large": per_subspecies_large,
+        "max_read_pairs": max_read_pairs,
+        "seed": seed,
         "kraken_output": kraken_output,
         "extracted_reads_1": extracted_reads_1,
         "output_dir": output_dir,
@@ -205,6 +223,8 @@ def run_pipeline(
     extra_warnings: list[str] = []
     if cfg.genomes_dir is not None and cfg.ncbi_subspecies:
         extra_warnings.append(_SUBSPECIES_WITH_GENOMES_WARNING)
+    if cfg.extracted_reads_1 is not None and cfg.max_read_pairs is not None:
+        extra_warnings.append(_MAX_READ_PAIRS_EXTRACTED_WARNING)
     if cfg.extracted_reads_1 is not None and (cfg.reads_1 is not None or cfg.reads_2 is not None):
         extra_warnings.append(
             "--reads-1/--reads-2 are ignored because --extracted-reads-1 is given "
@@ -339,6 +359,17 @@ def run_cohort(
             "GTDB species (default 3)."
         ),
     ),
+    max_read_pairs: int | None = typer.Option(
+        None, "--max-read-pairs", min=1,
+        help=(
+            "Randomly keep at most this many read pairs after Kraken2 extraction "
+            "(default: keep all). Acts only on the extraction step."
+        ),
+    ),
+    seed: int | None = typer.Option(
+        None, "--seed",
+        help="Random seed for --max-read-pairs (default: METADARKMATTER_SEED or 42).",
+    ),
     aligner: Aligner = typer.Option(
         Aligner.BLAST, "--aligner", help="Aligner for the alignment step.",
     ),
@@ -389,6 +420,11 @@ def run_cohort(
         raise ValueError(f"--genomes path does not exist or is not a directory: {genomes}")
     if genomes is not None and ncbi_subspecies:
         console.print(f"[yellow]Warning:[/yellow] {_SUBSPECIES_WITH_GENOMES_WARNING}")
+    if max_read_pairs is not None and any(smp.extracted_reads_1 for smp in sheet):
+        console.print(
+            "[yellow]Warning:[/yellow] --max-read-pairs is ignored for samples "
+            "with extracted_reads_1 (it only acts on the extraction step)."
+        )
 
     shared: dict[str, object] = {
         "family": family,
@@ -399,6 +435,8 @@ def run_cohort(
         "ncbi_subspecies": ncbi_subspecies or None,
         "per_subspecies": per_subspecies,
         "per_subspecies_large": per_subspecies_large,
+        "max_read_pairs": max_read_pairs,
+        "seed": seed,
         "threads": threads,
         "ani_backend": ani_backend,
     }

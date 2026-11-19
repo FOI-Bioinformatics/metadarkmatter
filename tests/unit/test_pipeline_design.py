@@ -181,3 +181,34 @@ class TestNcbiSubspeciesOptions:
         argv = self._download_argv(tmp_path)
         for flag in ("--ncbi-subspecies", "--per-subspecies", "--per-subspecies-large"):
             assert flag not in argv
+
+
+class TestMaxReadPairsArgv:
+    def _ke_argv(self, tmp_path, **kw):
+        from metadarkmatter.models.pipeline_config import PipelineConfig
+
+        reads = tmp_path / "r1.fastq.gz"
+        reads.write_bytes(b"reads")
+        kout = tmp_path / "s.kraken"
+        kout.write_text("C\tr\t262\t150\t262:150\n")
+        cfg = PipelineConfig(
+            family="f__Brucellaceae", reads_1=reads, family_taxid=262,
+            kraken_output=kout, output_dir=tmp_path / "out", **kw,
+        )
+        plan = Pipeline(cfg, PipelineLayout(root=cfg.output_dir)).plan()
+        return _step(plan, PipelineStep.KRAKEN_EXTRACT).argv
+
+    def test_extract_argv_includes_max_read_pairs(self, tmp_path):
+        argv = self._ke_argv(tmp_path, max_read_pairs=250000, seed=42)
+        i = argv.index("--max-read-pairs")
+        assert argv[i:i + 4] == ["--max-read-pairs", "250000", "--seed", "42"]
+
+    def test_extract_argv_without_seed(self, tmp_path):
+        argv = self._ke_argv(tmp_path, max_read_pairs=10)
+        assert "--max-read-pairs" in argv
+        assert "--seed" not in argv
+
+    def test_extract_argv_absent_when_none(self, tmp_path):
+        argv = self._ke_argv(tmp_path)
+        assert "--max-read-pairs" not in argv
+        assert "--seed" not in argv

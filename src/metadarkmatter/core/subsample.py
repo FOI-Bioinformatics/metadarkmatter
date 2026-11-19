@@ -2,7 +2,8 @@
 
 Records are parsed strictly as four-line units, so quality lines that begin
 with "@" are not mistaken for headers. Files are streamed; only the set of
-selected record indices is held in memory.
+selected record indices is held in memory. Input must be FASTQ (four-line
+records); FASTA input is not supported.
 """
 
 from __future__ import annotations

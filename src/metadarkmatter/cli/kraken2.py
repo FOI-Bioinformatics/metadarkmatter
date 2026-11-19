@@ -19,6 +19,7 @@ from metadarkmatter.cli.utils import (
     extract_sample_name_from_reads,
     spinner_progress,
 )
+from metadarkmatter.core.random import get_seed
 from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.external import (
     ExtractKrakenReads,
@@ -282,6 +283,20 @@ def extract_reads(
         "--skip-if-exists",
         help="Skip extraction if output files already exist",
     ),
+    max_read_pairs: int | None = typer.Option(
+        None,
+        "--max-read-pairs",
+        min=1,
+        help=(
+            "Randomly keep at most this many read pairs (reads if single-end) "
+            "after extraction. Default: keep all. Writes a *_subsample.json sidecar."
+        ),
+    ),
+    seed: int | None = typer.Option(
+        None,
+        "--seed",
+        help="Random seed for --max-read-pairs (default: METADARKMATTER_SEED or 42)",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose", "-v",
@@ -478,6 +493,36 @@ def extract_reads(
                 temp_file.unlink()  # Remove uncompressed file
 
         out.print("  [green]Compression complete[/green]")
+
+    # Optional random subsample of the final output files (in place)
+    if max_read_pairs is not None:
+        import json
+
+        from metadarkmatter.core.subsample import subsample_reads
+
+        effective_seed = get_seed() if seed is None else seed
+        try:
+            sub = subsample_reads(
+                extracted_r1, extracted_r2, max_pairs=max_read_pairs, seed=effective_seed
+            )
+        except (OSError, ValueError) as e:
+            console.print(f"[red]Subsampling failed: {e}[/red]")
+            raise typer.Exit(code=1) from None
+        sidecar = output / f"{sample_name}_taxid{taxid}_subsample.json"
+        sidecar.write_text(
+            json.dumps(
+                {
+                    "total": sub.total,
+                    "kept": sub.kept,
+                    "max_read_pairs": max_read_pairs,
+                    "seed": sub.seed,
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+        unit = "read pairs" if reads_2 else "reads"
+        out.print(f"  Subsampled {sub.kept:,} of {sub.total:,} {unit} (seed {sub.seed})")
 
     # Count extracted reads
     read_count = 0

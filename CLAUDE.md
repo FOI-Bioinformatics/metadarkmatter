@@ -29,7 +29,9 @@ mdm download genomes fetch --accessions genomes.tsv --output-dir genomes/
 # 2. Extract family reads with Kraken2 (classify needs a built kraken2 DB;
 #    --output is a directory receiving {sample}.kraken and {sample}.kreport,
 #    and extract needs the .kreport next to the .kraken file). Extracted
-#    reads are written as {sample}_taxid{taxid}_R1/_R2.fastq.gz.
+#    reads are written as {sample}_taxid{taxid}_R1/_R2.fastq.gz. Optional
+#    --max-read-pairs N (with --seed) randomly keeps at most N pairs in place
+#    and writes {sample}_taxid{taxid}_subsample.json (FASTQ input only).
 mdm kraken2 classify --reads-1 sample_R1.fastq.gz --reads-2 sample_R2.fastq.gz \
   --kraken-db db/ --output kraken_out/
 mdm kraken2 extract --kraken-output kraken_out/sample.kraken --reads-1 sample_R1.fastq.gz \

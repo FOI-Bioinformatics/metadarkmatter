@@ -58,7 +58,7 @@ For complete step-by-step workflows, see the
 | `download genomes fetch` | Download genomes from NCBI (use `--include-protein` for AAI) |
 | `proteins predict` | Predict proteins with Prodigal (use `--missing-only` for gaps) |
 | `kraken2 classify` | Run Kraken2 classification |
-| `kraken2 extract` | Extract reads for target taxid (gzip output by default) |
+| `kraken2 extract` | Extract reads for target taxid (gzip output by default; optional `--max-read-pairs` subsampling) |
 | `blast makedb` | Build BLAST nucleotide database |
 | `blast align` | BLASTN competitive alignment (accepts .gz query) |
 | `mmseqs2 makedb` | Build MMseqs2 nucleotide database |
@@ -525,6 +525,35 @@ Backend comparison:
 - **fastANI**: Original tool, well-validated, widely used in publications (`--fastani-batches N` runs N parallel batches)
 
 `--metadata genome_metadata.tsv --representatives-only` restricts the matrix to species representatives with either backend. The classifier expects values on a 0-100 scale (0-1 matrices are rejected), mirrors pairs present in only one direction, and uses 70% ANI for missing pairs.
+
+### Read Subsampling
+
+`kraken2 extract` can limit the number of reads passed to alignment by
+randomly subsampling the extracted FASTQ files:
+
+```bash
+metadarkmatter kraken2 extract --kraken-output kraken_out/sample.kraken \
+  --reads-1 R1.fastq.gz --reads-2 R2.fastq.gz --taxid 262 --output extraction/ \
+  --max-read-pairs 250000 --seed 42
+```
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `--max-read-pairs INT` | none (keep all) | Maximum read pairs kept (reads if single-end), minimum 1 |
+| `--seed INT` | `METADARKMATTER_SEED`, else 42 | Seed for the random selection |
+
+Subsampling is applied in place to the final output files after extraction and
+compression, so file names are unchanged. Mates are kept together and the
+selection is reproducible for a given seed and input. Input must be FASTQ. When
+the number of read pairs does not exceed the limit the files are left
+unchanged. The totals are recorded in `{sample}_taxid{taxid}_subsample.json`
+(`total`, `kept`, `max_read_pairs`, `seed`). Subsampling reduces the depth
+available for classification, so low-abundance taxa may be detected less
+reliably. With `--skip-if-exists` and existing outputs nothing is
+re-subsampled. `run pipeline` and `run cohort` accept the same options and
+forward them to the extraction step; they have no effect with
+`--extracted-reads-1` (a warning is printed). Changing `--max-read-pairs` or
+`--seed` changes the step arguments, so the extraction step is re-run.
 
 ### Novel Species Extraction
 

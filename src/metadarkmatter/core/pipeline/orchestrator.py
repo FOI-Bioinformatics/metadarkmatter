@@ -479,6 +479,10 @@ class Pipeline:
         ]
         if cfg.reads_2:
             ke_argv += ["--reads-2", str(cfg.reads_2)]
+        if cfg.max_read_pairs is not None:
+            ke_argv += ["--max-read-pairs", str(cfg.max_read_pairs)]
+            if cfg.seed is not None:
+                ke_argv += ["--seed", str(cfg.seed)]
         steps.append(
             _Step(
                 step=PipelineStep.KRAKEN_EXTRACT,
