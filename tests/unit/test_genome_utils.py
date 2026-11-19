@@ -389,3 +389,12 @@ class TestGenerateMetadata:
         )
 
         assert result.exit_code == 0
+
+
+class TestHiddenFiles:
+    def test_find_genome_files_skips_appledouble(self, tmp_path: Path) -> None:
+        from metadarkmatter.core.genome_utils import find_genome_files
+
+        for name in ("A.fna", "._A.fna", ".hidden.fna"):
+            (tmp_path / name).write_text(">c\nACGT\n")
+        assert [p.name for p in find_genome_files(tmp_path)] == ["A.fna"]

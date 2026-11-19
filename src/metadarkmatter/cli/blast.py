@@ -22,6 +22,7 @@ from rich.progress import (
 )
 
 from metadarkmatter.cli.utils import QuietConsole, spinner_progress
+from metadarkmatter.core.genome_utils import is_hidden_file
 from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.external import ToolExecutionError
 from metadarkmatter.external.blast import BlastN, MakeBlastDb
@@ -251,7 +252,9 @@ def make_database(
                 f"  [dim]Would create contig mapping at {contig_mapping_path}[/dim]"
             )
             input_fasta = pangenome_fasta
-            genome_count = len(list(genomes.glob(genome_pattern)))
+            genome_count = len(
+                [f for f in genomes.glob(genome_pattern) if not is_hidden_file(f)]
+            )
         else:
             genome_count, contig_count = _concatenate_genomes(
                 genomes, pangenome_fasta, contig_mapping_path, genome_pattern

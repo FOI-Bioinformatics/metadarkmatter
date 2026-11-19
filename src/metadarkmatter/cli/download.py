@@ -28,6 +28,7 @@ from metadarkmatter.clients.gtdb import (
     GTDBClient,
     InvalidTaxonFormatError,
 )
+from metadarkmatter.core.genome_utils import is_hidden_file
 from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.core.subspecies import (
     ncbi_species_name,
@@ -671,8 +672,18 @@ def fetch_genomes(
             raise typer.Exit(code=1) from None
 
     # Count downloaded files
-    genome_files = list(output_dir.glob("*.fna")) + list(output_dir.glob("*.fna.gz"))
-    protein_files = list(output_dir.glob("*.faa")) + list(output_dir.glob("*.faa.gz"))
+    genome_files = [
+        f
+        for pat in ("*.fna", "*.fna.gz")
+        for f in output_dir.glob(pat)
+        if not is_hidden_file(f)
+    ]
+    protein_files = [
+        f
+        for pat in ("*.faa", "*.faa.gz")
+        for f in output_dir.glob(pat)
+        if not is_hidden_file(f)
+    ]
     all_downloaded = genome_files + protein_files
     total_size = sum(f.stat().st_size for f in all_downloaded)
 

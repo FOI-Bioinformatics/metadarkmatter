@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from metadarkmatter.core.genome_utils import is_hidden_file
 from metadarkmatter.external.base import ExternalTool
 
 
@@ -258,5 +259,7 @@ def concatenate_genomes(
         )
 
     # Return list of genome accessions for backwards compatibility
-    genome_files = sorted(genome_dir.glob(pattern))
+    genome_files = sorted(
+        f for f in genome_dir.glob(pattern) if not is_hidden_file(f)
+    )
     return [extract_accession_from_filename(f.name) for f in genome_files]

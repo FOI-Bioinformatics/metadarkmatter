@@ -177,6 +177,8 @@ Production-readiness and UX hardening pass.
 
 ### Fixed
 
+- Hidden files such as macOS AppleDouble `._*` sidecars are ignored when
+  discovering genome and protein files.
 - Round-5 audit, genome inputs: a directory mixing `.fna` and `.fna.gz`
   (or other supported extensions) now uses every genome in `blast/mmseqs2
   makedb`, `ani compute`, `proteins predict` and ID mapping (gzipped genomes

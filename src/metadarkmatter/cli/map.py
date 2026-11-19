@@ -13,6 +13,7 @@ import typer
 from rich.console import Console
 
 from metadarkmatter.cli.utils import QuietConsole, spinner_progress
+from metadarkmatter.core.genome_utils import is_hidden_file
 from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.external import (
     Bowtie2,
@@ -276,7 +277,9 @@ def map_reads(
     # Reuse a complete, up-to-date index built earlier for the same genomes.
     if index is None and not (dry_run or is_dry_run()):
         if genomes.is_dir():
-            genome_inputs = sorted(genomes.glob(genome_pattern))
+            genome_inputs = sorted(
+                f for f in genomes.glob(genome_pattern) if not is_hidden_file(f)
+            )
             if pangenome_path.exists() and _index_is_current(
                 index_prefix, genome_inputs
             ) and pangenome_path.stat().st_mtime >= max(
