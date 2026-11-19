@@ -582,6 +582,63 @@ class TestDisplaySummaryTable:
         )
         _display_summary_table(summary)
 
+    def test_display_lists_every_category(self, capsys):
+        """Category rows should cover all reads, including Species Boundary
+        and Ambiguous Within Genus (previously omitted from the table)."""
+        from rich.console import Console
+
+        from metadarkmatter.cli import score as score_mod
+
+        summary = TaxonomicSummary(
+            total_reads=100,
+            known_species=30,
+            novel_species=15,
+            novel_genus=5,
+            species_boundary=26,
+            ambiguous=10,
+            ambiguous_within_genus=4,
+            conserved_regions=5,
+            unclassified=2,
+            off_target=3,
+            mean_novelty_index=3.0,
+            mean_placement_uncertainty=3.5,
+        )
+        with patch.object(score_mod, "console", Console(width=120, force_terminal=False)):
+            _display_summary_table(summary)
+        out = capsys.readouterr().out
+
+        assert "Species Boundary" in out
+        assert "26.00%" in out
+        assert "Ambiguous Within Genus" in out
+        assert "4.00%" in out
+        category_lines = [
+            line for line in out.splitlines()
+            if "%" in line and "Total Novel Diversity" not in line
+        ]
+        counts = [int(line.split("│")[2].strip().replace(",", "")) for line in category_lines]
+        assert sum(counts) == summary.total_reads
+
+    def test_display_hides_empty_ambiguous_within_genus(self, capsys):
+        """Ambiguous Within Genus is shown only when present."""
+        from rich.console import Console
+
+        from metadarkmatter.cli import score as score_mod
+
+        summary = TaxonomicSummary(
+            total_reads=10,
+            known_species=10,
+            novel_species=0,
+            novel_genus=0,
+            conserved_regions=0,
+            mean_novelty_index=0.0,
+            mean_placement_uncertainty=0.0,
+        )
+        with patch.object(score_mod, "console", Console(width=120, force_terminal=False)):
+            _display_summary_table(summary)
+        out = capsys.readouterr().out
+        assert "Species Boundary" in out
+        assert "Ambiguous Within Genus" not in out
+
 
 class TestThresholdPresets:
     """Tests for THRESHOLD_PRESETS dictionary."""
