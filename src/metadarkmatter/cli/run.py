@@ -89,7 +89,10 @@ def run_pipeline(
     ),
     per_subspecies_large: int | None = typer.Option(
         None, "--per-subspecies-large", min=1,
-        help="Genomes per NCBI species for large GTDB species (default 3).",
+        help=(
+            "Genomes kept per NCBI species that has more than 50 genomes in the "
+            "GTDB species (default 3)."
+        ),
     ),
     kraken_output: Path | None = typer.Option(
         None, "--kraken-output", help="Pre-computed .kraken file (skips kraken classify).",
@@ -322,7 +325,10 @@ def run_cohort(
     ),
     per_subspecies_large: int | None = typer.Option(
         None, "--per-subspecies-large", min=1,
-        help="Genomes per NCBI species for large GTDB species (default 3).",
+        help=(
+            "Genomes kept per NCBI species that has more than 50 genomes in the "
+            "GTDB species (default 3)."
+        ),
     ),
     aligner: Aligner = typer.Option(
         Aligner.BLAST, "--aligner", help="Aligner for the alignment step.",

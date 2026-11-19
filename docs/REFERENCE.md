@@ -645,10 +645,12 @@ metadarkmatter download genomes list f__Brucellaceae --output genomes.tsv --incl
 |--------|---------|---------|
 | `--ncbi-subspecies TEXT` | none | GTDB species to expand; repeatable |
 | `--per-subspecies INT` | 2 | Genomes per NCBI species |
-| `--per-subspecies-large INT` | 3 | Genomes per NCBI species for large GTDB species |
+| `--per-subspecies-large INT` | 3 | Genomes kept per NCBI species that has more than 50 genomes in the GTDB species |
 
 The same options are accepted by `run pipeline` and `run cohort` and are
-forwarded to the download step. Panel genomes keep the GTDB species name and
+forwarded to the download step. In `run pipeline` they only take effect when
+the pipeline performs the download step (they are ignored when `--genomes` is
+supplied), and they require the NCBI `datasets` CLI. Panel genomes keep the GTDB species name and
 GTDB representative; the NCBI name is written to the `subspecies` column.
 
 With a `subspecies` column in the metadata, `score classify` adds:
@@ -657,7 +659,9 @@ With a `subspecies` column in the metadata, `score classify` adds:
 |--------|---------|
 | `closest_subspecies` | NCBI species of the best-hit genome; "unresolved" when tied best hits span several subspecies. Known Species reads only |
 | `subspecies_candidates` | Sorted, `;`-separated subspecies among the tied best hits |
-| `subspecies_reference` | Subspecies of the best-hit genome (metadata join, not `--streaming`) |
+| `subspecies_reference` | Subspecies of the best-hit genome (metadata join; in-memory output only) |
+
+`closest_subspecies` and `subspecies_candidates` are also written with `--streaming`.
 
 The report Summary tab adds a subspecies table (Known Species reads; percentage
 of that GTDB species' Known Species reads). Subspecies assignment from short

@@ -109,7 +109,10 @@ class PipelineConfig(BaseModel):
         default=2, ge=1, description="Genomes per NCBI species within a listed GTDB species."
     )
     per_subspecies_large: int = Field(
-        default=3, ge=1, description="Genomes per NCBI species for large GTDB species."
+        default=3, ge=1, description=(
+            "Genomes kept per NCBI species that has more than 50 genomes "
+            "in the GTDB species."
+        ),
     )
 
     # Output + execution
