@@ -134,6 +134,23 @@ TOP_SPECIES_TABLE_TEMPLATE: str = '''
 
 TOP_SPECIES_ROW_TEMPLATE: str = '''<tr><td class="species-name">{species}</td><td class="num">{count}</td><td class="num">{pct:.1f}%</td></tr>'''
 
+SUBSPECIES_TABLE_TEMPLATE: str = '''
+<div class="top-species-card">
+    <h4 class="card-section-title">Subspecies (NCBI species within GTDB species)</h4>
+    <table class="mini-table">
+        <thead>
+            <tr><th>GTDB species</th><th>Subspecies</th><th>Reads</th><th>% of Known Species</th></tr>
+        </thead>
+        <tbody>
+{rows}
+        </tbody>
+    </table>
+    <p class="table-note">Subspecies are assigned from the best-hit reference genomes of Known Species reads and are indicative for closely related taxa. Reads whose best hits span several subspecies are listed as unresolved.</p>
+</div>
+'''
+
+SUBSPECIES_ROW_TEMPLATE: str = '''<tr><td class="species-name">{gtdb_species}</td><td class="species-name">{subspecies}</td><td class="num">{reads}</td><td class="num">{pct:.1f}%</td></tr>'''
+
 CATEGORY_GRID_TEMPLATE: str = '''
 <div class="category-grid">
 {cells}

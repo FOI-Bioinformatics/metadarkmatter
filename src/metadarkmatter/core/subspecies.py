@@ -11,14 +11,18 @@ import csv
 import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import polars as pl
 
 from metadarkmatter.external.ncbi_datasets import AssemblySummary
 
+if TYPE_CHECKING:
+    from metadarkmatter.core.metadata import GenomeMetadata
+
 UNRESOLVED: Final = "unresolved"
 _KEY_SEP: Final = "\t"
+_UNKNOWN_SPECIES: Final = "Unknown species"
 
 _LEVEL_ORDER: Final = {
     "complete genome": 0,
@@ -197,4 +201,60 @@ def assign_subspecies(df: pl.DataFrame, subspecies_map: dict[str, str]) -> pl.Da
         keys.replace_strict(candidates, default=null_utf8, return_dtype=pl.Utf8).alias(
             "subspecies_candidates"
         ),
+    )
+
+
+_SUMMARY_SCHEMA: Final = {
+    "gtdb_species": pl.Utf8,
+    "subspecies": pl.Utf8,
+    "reads": pl.UInt32,
+    "pct": pl.Float64,
+}
+
+
+def summarize_subspecies(
+    df: pl.DataFrame, metadata: GenomeMetadata | None
+) -> pl.DataFrame:
+    """Count Known Species reads per subspecies within each GTDB species.
+
+    Columns: gtdb_species, subspecies, reads, pct. The percentage is relative
+    to all Known Species reads of the GTDB species, including reads without a
+    subspecies label. The result is sorted by gtdb_species, reads (descending)
+    and subspecies, and is empty when no subspecies column is present.
+    """
+    if "closest_subspecies" not in df.columns:
+        return pl.DataFrame(schema=_SUMMARY_SCHEMA)
+
+    known = df
+    if "taxonomic_call" in df.columns:
+        known = df.filter(pl.col("taxonomic_call") == "Known Species")
+
+    if "species" in known.columns:
+        species = known["species"].cast(pl.Utf8).fill_null(_UNKNOWN_SPECIES)
+    else:
+        species = pl.Series(
+            "species",
+            [
+                (metadata.get_species(g) if metadata is not None else None)
+                or _UNKNOWN_SPECIES
+                for g in known["best_match_genome"].to_list()
+            ],
+            dtype=pl.Utf8,
+        )
+    known = known.select(
+        species.alias("gtdb_species"), pl.col("closest_subspecies").alias("subspecies")
+    )
+    if known.is_empty():
+        return pl.DataFrame(schema=_SUMMARY_SCHEMA)
+
+    totals = known.group_by("gtdb_species").len().rename({"len": "_total"})
+    return (
+        known.drop_nulls("subspecies")
+        .group_by("gtdb_species", "subspecies")
+        .len()
+        .rename({"len": "reads"})
+        .join(totals, on="gtdb_species")
+        .with_columns((pl.col("reads") / pl.col("_total") * 100).alias("pct"))
+        .drop("_total")
+        .sort(["gtdb_species", "reads", "subspecies"], descending=[False, True, False])
     )
