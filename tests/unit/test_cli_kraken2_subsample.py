@@ -121,3 +121,11 @@ def test_extract_dry_run_does_no_subsampling(tmp_path):
 def test_extract_max_read_pairs_rejects_zero(tmp_path):
     result, _ = _invoke(tmp_path, ["--max-read-pairs", "0"])
     assert result.exit_code != 0
+
+
+def test_extract_rerun_without_option_removes_stale_sidecar(tmp_path):
+    result, out = _invoke(tmp_path, ["--max-read-pairs", "5"])
+    assert (out / "s_taxid262_subsample.json").exists()
+    result, out = _invoke(tmp_path, [])
+    assert result.exit_code == 0, result.output
+    assert not (out / "s_taxid262_subsample.json").exists()

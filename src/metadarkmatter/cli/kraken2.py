@@ -494,6 +494,11 @@ def extract_reads(
 
         out.print("  [green]Compression complete[/green]")
 
+    # A sidecar from an earlier run would misreport the re-extracted files.
+    sidecar = output / f"{sample_name}_taxid{taxid}_subsample.json"
+    if max_read_pairs is None:
+        sidecar.unlink(missing_ok=True)
+
     # Optional random subsample of the final output files (in place)
     if max_read_pairs is not None:
         import json
@@ -508,7 +513,6 @@ def extract_reads(
         except (OSError, ValueError) as e:
             console.print(f"[red]Subsampling failed: {e}[/red]")
             raise typer.Exit(code=1) from None
-        sidecar = output / f"{sample_name}_taxid{taxid}_subsample.json"
         sidecar.write_text(
             json.dumps(
                 {

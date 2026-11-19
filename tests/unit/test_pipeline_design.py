@@ -203,10 +203,10 @@ class TestMaxReadPairsArgv:
         i = argv.index("--max-read-pairs")
         assert argv[i:i + 4] == ["--max-read-pairs", "250000", "--seed", "42"]
 
-    def test_extract_argv_without_seed(self, tmp_path):
+    def test_extract_argv_resolves_default_seed(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("METADARKMATTER_SEED", "9")
         argv = self._ke_argv(tmp_path, max_read_pairs=10)
-        assert "--max-read-pairs" in argv
-        assert "--seed" not in argv
+        assert argv[argv.index("--seed") + 1] == "9"
 
     def test_extract_argv_absent_when_none(self, tmp_path):
         argv = self._ke_argv(tmp_path)

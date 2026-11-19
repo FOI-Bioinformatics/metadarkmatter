@@ -28,6 +28,7 @@ from enum import Enum, StrEnum
 from pathlib import Path
 
 from metadarkmatter.core.exceptions import MetadarkmatterError
+from metadarkmatter.core.random import get_seed
 from metadarkmatter.models.pipeline_config import Aligner, PipelineConfig, PipelineStep
 
 # Invoke the package CLI as a subprocess via the module entry point. This is
@@ -481,8 +482,10 @@ class Pipeline:
             ke_argv += ["--reads-2", str(cfg.reads_2)]
         if cfg.max_read_pairs is not None:
             ke_argv += ["--max-read-pairs", str(cfg.max_read_pairs)]
-            if cfg.seed is not None:
-                ke_argv += ["--seed", str(cfg.seed)]
+            # Resolve the seed here so a changed METADARKMATTER_SEED changes
+            # the step fingerprint.
+            seed = cfg.seed if cfg.seed is not None else get_seed()
+            ke_argv += ["--seed", str(seed)]
         steps.append(
             _Step(
                 step=PipelineStep.KRAKEN_EXTRACT,
