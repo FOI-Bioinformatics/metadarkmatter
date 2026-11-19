@@ -25,6 +25,7 @@ from metadarkmatter.core.constants import (
 )
 from metadarkmatter.core.io_utils import OutputFormat, StreamingWriter
 from metadarkmatter.core.parsers import extract_genome_name_expr
+from metadarkmatter.core.subspecies import assign_subspecies
 from metadarkmatter.models.classification import TAXONOMIC_TO_DIVERSITY
 from metadarkmatter.models.config import EffectiveThresholds, ScoringConfig
 
@@ -76,6 +77,7 @@ class VectorizedClassifier:
         aai_matrix: AAIMatrix | None = None,
         config: ScoringConfig | None = None,
         representative_mapping: dict[str, str] | None = None,
+        subspecies_map: dict[str, str] | None = None,
     ) -> None:
         """
         Initialize vectorized classifier.
@@ -93,6 +95,12 @@ class VectorizedClassifier:
                 use representative genomes while output preserves actual hit
                 genomes. This decouples alignment (all genomes) from
                 classification (representative ANI matrix).
+            subspecies_map: Optional mapping from genome accession to NCBI
+                species label. When non-empty, the output gains
+                ``closest_subspecies`` and ``subspecies_candidates`` as the
+                last two columns, filled for "Known Species" reads from the
+                genomes tied at the best weighted bitscore. When None or
+                empty, the output is unchanged.
         """
         self.ani_matrix = ani_matrix
         self.aai_matrix = aai_matrix
@@ -115,6 +123,7 @@ class VectorizedClassifier:
                 for k, v in representative_mapping.items()
             }
         self.representative_mapping = representative_mapping
+        self.subspecies_map = dict(subspecies_map) if subspecies_map else None
         # Diagnostics: hit genomes (or representatives) absent from the ANI
         # matrix and reads whose competitor ANI lookup failed (U defaults to 100).
         self.missing_ani_genomes: set[str] = set()
@@ -453,8 +462,23 @@ class VectorizedClassifier:
         """
         out = self._classify_file_impl(blast_input, id_mapping, compute_qc)
         if isinstance(out, tuple):
-            return self._conform_output(out[0]), out[1]
-        return self._conform_output(out)
+            return self._conform_output(self._add_subspecies(out[0])), out[1]
+        return self._conform_output(self._add_subspecies(out))
+
+    def _add_subspecies(self, df: pl.DataFrame) -> pl.DataFrame:
+        """Replace ``top_hit_genomes`` with the per-read subspecies columns.
+
+        No-op without a subspecies map. Rows built outside the best-hit
+        aggregation (off-target reads, empty results) have no top-hit genome
+        list and therefore receive null labels.
+        """
+        if not self.subspecies_map:
+            return df
+        if "top_hit_genomes" not in df.columns:
+            df = df.with_columns(
+                pl.lit(None, dtype=pl.List(pl.Utf8)).alias("top_hit_genomes")
+            )
+        return assign_subspecies(df, self.subspecies_map)
 
     _FAMILY_OUTPUT_SCHEMA: ClassVar[dict[str, Any]] = {
         "family_bitscore_ratio": pl.Float64,
@@ -490,6 +514,9 @@ class VectorizedClassifier:
             schema["clade_novel_species"] = pl.Boolean()
         if self._single_hit_rule_active:
             schema["single_hit_novel_species"] = pl.Boolean()
+        if self.subspecies_map:
+            schema["closest_subspecies"] = pl.Utf8()
+            schema["subspecies_candidates"] = pl.Utf8()
         return schema
 
     def _conform_output(self, df: pl.DataFrame) -> pl.DataFrame:
@@ -779,6 +806,17 @@ class VectorizedClassifier:
         df = df.sort(["qseqid", "weighted_bitscore", "pident", "genome_name"], descending=[False, True, True, False])
 
         # Step 1: Find best hit per read (highest weighted_bitscore) and collect metrics for confidence
+        subspecies_aggs: list[pl.Expr] = []
+        if self.subspecies_map:
+            # All genomes tied at the best weighted bitscore, for the
+            # per-read subspecies label.
+            subspecies_aggs.append(
+                pl.col("genome_name")
+                .filter(pl.col("weighted_bitscore") == pl.col("weighted_bitscore").max())
+                .unique()
+                .sort()
+                .alias("top_hit_genomes")
+            )
         best_hits = (
             df.group_by("qseqid", maintain_order=True)
             .agg([
@@ -812,6 +850,7 @@ class VectorizedClassifier:
                 .filter(pl.col("weighted_bitscore") == pl.col("weighted_bitscore").max())
                 .first()
                 .alias("alignment_fraction"),
+                *subspecies_aggs,
             ])
         )
 
@@ -1220,6 +1259,9 @@ class VectorizedClassifier:
                 "placement_confidence",
                 "discovery_score",
             ])
+
+        if self.subspecies_map:
+            base_columns.append("top_hit_genomes")
 
         classification_result = result.select(base_columns)
 

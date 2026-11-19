@@ -18,6 +18,7 @@ import polars as pl
 from metadarkmatter.external.ncbi_datasets import AssemblySummary
 
 UNRESOLVED: Final = "unresolved"
+_KEY_SEP: Final = "\t"
 
 _LEVEL_ORDER: Final = {
     "complete genome": 0,
@@ -154,21 +155,46 @@ def assign_subspecies(df: pl.DataFrame, subspecies_map: dict[str, str]) -> pl.Da
     both new columns. One label gives that label in ``closest_subspecies``;
     several give ``UNRESOLVED``. ``subspecies_candidates`` holds all labels
     joined by ";". The ``top_hit_genomes`` column is dropped.
-    """
-    labels: list[list[str]] = []
-    for call, genomes in zip(
-        df["taxonomic_call"].to_list(), df["top_hit_genomes"].to_list(), strict=True
-    ):
-        if call != "Known Species" or not genomes:
-            labels.append([])
-            continue
-        labels.append(sorted({subspecies_map[g] for g in genomes if g in subspecies_map}))
 
-    closest = [
-        None if not lab else (lab[0] if len(lab) == 1 else UNRESOLVED) for lab in labels
-    ]
-    candidates = [";".join(lab) if lab else None for lab in labels]
-    return df.drop("top_hit_genomes").with_columns(
-        pl.Series("closest_subspecies", closest, dtype=pl.Utf8),
-        pl.Series("subspecies_candidates", candidates, dtype=pl.Utf8),
+    Labels are computed once per distinct top-hit genome list, so the cost
+    scales with the number of distinct lists rather than the number of reads.
+    """
+    out = df.drop("top_hit_genomes")
+    is_known = pl.col("taxonomic_call") == "Known Species"
+    if not subspecies_map or df.is_empty() or not df.select(is_known.any()).item():
+        return out.with_columns(
+            pl.lit(None, dtype=pl.Utf8).alias("closest_subspecies"),
+            pl.lit(None, dtype=pl.Utf8).alias("subspecies_candidates"),
+        )
+
+    # One string key per row (null for non-Known-Species rows and null lists).
+    # Accessions come from tab-separated alignment fields, so they cannot
+    # contain the tab separator.
+    keys = df.select(
+        pl.when(is_known)
+        .then(pl.col("top_hit_genomes").list.join(_KEY_SEP))
+        .otherwise(None)
+        .alias("_key")
+    )["_key"]
+
+    closest: dict[str, str] = {}
+    candidates: dict[str, str] = {}
+    for key in keys.drop_nulls().unique().sort().to_list():
+        if not key:
+            continue
+        labels = sorted(
+            {subspecies_map[g] for g in key.split(_KEY_SEP) if g in subspecies_map}
+        )
+        if labels:
+            closest[key] = labels[0] if len(labels) == 1 else UNRESOLVED
+            candidates[key] = ";".join(labels)
+
+    null_utf8 = pl.lit(None, dtype=pl.Utf8)
+    return out.with_columns(
+        keys.replace_strict(closest, default=null_utf8, return_dtype=pl.Utf8).alias(
+            "closest_subspecies"
+        ),
+        keys.replace_strict(candidates, default=null_utf8, return_dtype=pl.Utf8).alias(
+            "subspecies_candidates"
+        ),
     )
