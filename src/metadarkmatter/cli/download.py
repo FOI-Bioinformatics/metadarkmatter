@@ -126,6 +126,17 @@ def _apply_ncbi_subspecies(
                 console.print(f"\n[dim]{e.suggestion}[/dim]")
                 raise typer.Exit(code=1) from None
 
+            returned = {x.accession for x in summaries}
+            missing = [a for a in accs if a not in returned]
+            if missing:
+                examples = ", ".join(missing[:5])
+                console.print(
+                    f"[yellow]Warning: NCBI Datasets returned no summary for "
+                    f"{len(missing):,} of {len(accs):,} accessions of {s} "
+                    f"(possibly suppressed or unknown); e.g. {examples}. "
+                    "These genomes are not labelled.[/yellow]"
+                )
+
             entries = select_subspecies_panel(
                 summaries,
                 name,
@@ -134,6 +145,19 @@ def _apply_ncbi_subspecies(
                 per_subspecies_large=per_subspecies_large,
             )
             panel_entries.extend(entries)
+            n_ncbi = len({e.subspecies for e in entries if e.subspecies})
+            n_added = sum(1 for e in entries if e.accession not in existing)
+            if not quiet:
+                console.print(
+                    f"{s}: {len(entries):,} panel genomes ({n_added:,} added) across "
+                    f"{n_ncbi:,} NCBI species -> {panel_path.name}"
+                )
+            if not any(e.accession == rep and e.subspecies for e in entries):
+                console.print(
+                    f"[yellow]Warning: the GTDB representative {rep} of {s} has no "
+                    "NCBI species label (for example an 'sp.' organism name or a "
+                    "missing summary).[/yellow]"
+                )
             if representatives_only:
                 representative_map[name] = rep
                 taxonomy = members[0].gtdb_taxonomy
@@ -392,6 +416,7 @@ def list_genomes(
     ]
 
     metadata_path = output.parent / "genome_metadata.tsv"
+    panel_path = metadata_path.parent / "subspecies_panel.tsv"
     if ncbi_subspecies:
         accessions = _apply_ncbi_subspecies(
             ncbi_subspecies,
@@ -400,7 +425,7 @@ def list_genomes(
             representatives_only=representatives_only,
             per_subspecies=per_subspecies,
             per_subspecies_large=per_subspecies_large,
-            panel_path=metadata_path.parent / "subspecies_panel.tsv",
+            panel_path=panel_path,
             quiet=quiet,
         )
 
@@ -410,6 +435,13 @@ def list_genomes(
         genus_counts=result.genus_counts,
         representative_map=representative_map,
     )
+
+    if not ncbi_subspecies and panel_path.exists():
+        panel_path.unlink()
+        console.print(
+            f"[dim]Removed stale {panel_path} (not written by this run, which has no "
+            "--ncbi-subspecies).[/dim]"
+        )
 
     if metadata_path.exists():
         console.print(

@@ -178,3 +178,49 @@ def test_assign_subspecies_empty_map_returns_null_utf8():
     assert out.schema["closest_subspecies"] == pl.Utf8
     assert out.schema["subspecies_candidates"] == pl.Utf8
     assert out["closest_subspecies"].to_list() == [None]
+
+
+@pytest.fixture
+def rep_only_ani(tmp_path: Path) -> tuple[ANIMatrix, dict[str, str]]:
+    """ANI matrix with the representative only; S maps to A."""
+    ani_path = tmp_path / "ani_rep.csv"
+    pl.DataFrame({"genome": [GENOME_A, GENOME_X],
+                  GENOME_A: [100.0, 99.0], GENOME_X: [99.0, 100.0]}).write_csv(ani_path)
+    return ANIMatrix.from_file(ani_path), {GENOME_A: GENOME_A, GENOME_S: GENOME_A}
+
+
+def _write_aln(path: Path, rows: list[tuple]) -> Path:
+    rows = [(q, f"{g}|contig_1", *rest) for q, g, *rest in rows]
+    path.write_text("\n".join("\t".join(str(c) for c in r) for r in rows) + "\n")
+    return path
+
+
+def test_non_representative_best_hit_labelled_with_representative_mapping(
+    tmp_path: Path, rep_only_ani
+):
+    ani, rep_map = rep_only_ani
+    aln = _write_aln(
+        tmp_path / "s.blast.tsv",
+        [
+            # single best hit is the non-representative S
+            ("read_s", GENOME_S, 99.9, 200, 0, 0, 1, 200, 1, 200, 1e-100, 390.0),
+            ("read_s", GENOME_X, 98.0, 200, 4, 0, 1, 200, 1, 200, 1e-80, 340.0),
+            # tie between A and S with different labels
+            ("read_tie", GENOME_A, 99.8, 200, 0, 0, 1, 200, 1, 200, 1e-100, 380.0),
+            ("read_tie", GENOME_S, 99.8, 200, 0, 0, 1, 200, 1, 200, 1e-100, 380.0),
+        ],
+    )
+    clf = VectorizedClassifier(
+        ani_matrix=ani, representative_mapping=rep_map, subspecies_map=SUBSPECIES_MAP
+    )
+    df = clf.classify_file(aln)
+    assert isinstance(df, pl.DataFrame)
+    rows = {r["read_id"]: r for r in df.to_dicts()}
+    assert rows["read_s"]["closest_subspecies"] == "Brucella suis"
+    assert rows["read_tie"]["closest_subspecies"] == UNRESOLVED
+
+    baseline = VectorizedClassifier(ani_matrix=ani, representative_mapping=rep_map)
+    base_df = baseline.classify_file(aln)
+    assert isinstance(base_df, pl.DataFrame)
+    core = [c for c in df.columns if c not in ("closest_subspecies", "subspecies_candidates")]
+    assert df.select(core).equals(base_df.select(core))

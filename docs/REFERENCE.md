@@ -653,6 +653,14 @@ the pipeline performs the download step (they are ignored when `--genomes` is
 supplied), and they require the NCBI `datasets` CLI. Panel genomes keep the GTDB species name and
 GTDB representative; the NCBI name is written to the `subspecies` column.
 
+With `--all-genomes`, every genome of the species in the listing is labelled in
+the `subspecies` column, whereas `subspecies_panel.tsv` records only the ranked
+top-N selection per NCBI species. A `subspecies_panel.tsv` left from an earlier
+run is removed when `download genomes list` runs without `--ncbi-subspecies`.
+When `--genomes` is supplied to `run pipeline` or `run cohort`, a warning is
+printed: use `--metadata` with a `genome_metadata.tsv` that has a `subspecies`
+column instead.
+
 With a `subspecies` column in the metadata, `score classify` adds:
 
 | Column | Meaning |

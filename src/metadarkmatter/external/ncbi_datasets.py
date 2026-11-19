@@ -111,7 +111,15 @@ def parse_assembly_summary_jsonl(text: str) -> list[AssemblySummary]:
         line = line.strip()
         if not line:
             continue
-        rec = json.loads(line)
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError as err:
+            raise ToolExecutionError(
+                "datasets",
+                ["datasets", "summary", "genome", "accession"],
+                0,
+                f"Could not parse 'datasets summary' output as JSON Lines: {err}",
+            ) from err
         info = rec.get("assembly_info") or {}
         stats = rec.get("assembly_stats") or {}
         summaries.append(

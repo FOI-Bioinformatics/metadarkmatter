@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from metadarkmatter.core.metadata import GenomeMetadata
 
 UNRESOLVED: Final = "unresolved"
+UNLABELLED: Final = "unlabelled"
 _KEY_SEP: Final = "\t"
 _UNKNOWN_SPECIES: Final = "Unknown species"
 
@@ -219,8 +220,8 @@ def summarize_subspecies(
 
     Columns: gtdb_species, subspecies, reads, pct. The percentage is relative
     to all Known Species reads of the GTDB species, including reads without a
-    subspecies label. The result is sorted by gtdb_species, reads (descending)
-    and subspecies, and is empty when no subspecies column is present.
+    subspecies label, which are listed as "unlabelled". The result is sorted by
+    gtdb_species, reads (descending) and subspecies, and is empty when no subspecies column is present.
     """
     if "closest_subspecies" not in df.columns:
         return pl.DataFrame(schema=_SUMMARY_SCHEMA)
@@ -249,7 +250,7 @@ def summarize_subspecies(
 
     totals = known.group_by("gtdb_species").len().rename({"len": "_total"})
     return (
-        known.drop_nulls("subspecies")
+        known.with_columns(pl.col("subspecies").fill_null(UNLABELLED))
         .group_by("gtdb_species", "subspecies")
         .len()
         .rename({"len": "reads"})

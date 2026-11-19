@@ -189,3 +189,44 @@ def test_list_ncbi_subspecies_gtdb_species_query_failure_exits(cli_runner, tmp_p
     assert result.exit_code == 1
     assert not (tmp_path / "genome_metadata.tsv").exists()
     assert not out.exists()
+
+
+def test_list_ncbi_subspecies_warns_on_missing_summaries(cli_runner, tmp_path):
+    result = _run(
+        cli_runner,
+        tmp_path,
+        ["--ncbi-subspecies", "s__Genus alpha"],
+        summaries=[s for s in SUMMARIES if s.accession not in (OTHER_B, OTHER_C)],
+    )
+    assert result.exit_code == 0, result.output
+    out = " ".join(result.output.split())
+    assert "no summary for 2 of 4 accessions" in out
+    assert OTHER_B in out
+    assert OTHER_C in out
+
+
+def test_list_ncbi_subspecies_prints_summary_line(cli_runner, tmp_path):
+    result = _run(cli_runner, tmp_path, ["--ncbi-subspecies", "s__Genus alpha"])
+    assert result.exit_code == 0, result.output
+    out = " ".join(result.output.split())
+    assert "s__Genus alpha: 4 panel genomes (3 added) across 2 NCBI species" in out
+    assert "subspecies_panel.tsv" in out
+
+    quiet = _run(cli_runner, tmp_path, ["--ncbi-subspecies", "s__Genus alpha", "-q"])
+    assert "panel genomes" not in quiet.output
+
+
+def test_list_ncbi_subspecies_warns_when_representative_unlabelled(cli_runner, tmp_path):
+    summaries = [_s(REP, "Genus sp. strain1"), *SUMMARIES[1:]]
+    result = _run(cli_runner, tmp_path, ["--ncbi-subspecies", "s__Genus alpha"], summaries=summaries)
+    assert result.exit_code == 0, result.output
+    assert "has no NCBI species label" in " ".join(result.output.split())
+
+
+def test_list_without_subspecies_removes_stale_panel(cli_runner, tmp_path):
+    panel = tmp_path / "subspecies_panel.tsv"
+    panel.write_text("stale\n")
+    result = _run(cli_runner, tmp_path, [])
+    assert result.exit_code == 0, result.output
+    assert not panel.exists()
+    assert "Removed stale" in result.output

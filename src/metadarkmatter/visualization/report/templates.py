@@ -145,7 +145,7 @@ SUBSPECIES_TABLE_TEMPLATE: str = '''
 {rows}
         </tbody>
     </table>
-    <p class="table-note">Subspecies are assigned from the best-hit reference genomes of Known Species reads and are indicative for closely related taxa. Reads whose best hits span several subspecies are listed as unresolved.</p>
+    <p class="table-note">Subspecies are assigned from the best-hit reference genomes of Known Species reads and are indicative for closely related taxa. Reads whose best hits span several subspecies are listed as unresolved. Known Species reads whose best hits have no NCBI species label are listed as unlabelled.</p>
 </div>
 '''
 

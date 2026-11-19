@@ -41,6 +41,13 @@ app = typer.Typer(
 
 console = Console()
 
+_SUBSPECIES_WITH_GENOMES_WARNING = (
+    "--ncbi-subspecies only acts on the download step and is ignored with "
+    "--genomes. To use subspecies labels, point --metadata to a "
+    "genome_metadata.tsv that has a 'subspecies' column (written by "
+    "'download genomes list --ncbi-subspecies')."
+)
+
 
 @app.command(name="pipeline")
 def run_pipeline(
@@ -196,6 +203,8 @@ def run_pipeline(
         if path is not None and not Path(path).is_file():
             raise ValueError(f"{label} file does not exist: {path}")
     extra_warnings: list[str] = []
+    if cfg.genomes_dir is not None and cfg.ncbi_subspecies:
+        extra_warnings.append(_SUBSPECIES_WITH_GENOMES_WARNING)
     if cfg.extracted_reads_1 is not None and (cfg.reads_1 is not None or cfg.reads_2 is not None):
         extra_warnings.append(
             "--reads-1/--reads-2 are ignored because --extracted-reads-1 is given "
@@ -378,6 +387,8 @@ def run_cohort(
     sheet = read_samples_tsv(samples)
     if genomes is not None and not genomes.is_dir():
         raise ValueError(f"--genomes path does not exist or is not a directory: {genomes}")
+    if genomes is not None and ncbi_subspecies:
+        console.print(f"[yellow]Warning:[/yellow] {_SUBSPECIES_WITH_GENOMES_WARNING}")
 
     shared: dict[str, object] = {
         "family": family,

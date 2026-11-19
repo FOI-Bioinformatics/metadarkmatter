@@ -20,6 +20,13 @@ Production-readiness and UX hardening pass.
   and `run cohort` forward the options. GTDB-based classification is
   unchanged; subspecies assignment from short reads is indicative for
   closely related taxa.
+  `download genomes list --ncbi-subspecies` warns when `datasets` returns no
+  summary for some accessions, warns when the GTDB representative has no NCBI
+  species label, prints one summary line per expanded species and removes a
+  stale `subspecies_panel.tsv` when run without the option. `run pipeline` and
+  `run cohort` warn that `--ncbi-subspecies` is ignored with `--genomes`. The
+  report subspecies table lists Known Species reads without a label as
+  "unlabelled", so rows sum to 100% per GTDB species.
 - `run pipeline` / `run cohort --metadata PATH`: use a `genome_metadata.tsv`
   with `--genomes` (representative-only ANI, target-family inference,
   species/genus columns and genus grouping in the report). Without it, a

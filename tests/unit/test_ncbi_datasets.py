@@ -9,10 +9,11 @@ from __future__ import annotations
 import json
 import subprocess
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from metadarkmatter.external.base import ToolExecutionError
 from metadarkmatter.external.ncbi_datasets import (
     AssemblySummary,
     DownloadOutcome,
@@ -467,3 +468,19 @@ class TestAssemblySummary:
         assert "--as-json-lines" in argv
         assert result[0].accession == "GCF_000005845.2"
         assert result[0].contig_n50 == 10
+
+
+class TestAssemblySummaryJsonErrors:
+    def test_parse_invalid_json_raises_tool_execution_error(self):
+        with pytest.raises(ToolExecutionError, match="JSON"):
+            parse_assembly_summary_jsonl("not json\n")
+
+    def test_fetch_wraps_invalid_json_output(self):
+        NCBIDatasets._executable_cache["datasets"] = Path("/usr/bin/datasets")
+        ncbi = NCBIDatasets()
+        fake = MagicMock(success=True, stdout="{broken", command=["datasets"])
+        with patch.object(NCBIDatasets, "run", return_value=fake), pytest.raises(
+            ToolExecutionError
+        ):
+            ncbi.fetch_assembly_summaries(["GCF_000005845.2"])
+

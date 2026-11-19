@@ -14,7 +14,8 @@ TITLE = "Subspecies (NCBI species within GTDB species)"
 NOTE = (
     "Subspecies are assigned from the best-hit reference genomes of Known Species "
     "reads and are indicative for closely related taxa. Reads whose best hits span "
-    "several subspecies are listed as unresolved."
+    "several subspecies are listed as unresolved. Known Species reads whose best "
+    "hits have no NCBI species label are listed as unlabelled."
 )
 
 
@@ -40,6 +41,7 @@ def test_summarize_subspecies_counts_and_pct():
     assert out.rows() == [
         ("Francisella novicida", "Francisella novicida", 2, 100.0),
         ("Francisella tularensis", "Francisella tularensis", 2, 50.0),
+        ("Francisella tularensis", "unlabelled", 1, 25.0),
         ("Francisella tularensis", "unresolved", 1, 25.0),
     ]
 
@@ -48,8 +50,9 @@ def test_summarize_subspecies_uses_metadata_when_species_column_absent():
     out = summarize_subspecies(_frame(False), make_metadata())
     assert out["gtdb_species"].to_list() == [
         "Francisella novicida", "Francisella tularensis", "Francisella tularensis",
+        "Francisella tularensis",
     ]
-    assert out["pct"].to_list() == [100.0, 50.0, 25.0]
+    assert out["pct"].to_list() == [100.0, 50.0, 25.0, 25.0]
 
 
 def test_summarize_subspecies_empty_without_column():
@@ -76,3 +79,17 @@ def test_report_has_subspecies_table(tmp_path):
 
 def test_report_without_subspecies_unchanged(tmp_path):
     assert TITLE not in render(tmp_path)
+
+
+def test_summarize_subspecies_all_unlabelled_species_row():
+    df = _frame(True).with_columns(
+        pl.when(pl.col("best_match_genome") == GENOMES[0])
+        .then(pl.lit(None, dtype=pl.Utf8))
+        .otherwise(pl.col("closest_subspecies"))
+        .alias("closest_subspecies")
+    )
+    out = summarize_subspecies(df, None)
+    assert out.rows() == [
+        ("Francisella novicida", "Francisella novicida", 2, 100.0),
+        ("Francisella tularensis", "unlabelled", 4, 100.0),
+    ]
