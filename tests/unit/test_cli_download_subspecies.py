@@ -7,7 +7,7 @@ from unittest.mock import patch
 import polars as pl
 
 from metadarkmatter.cli.main import app
-from metadarkmatter.clients.gtdb import GTDBGenome, GTDBQueryResult
+from metadarkmatter.clients.gtdb import GTDBAPIError, GTDBGenome, GTDBQueryResult
 from metadarkmatter.external.base import ToolExecutionError, ToolNotFoundError
 from metadarkmatter.external.ncbi_datasets import AssemblySummary
 
@@ -165,3 +165,27 @@ def test_list_without_subspecies_unchanged(cli_runner, tmp_path):
     assert result.exit_code == 0, result.output
     assert "subspecies" not in _meta(tmp_path).columns
     assert not (tmp_path / "subspecies_panel.tsv").exists()
+
+
+def test_list_ncbi_subspecies_gtdb_species_query_failure_exits(cli_runner, tmp_path):
+    def query(taxon, *, representatives_only=True):
+        if taxon.startswith("s__"):
+            raise GTDBAPIError("GTDB unavailable")
+        return _query(taxon, representatives_only=representatives_only)
+
+    out = tmp_path / "list.tsv"
+    with (
+        patch("metadarkmatter.cli.download.GTDBClient.query_genomes", side_effect=query),
+        patch(
+            "metadarkmatter.cli.download.NCBIDatasets.fetch_assembly_summaries",
+            return_value=SUMMARIES,
+        ),
+    ):
+        result = cli_runner.invoke(
+            app,
+            ["download", "genomes", "list", "g__Genus", "-o", str(out),
+             "--ncbi-subspecies", "s__Genus alpha"],
+        )
+    assert result.exit_code == 1
+    assert not (tmp_path / "genome_metadata.tsv").exists()
+    assert not out.exists()

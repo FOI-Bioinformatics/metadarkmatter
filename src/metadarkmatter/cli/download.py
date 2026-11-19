@@ -62,6 +62,7 @@ def _apply_ncbi_subspecies(
     per_subspecies: int,
     per_subspecies_large: int,
     panel_path: Path,
+    quiet: bool = False,
 ) -> list[GenomeAccession]:
     """Label genomes by NCBI species within the given GTDB species.
 
@@ -104,8 +105,15 @@ def _apply_ncbi_subspecies(
                 rep = representative_map.get(name) or sorted(
                     m.accession for m in members
                 )[0]
-            with spinner_progress(f"Querying GTDB for all genomes of {s}...", console, False):
-                full = client.query_genomes(s, representatives_only=False)
+            try:
+                with spinner_progress(
+                    f"Querying GTDB for all genomes of {s}...", console, quiet
+                ):
+                    full = client.query_genomes(s, representatives_only=False)
+            except (InvalidTaxonFormatError, GTDBAPIError) as err:
+                console.print(f"\n[red]Error: {err.message}[/red]")
+                console.print(f"\n[dim]{err.suggestion}[/dim]")
+                raise typer.Exit(code=1) from None
             accs = sorted({g.accession for g in full.genomes} | {rep})
             try:
                 summaries = ncbi.fetch_assembly_summaries(accs)
@@ -129,11 +137,11 @@ def _apply_ncbi_subspecies(
             if representatives_only:
                 representative_map[name] = rep
                 taxonomy = members[0].gtdb_taxonomy
-                for e in entries:
-                    labels[e.accession] = e.subspecies
-                    if e.accession not in existing:
-                        appended[e.accession] = GenomeAccession(
-                            accession=e.accession,
+                for entry in entries:
+                    labels[entry.accession] = entry.subspecies
+                    if entry.accession not in existing:
+                        appended[entry.accession] = GenomeAccession(
+                            accession=entry.accession,
                             gtdb_taxonomy=taxonomy,
                             species=name,
                             is_representative=False,
@@ -393,6 +401,7 @@ def list_genomes(
             per_subspecies=per_subspecies,
             per_subspecies_large=per_subspecies_large,
             panel_path=metadata_path.parent / "subspecies_panel.tsv",
+            quiet=quiet,
         )
 
     accession_list = AccessionList(
