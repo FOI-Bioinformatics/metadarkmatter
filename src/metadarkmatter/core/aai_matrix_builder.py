@@ -30,6 +30,7 @@ import numpy as np
 import polars as pl
 
 from metadarkmatter.core.constants import AAI_DEFAULT_UNRELATED
+from metadarkmatter.core.genome_utils import is_hidden_file
 
 logger = logging.getLogger(__name__)
 
@@ -337,7 +338,9 @@ def concatenate_protein_files(
     # Find all protein files
     protein_files: list[Path] = []
     for pattern in patterns:
-        protein_files.extend(protein_dir.glob(pattern))
+        protein_files.extend(
+            f for f in protein_dir.glob(pattern) if not is_hidden_file(f)
+        )
 
     if not protein_files:
         msg = f"No protein files found in {protein_dir} with patterns {patterns}"

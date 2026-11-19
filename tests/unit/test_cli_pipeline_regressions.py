@@ -646,3 +646,30 @@ def test_run_passes_no_timeout_by_default(tmp_path: Path):
          patch("metadarkmatter.external.base.subprocess.run", side_effect=fake_run):
         MakeBlastDb().run(input_fasta=tmp_path / "a.fa", output_db=tmp_path / "db")
     assert seen["timeout"] is None
+
+
+def test_ncbi_subspecies_with_genomes_warns(tmp_path: Path):
+    reads = tmp_path / "r1.fq"
+    reads.write_text("@r\nA\n+\nI\n")
+    base = ["--genomes", str(_genomes(tmp_path)), "--extracted-reads-1", str(reads),
+            "--output-dir", str(tmp_path / "out"), "--dry-run"]
+    result = CliRunner().invoke(
+        app, ["run", "pipeline", *base, "--ncbi-subspecies", "s__Foo bar"]
+    )
+    out = " ".join(result.output.split())
+    assert "--ncbi-subspecies only acts on the download step" in out
+    assert "--metadata" in out
+    plain = CliRunner().invoke(app, ["run", "pipeline", *base])
+    assert "--ncbi-subspecies only acts" not in " ".join(plain.output.split())
+
+
+def test_pipeline_warns_max_read_pairs_with_extracted_reads(tmp_path: Path):
+    reads = tmp_path / "r1.fq"
+    reads.write_text("@r\nA\n+\nI\n")
+    base = ["--genomes", str(_genomes(tmp_path)), "--extracted-reads-1", str(reads),
+            "--output-dir", str(tmp_path / "out"), "--dry-run"]
+    result = CliRunner().invoke(app, ["run", "pipeline", *base, "--max-read-pairs", "10"])
+    out = " ".join(result.output.split())
+    assert "--max-read-pairs only acts on the extraction step" in out
+    plain = CliRunner().invoke(app, ["run", "pipeline", *base])
+    assert "--max-read-pairs only acts" not in " ".join(plain.output.split())

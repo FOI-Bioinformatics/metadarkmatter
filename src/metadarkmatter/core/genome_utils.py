@@ -65,8 +65,17 @@ GENOME_PATTERNS: tuple[str, ...] = (
 DEFAULT_GENOME_PATTERN = "*.fna"
 
 
+def is_hidden_file(path: Path) -> bool:
+    """True for hidden files (name starts with ``.``).
+
+    Covers macOS AppleDouble sidecars (``._<name>``), which exFAT and network
+    volumes receive next to real files and which are metadata, not FASTA.
+    """
+    return path.name.startswith(".")
+
+
 def find_genome_files(genome_dir: Path, pattern: str = DEFAULT_GENOME_PATTERN) -> list[Path]:
-    """Genome FASTA files in ``genome_dir`` (sorted, regular files only).
+    """Genome FASTA files in ``genome_dir`` (sorted, regular, non-hidden files).
 
     With the default pattern every supported extension is included, so a
     directory that mixes plain and gzipped genomes keeps all of them (the
@@ -78,7 +87,7 @@ def find_genome_files(genome_dir: Path, pattern: str = DEFAULT_GENOME_PATTERN) -
     if not found:
         # Default pattern, or an explicit pattern that matched nothing.
         found = {f for pat in GENOME_PATTERNS for f in genome_dir.glob(pat)}
-    return sorted(f for f in found if f.is_file())
+    return sorted(f for f in found if f.is_file() and not is_hidden_file(f))
 
 
 def _read_lines(handle: Any, path: Path) -> Iterator[str]:

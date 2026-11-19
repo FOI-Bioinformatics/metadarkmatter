@@ -29,7 +29,9 @@ mdm download genomes fetch --accessions genomes.tsv --output-dir genomes/
 # 2. Extract family reads with Kraken2 (classify needs a built kraken2 DB;
 #    --output is a directory receiving {sample}.kraken and {sample}.kreport,
 #    and extract needs the .kreport next to the .kraken file). Extracted
-#    reads are written as {sample}_taxid{taxid}_R1/_R2.fastq.gz.
+#    reads are written as {sample}_taxid{taxid}_R1/_R2.fastq.gz. Optional
+#    --max-read-pairs N (with --seed) randomly keeps at most N pairs in place
+#    and writes {sample}_taxid{taxid}_subsample.json (FASTQ input only).
 mdm kraken2 classify --reads-1 sample_R1.fastq.gz --reads-2 sample_R2.fastq.gz \
   --kraken-db db/ --output kraken_out/
 mdm kraken2 extract --kraken-output kraken_out/sample.kraken --reads-1 sample_R1.fastq.gz \
@@ -137,6 +139,8 @@ accession	species	genus	family	representative	gtdb_taxonomy
 GCF_000195955.2	F. tularensis	Francisella	Francisellaceae	GCF_000195955.2	d__...
 GCF_001234567.1	F. tularensis	Francisella	Francisellaceae	GCF_000195955.2	d__...
 ```
+
+An optional last column `subspecies` holds the NCBI species name of each genome. Panel genomes selected with `download genomes list --ncbi-subspecies "s__Genus species"` keep the GTDB species name and GTDB representative; the NCBI name is only a label. With this column, `score classify` adds `closest_subspecies` and `subspecies_candidates` for Known Species reads ("unresolved" when tied best hits span several subspecies), and the report Summary tab adds a subspecies table. Assignment from short reads is indicative for closely related taxa. Without the column, behavior is unchanged.
 
 **Backwards compatibility:** If `representative` column is absent, every genome maps to itself (current behavior preserved).
 

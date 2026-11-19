@@ -98,6 +98,35 @@ class PipelineConfig(BaseModel):
         ),
     )
 
+    ncbi_subspecies: list[str] = Field(
+        default_factory=list,
+        description=(
+            "GTDB species (e.g. 's__Brucella melitensis') for which additional "
+            "genomes are selected per NCBI species name during download."
+        ),
+    )
+    per_subspecies: int = Field(
+        default=2, ge=1, description="Genomes per NCBI species within a listed GTDB species."
+    )
+    per_subspecies_large: int = Field(
+        default=3, ge=1, description=(
+            "Genomes kept per NCBI species that has more than 50 genomes "
+            "in the GTDB species."
+        ),
+    )
+
+    max_read_pairs: int | None = Field(
+        default=None, ge=1,
+        description=(
+            "Maximum read pairs kept after Kraken2 extraction (random subsample). "
+            "None keeps all reads."
+        ),
+    )
+    seed: int | None = Field(
+        default=None,
+        description="Random seed for subsampling (default: METADARKMATTER_SEED or 42).",
+    )
+
     # Output + execution
     output_dir: Path = Field(description="Root output directory for the run.")
     aligner: Aligner = Field(default=Aligner.BLAST, description="Aligner for the alignment step.")

@@ -445,20 +445,32 @@ def run_classification(
     classification_df: pl.DataFrame | None = None
     qc_metrics = None
 
+    # Per-read NCBI species labels, only when the metadata carries them.
+    subspecies_map: dict[str, str] | None = None
+    if genome_metadata is not None and genome_metadata.has_subspecies:
+        subspecies_map = genome_metadata.subspecies_map()
+
     if request.streaming:
         # Streaming mode writes directly to file - no in-memory DataFrame.
         log(f"[cyan]Streaming mode: processing in {request.chunk_size:,}-row partitions[/cyan]\n")
 
         if genome_metadata:
-            log(
+            note = (
                 "[yellow]Note: with --streaming, --metadata is used for the representative "
-                "mapping and target-family inference only.[/yellow]\n"
+                "mapping, target-family inference and subspecies labels only.[/yellow]\n"
                 "[yellow]Species/genus columns will not be added to output.[/yellow]\n"
             )
+            if subspecies_map:
+                note += (
+                    "[yellow]Subspecies columns (closest_subspecies, "
+                    "subspecies_candidates) are still produced.[/yellow]\n"
+                )
+            log(note)
 
         vectorized = VectorizedClassifier(
             ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config,
             representative_mapping=representative_mapping,
+            subspecies_map=subspecies_map,
         )
         num_classified = vectorized.stream_to_file(
             blast_path=request.alignment,
@@ -472,6 +484,7 @@ def run_classification(
         vectorized = VectorizedClassifier(
             ani_matrix=ani_matrix, aai_matrix=aai_matrix, config=config,
             representative_mapping=representative_mapping,
+            subspecies_map=subspecies_map,
         )
         result = vectorized.classify_file(
             request.alignment,

@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import ClassVar
 
+from metadarkmatter.core.genome_utils import is_hidden_file
 from metadarkmatter.external.base import ExternalTool
 
 logger = logging.getLogger(__name__)
@@ -283,7 +284,9 @@ def create_genome_list_file(
     genome_paths: list[Path] = []
 
     for pattern in patterns:
-        genome_paths.extend(genome_dir.glob(pattern))
+        genome_paths.extend(
+            f for f in genome_dir.glob(pattern) if not is_hidden_file(f)
+        )
 
     # Remove duplicates and sort
     genome_paths = sorted(set(genome_paths))

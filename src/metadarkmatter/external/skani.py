@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import ClassVar
 
+from metadarkmatter.core.genome_utils import is_hidden_file
 from metadarkmatter.external.base import ExternalTool
 
 
@@ -46,7 +47,9 @@ class Skani(ExternalTool):
         """Sorted FASTA files directly inside ``directory``."""
         return sorted(
             p for p in directory.iterdir()
-            if p.is_file() and p.name.lower().endswith(cls.GENOME_SUFFIXES)
+            if p.is_file()
+            and not is_hidden_file(p)
+            and p.name.lower().endswith(cls.GENOME_SUFFIXES)
         )
 
     def build_command(

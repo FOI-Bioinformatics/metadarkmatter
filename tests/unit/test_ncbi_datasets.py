@@ -6,16 +6,22 @@ to be installed.
 
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
+from metadarkmatter.external.base import ToolExecutionError
 from metadarkmatter.external.ncbi_datasets import (
+    AssemblySummary,
     DownloadOutcome,
     DownloadReport,
     NCBIDatasets,
     _alternative_versions,
     _parse_accession_version,
+    parse_assembly_summary_jsonl,
 )
 
 
@@ -404,3 +410,77 @@ class TestDownloadReport:
         out = tmp_path / "failures.tsv"
         r.write_failures_tsv(out)
         assert not out.exists()
+
+
+class TestAssemblySummary:
+    """Tests for assembly summary parsing and lookup."""
+
+    def test_parse_assembly_summary_jsonl_fields(self):
+        record = {
+            "accession": "GCF_000005845.2",
+            "organism": {"organism_name": "Escherichia coli"},
+            "assembly_info": {
+                "assembly_level": "Complete Genome",
+                "refseq_category": "reference genome",
+            },
+            "assembly_stats": {"contig_n50": 4641652},
+        }
+        result = parse_assembly_summary_jsonl(json.dumps(record) + "\n\n")
+        assert result == [
+            AssemblySummary(
+                accession="GCF_000005845.2",
+                organism_name="Escherichia coli",
+                assembly_level="Complete Genome",
+                refseq_category="reference genome",
+                contig_n50=4641652,
+            )
+        ]
+
+    def test_parse_assembly_summary_jsonl_missing_optional_fields(self):
+        record = {
+            "accession": "GCA_000000001.1",
+            "organism": {"organism_name": "Foo bar"},
+            "assembly_info": {"assembly_level": "Contig"},
+            "assembly_stats": {},
+        }
+        result = parse_assembly_summary_jsonl(json.dumps(record))
+        assert len(result) == 1
+        assert result[0].refseq_category == ""
+        assert result[0].contig_n50 == 0
+
+    def test_fetch_assembly_summaries_builds_command(self):
+        NCBIDatasets._executable_cache["datasets"] = Path("/usr/bin/datasets")
+        record = {
+            "accession": "GCF_000005845.2",
+            "organism": {"organism_name": "Escherichia coli"},
+            "assembly_info": {"assembly_level": "Complete Genome"},
+            "assembly_stats": {"contig_n50": 10},
+        }
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(record) + "\n", stderr=""
+        )
+        with patch("subprocess.run", return_value=completed) as mock_run:
+            result = NCBIDatasets().fetch_assembly_summaries(["GCF_000005845.2"])
+
+        argv = mock_run.call_args[0][0]
+        idx = argv.index("summary")
+        assert argv[idx : idx + 4] == ["summary", "genome", "accession", "--inputfile"]
+        assert "--as-json-lines" in argv
+        assert result[0].accession == "GCF_000005845.2"
+        assert result[0].contig_n50 == 10
+
+
+class TestAssemblySummaryJsonErrors:
+    def test_parse_invalid_json_raises_tool_execution_error(self):
+        with pytest.raises(ToolExecutionError, match="JSON"):
+            parse_assembly_summary_jsonl("not json\n")
+
+    def test_fetch_wraps_invalid_json_output(self):
+        NCBIDatasets._executable_cache["datasets"] = Path("/usr/bin/datasets")
+        ncbi = NCBIDatasets()
+        fake = MagicMock(success=True, stdout="{broken", command=["datasets"])
+        with patch.object(NCBIDatasets, "run", return_value=fake), pytest.raises(
+            ToolExecutionError
+        ):
+            ncbi.fetch_assembly_summaries(["GCF_000005845.2"])
+

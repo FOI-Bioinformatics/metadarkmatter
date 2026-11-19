@@ -10,6 +10,29 @@ Production-readiness and UX hardening pass.
 
 ### Added
 
+- Optional read subsampling after Kraken2 extraction.
+  `kraken2 extract --max-read-pairs N` (with `--seed`, default
+  `METADARKMATTER_SEED` or 42) randomly keeps at most N read pairs in place,
+  keeping mates together, and writes `{sample}_taxid{taxid}_subsample.json`.
+  `run pipeline` and `run cohort` forward both options and warn when
+  `--max-read-pairs` is combined with pre-extracted reads.
+- NCBI species ("subspecies") labels within a GTDB species.
+  `download genomes list --ncbi-subspecies TEXT` (repeatable),
+  `--per-subspecies` (default 2) and `--per-subspecies-large` (default 3)
+  select a per-NCBI-species panel, write `subspecies_panel.tsv` and add an
+  optional `subspecies` column to `genome_metadata.tsv`. `score classify`
+  adds `closest_subspecies` and `subspecies_candidates` for Known Species
+  reads, and the report Summary tab adds a subspecies table. `run pipeline`
+  and `run cohort` forward the options. GTDB-based classification is
+  unchanged; subspecies assignment from short reads is indicative for
+  closely related taxa.
+  `download genomes list --ncbi-subspecies` warns when `datasets` returns no
+  summary for some accessions, warns when the GTDB representative has no NCBI
+  species label, prints one summary line per expanded species and removes a
+  stale `subspecies_panel.tsv` when run without the option. `run pipeline` and
+  `run cohort` warn that `--ncbi-subspecies` is ignored with `--genomes`. The
+  report subspecies table lists Known Species reads without a label as
+  "unlabelled", so rows sum to 100% per GTDB species.
 - `run pipeline` / `run cohort --metadata PATH`: use a `genome_metadata.tsv`
   with `--genomes` (representative-only ANI, target-family inference,
   species/genus columns and genus grouping in the report). Without it, a
@@ -160,6 +183,8 @@ Production-readiness and UX hardening pass.
 
 ### Fixed
 
+- Hidden files such as macOS AppleDouble `._*` sidecars are ignored when
+  discovering genome and protein files.
 - Round-5 audit, genome inputs: a directory mixing `.fna` and `.fna.gz`
   (or other supported extensions) now uses every genome in `blast/mmseqs2
   makedb`, `ani compute`, `proteins predict` and ID mapping (gzipped genomes

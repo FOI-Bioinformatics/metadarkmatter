@@ -28,6 +28,7 @@ from enum import Enum, StrEnum
 from pathlib import Path
 
 from metadarkmatter.core.exceptions import MetadarkmatterError
+from metadarkmatter.core.random import get_seed
 from metadarkmatter.models.pipeline_config import Aligner, PipelineConfig, PipelineStep
 
 # Invoke the package CLI as a subprocess via the module entry point. This is
@@ -428,6 +429,13 @@ class Pipeline:
             *MDM_INVOCATION, "download", "genomes", "list", str(cfg.family or ""),
             "--output", str(lay.genomes_tsv), "--include-metadata",
         ]
+        if cfg.ncbi_subspecies:
+            for sp in cfg.ncbi_subspecies:
+                download_argv += ["--ncbi-subspecies", sp]
+            download_argv += [
+                "--per-subspecies", str(cfg.per_subspecies),
+                "--per-subspecies-large", str(cfg.per_subspecies_large),
+            ]
         # Note: download is two subcommands; the orchestrator runs list then
         # fetch as a single logical step (see _run_download).
         steps.append(
@@ -472,6 +480,12 @@ class Pipeline:
         ]
         if cfg.reads_2:
             ke_argv += ["--reads-2", str(cfg.reads_2)]
+        if cfg.max_read_pairs is not None:
+            ke_argv += ["--max-read-pairs", str(cfg.max_read_pairs)]
+            # Resolve the seed here so a changed METADARKMATTER_SEED changes
+            # the step fingerprint.
+            seed = cfg.seed if cfg.seed is not None else get_seed()
+            ke_argv += ["--seed", str(seed)]
         steps.append(
             _Step(
                 step=PipelineStep.KRAKEN_EXTRACT,

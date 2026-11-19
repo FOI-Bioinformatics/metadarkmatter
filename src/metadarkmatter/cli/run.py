@@ -41,6 +41,18 @@ app = typer.Typer(
 
 console = Console()
 
+_MAX_READ_PAIRS_EXTRACTED_WARNING = (
+    "--max-read-pairs only acts on the extraction step and is ignored with "
+    "--extracted-reads-1 (subsample the extracted reads before passing them in)."
+)
+
+_SUBSPECIES_WITH_GENOMES_WARNING = (
+    "--ncbi-subspecies only acts on the download step and is ignored with "
+    "--genomes. To use subspecies labels, point --metadata to a "
+    "genome_metadata.tsv that has a 'subspecies' column (written by "
+    "'download genomes list --ncbi-subspecies')."
+)
+
 
 @app.command(name="pipeline")
 def run_pipeline(
@@ -75,6 +87,35 @@ def run_pipeline(
             "species/genus columns. Not needed when the pipeline downloads genomes."
         ),
         exists=True, dir_okay=False,
+    ),
+    ncbi_subspecies: list[str] | None = typer.Option(
+        None, "--ncbi-subspecies",
+        help=(
+            "GTDB species (e.g. 's__Brucella melitensis') to expand with genomes "
+            "per NCBI species name. Repeatable."
+        ),
+    ),
+    per_subspecies: int | None = typer.Option(
+        None, "--per-subspecies", min=1,
+        help="Genomes per NCBI species within a listed GTDB species (default 2).",
+    ),
+    per_subspecies_large: int | None = typer.Option(
+        None, "--per-subspecies-large", min=1,
+        help=(
+            "Genomes kept per NCBI species that has more than 50 genomes in the "
+            "GTDB species (default 3)."
+        ),
+    ),
+    max_read_pairs: int | None = typer.Option(
+        None, "--max-read-pairs", min=1,
+        help=(
+            "Randomly keep at most this many read pairs after Kraken2 extraction "
+            "(default: keep all). Acts only on the extraction step."
+        ),
+    ),
+    seed: int | None = typer.Option(
+        None, "--seed",
+        help="Random seed for --max-read-pairs (default: METADARKMATTER_SEED or 42).",
     ),
     kraken_output: Path | None = typer.Option(
         None, "--kraken-output", help="Pre-computed .kraken file (skips kraken classify).",
@@ -144,6 +185,11 @@ def run_pipeline(
         "kraken_db": kraken_db,
         "genomes_dir": genomes,
         "metadata": metadata,
+        "ncbi_subspecies": ncbi_subspecies or None,
+        "per_subspecies": per_subspecies,
+        "per_subspecies_large": per_subspecies_large,
+        "max_read_pairs": max_read_pairs,
+        "seed": seed,
         "kraken_output": kraken_output,
         "extracted_reads_1": extracted_reads_1,
         "output_dir": output_dir,
@@ -175,6 +221,10 @@ def run_pipeline(
         if path is not None and not Path(path).is_file():
             raise ValueError(f"{label} file does not exist: {path}")
     extra_warnings: list[str] = []
+    if cfg.genomes_dir is not None and cfg.ncbi_subspecies:
+        extra_warnings.append(_SUBSPECIES_WITH_GENOMES_WARNING)
+    if cfg.extracted_reads_1 is not None and cfg.max_read_pairs is not None:
+        extra_warnings.append(_MAX_READ_PAIRS_EXTRACTED_WARNING)
     if cfg.extracted_reads_1 is not None and (cfg.reads_1 is not None or cfg.reads_2 is not None):
         extra_warnings.append(
             "--reads-1/--reads-2 are ignored because --extracted-reads-1 is given "
@@ -291,6 +341,35 @@ def run_cohort(
         ),
         exists=True, dir_okay=False,
     ),
+    ncbi_subspecies: list[str] | None = typer.Option(
+        None, "--ncbi-subspecies",
+        help=(
+            "GTDB species (e.g. 's__Brucella melitensis') to expand with genomes "
+            "per NCBI species name. Repeatable."
+        ),
+    ),
+    per_subspecies: int | None = typer.Option(
+        None, "--per-subspecies", min=1,
+        help="Genomes per NCBI species within a listed GTDB species (default 2).",
+    ),
+    per_subspecies_large: int | None = typer.Option(
+        None, "--per-subspecies-large", min=1,
+        help=(
+            "Genomes kept per NCBI species that has more than 50 genomes in the "
+            "GTDB species (default 3)."
+        ),
+    ),
+    max_read_pairs: int | None = typer.Option(
+        None, "--max-read-pairs", min=1,
+        help=(
+            "Randomly keep at most this many read pairs after Kraken2 extraction "
+            "(default: keep all). Acts only on the extraction step."
+        ),
+    ),
+    seed: int | None = typer.Option(
+        None, "--seed",
+        help="Random seed for --max-read-pairs (default: METADARKMATTER_SEED or 42).",
+    ),
     aligner: Aligner = typer.Option(
         Aligner.BLAST, "--aligner", help="Aligner for the alignment step.",
     ),
@@ -339,6 +418,13 @@ def run_cohort(
     sheet = read_samples_tsv(samples)
     if genomes is not None and not genomes.is_dir():
         raise ValueError(f"--genomes path does not exist or is not a directory: {genomes}")
+    if genomes is not None and ncbi_subspecies:
+        console.print(f"[yellow]Warning:[/yellow] {_SUBSPECIES_WITH_GENOMES_WARNING}")
+    if max_read_pairs is not None and any(smp.extracted_reads_1 for smp in sheet):
+        console.print(
+            "[yellow]Warning:[/yellow] --max-read-pairs is ignored for samples "
+            "with extracted_reads_1 (it only acts on the extraction step)."
+        )
 
     shared: dict[str, object] = {
         "family": family,
@@ -346,6 +432,11 @@ def run_cohort(
         "kraken_db": kraken_db,
         "genomes_dir": genomes,
         "metadata": metadata,
+        "ncbi_subspecies": ncbi_subspecies or None,
+        "per_subspecies": per_subspecies,
+        "per_subspecies_large": per_subspecies_large,
+        "max_read_pairs": max_read_pairs,
+        "seed": seed,
         "threads": threads,
         "ani_backend": ani_backend,
     }

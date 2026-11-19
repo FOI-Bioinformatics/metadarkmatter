@@ -280,6 +280,24 @@ def test_cli_cohort_dry_run(tmp_path: Path):
     assert not out.exists()
 
 
+def test_cli_cohort_ncbi_subspecies_with_genomes_warns(tmp_path: Path):
+    genomes = tmp_path / "genomes"
+    genomes.mkdir()
+    (genomes / "GCF_1.fna").write_text(">c\nACGT\n")
+    _touch(tmp_path / "a.fq")
+    sheet = _sheet(tmp_path, ["A\ta.fq"], header="sample\textracted_reads_1")
+    res = runner.invoke(
+        app,
+        ["run", "cohort", "--samples", str(sheet), "--genomes", str(genomes),
+         "--output-dir", str(tmp_path / "cohort"), "--dry-run",
+         "--ncbi-subspecies", "s__Foo bar"],
+    )
+    assert res.exit_code == 0, res.output
+    out = " ".join(res.output.split())
+    assert "--ncbi-subspecies only acts on the download step" in out
+    assert "--metadata" in out
+
+
 def test_cli_cohort_invalid_sheet_exits_nonzero(tmp_path: Path):
     genomes = tmp_path / "genomes"
     genomes.mkdir()

@@ -7,9 +7,11 @@ for downloading genome assemblies by accession.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import shutil
+import tempfile
 import time
 import zipfile
 from collections.abc import Callable
@@ -17,7 +19,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar
 
-from metadarkmatter.external.base import ExternalTool, ToolResult, ToolTimeoutError
+from metadarkmatter.external.base import (
+    ExternalTool,
+    ToolExecutionError,
+    ToolResult,
+    ToolTimeoutError,
+)
 
 # Rate limiting defaults for NCBI API
 DEFAULT_BATCH_DELAY = 0.5  # seconds between batch requests
@@ -75,6 +82,56 @@ class DownloadReport:
         for o in failed:
             lines.append(f"{o.accession}\t{o.reason}")
         path.write_text("\n".join(lines) + "\n")
+
+
+@dataclass(frozen=True)
+class AssemblySummary:
+    """Selected metadata for one NCBI genome assembly."""
+
+    accession: str
+    organism_name: str
+    assembly_level: str
+    refseq_category: str
+    contig_n50: int
+
+
+def parse_assembly_summary_jsonl(text: str) -> list[AssemblySummary]:
+    """Parse ``datasets summary genome accession --as-json-lines`` output.
+
+    Args:
+        text: JSON Lines text, one assembly report per line. Blank lines
+            are skipped.
+
+    Returns:
+        List of AssemblySummary. Missing refseq_category yields "" and
+        missing contig_n50 yields 0.
+    """
+    summaries: list[AssemblySummary] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError as err:
+            raise ToolExecutionError(
+                "datasets",
+                ["datasets", "summary", "genome", "accession"],
+                0,
+                f"Could not parse 'datasets summary' output as JSON Lines: {err}",
+            ) from err
+        info = rec.get("assembly_info") or {}
+        stats = rec.get("assembly_stats") or {}
+        summaries.append(
+            AssemblySummary(
+                accession=rec.get("accession", ""),
+                organism_name=(rec.get("organism") or {}).get("organism_name", ""),
+                assembly_level=info.get("assembly_level", ""),
+                refseq_category=info.get("refseq_category", ""),
+                contig_n50=int(stats.get("contig_n50", 0) or 0),
+            )
+        )
+    return summaries
 
 
 def _parse_accession_version(accession: str) -> tuple[str, int] | None:
@@ -140,6 +197,18 @@ class NCBIDatasets(ExternalTool):
         Returns:
             Command as list of strings
         """
+        summary_inputfile = kwargs.get("summary_inputfile")
+        if summary_inputfile:
+            return [
+                str(self.get_executable()),
+                "summary",
+                "genome",
+                "accession",
+                "--inputfile",
+                str(summary_inputfile),
+                "--as-json-lines",
+            ]
+
         accessions = kwargs.get("accessions", [])
         output_file = kwargs.get("output_file")
         include_sequence = kwargs.get("include_sequence", True)
@@ -179,6 +248,42 @@ class NCBIDatasets(ExternalTool):
             cmd.extend(["--include", ",".join(include_types)])
 
         return cmd
+
+    def fetch_assembly_summaries(
+        self,
+        accessions: list[str],
+        *,
+        timeout: float | None = 600.0,
+    ) -> list[AssemblySummary]:
+        """Fetch assembly metadata for accessions via the datasets CLI.
+
+        Args:
+            accessions: NCBI assembly accessions.
+            timeout: Timeout in seconds.
+
+        Returns:
+            List of AssemblySummary for accessions found by NCBI.
+
+        Raises:
+            ToolNotFoundError: If the datasets executable is missing.
+            ToolExecutionError: If the command exits with non-zero status.
+        """
+        if not accessions:
+            return []
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            input_file = Path(tmp_dir) / "accessions.txt"
+            input_file.write_text("\n".join(accessions) + "\n")
+            result = self.run(summary_inputfile=input_file, timeout=timeout)
+
+        if not result.success:
+            raise ToolExecutionError(
+                self.TOOL_NAME,
+                list(result.command),
+                result.return_code,
+                result.stderr,
+            )
+        return parse_assembly_summary_jsonl(result.stdout)
 
     def build_download_command(
         self,

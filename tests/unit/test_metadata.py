@@ -532,3 +532,31 @@ class TestAggregateByGenus:
         agg = meta.aggregate_by_genus(joined)
         total = sum(agg["read_count"].to_list())
         assert total == len(clf)
+
+
+def test_genome_metadata_subspecies_accessors():
+    base = {
+        "accession": ["GCF_000000001.1", "GCF_000000002.1"],
+        "species": ["Brucella abortus"] * 2,
+        "genus": ["Brucella"] * 2,
+    }
+    empty = GenomeMetadata(
+        pl.DataFrame({**base, "subspecies": [None, ""]}, schema_overrides={"subspecies": pl.Utf8})
+    )
+    assert not empty.has_subspecies
+    assert empty.get_subspecies("GCF_000000001.1") is None
+    assert empty.subspecies_map() == {}
+    clf = pl.DataFrame({"best_match_genome": ["GCF_000000001.1"]})
+    assert "subspecies_reference" not in empty.join_classifications(clf).columns
+
+    meta = GenomeMetadata(pl.DataFrame({**base, "subspecies": ["Brucella suis", None]}))
+    assert meta.has_subspecies
+    assert meta.get_subspecies("GCF_000000001.1") == "Brucella suis"
+    assert meta.get_subspecies("GCF_000000002.1") is None
+    assert meta.subspecies_map() == {"GCF_000000001.1": "Brucella suis"}
+    clf2 = pl.DataFrame({"best_match_genome": ["GCF_000000001.1", "GCF_000000002.1"]})
+    joined = meta.join_classifications(clf2)
+    assert joined["subspecies_reference"].to_list() == ["Brucella suis", None]
+
+    plain = GenomeMetadata(pl.DataFrame(base))
+    assert not plain.has_subspecies

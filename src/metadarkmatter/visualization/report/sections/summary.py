@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 import polars as pl
 
+from metadarkmatter.core.subspecies import summarize_subspecies
 from metadarkmatter.visualization.plots.base import (
     format_count,
 )
@@ -32,6 +33,8 @@ from metadarkmatter.visualization.report.templates import (
     METRIC_CARDS_CONTAINER,
     OVERVIEW_FINDING_CARD_TEMPLATE,
     OVERVIEW_KEY_FINDINGS_TEMPLATE,
+    SUBSPECIES_ROW_TEMPLATE,
+    SUBSPECIES_TABLE_TEMPLATE,
     TAB_SECTION_TEMPLATE,
     TOP_SPECIES_ROW_TEMPLATE,
     TOP_SPECIES_TABLE_TEMPLATE,
@@ -368,6 +371,7 @@ class SummaryMixin(_ReportBase):
 
         content = (
             kpi_html + bar_html + self._build_ani_qc_note() + two_col_html
+            + self._build_subspecies_table()
             + category_html + self._build_run_info_panel()
         )
 
@@ -425,6 +429,22 @@ class SummaryMixin(_ReportBase):
             ))
 
         return TOP_SPECIES_TABLE_TEMPLATE.format(rows="\n".join(rows))
+
+    def _build_subspecies_table(self) -> str:
+        """Build the subspecies table, or an empty string without labels."""
+        summary = summarize_subspecies(self.df, self.genome_metadata)
+        if summary.is_empty():
+            return ""
+        rows = [
+            SUBSPECIES_ROW_TEMPLATE.format(
+                gtdb_species=html.escape(str(r["gtdb_species"])),
+                subspecies=html.escape(str(r["subspecies"])),
+                reads=f'{r["reads"]:,}',
+                pct=r["pct"],
+            )
+            for r in summary.iter_rows(named=True)
+        ]
+        return SUBSPECIES_TABLE_TEMPLATE.format(rows="\n".join(rows))
 
     def _build_key_findings(self) -> str:
         """Build key findings cards for the overview tab."""

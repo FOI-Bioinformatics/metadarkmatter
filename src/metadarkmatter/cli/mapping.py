@@ -15,7 +15,7 @@ import typer
 from rich.console import Console
 
 from metadarkmatter.cli.utils import QuietConsole, spinner_progress
-from metadarkmatter.core.genome_utils import extract_accession_from_filename
+from metadarkmatter.core.genome_utils import extract_accession_from_filename, is_hidden_file
 from metadarkmatter.core.id_mapping import ContigIdMapping, _strip_ncbi_seqid_prefix
 
 app = typer.Typer(
@@ -568,7 +568,7 @@ def generate_metadata(
     qc.print(f"[bold]Generating metadata from:[/bold] {genomes}")
 
     try:
-        genome_files = sorted(genomes.glob(pattern))
+        genome_files = sorted(f for f in genomes.glob(pattern) if not is_hidden_file(f))
         if not genome_files:
             console.print(
                 f"[red]Error:[/red] No files matching '{pattern}' "

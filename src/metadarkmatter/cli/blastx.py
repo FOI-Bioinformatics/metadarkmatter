@@ -26,7 +26,7 @@ from rich.progress import (
 )
 
 from metadarkmatter.cli.utils import QuietConsole, spinner_progress
-from metadarkmatter.core.genome_utils import extract_accession_from_filename
+from metadarkmatter.core.genome_utils import extract_accession_from_filename, is_hidden_file
 from metadarkmatter.core.runtime import is_dry_run
 from metadarkmatter.external import ToolExecutionError
 from metadarkmatter.external.diamond import Diamond
@@ -85,7 +85,9 @@ def _concatenate_proteins(
     Returns:
         Tuple of (genome_count, protein_count)
     """
-    protein_files = sorted(protein_dir.glob(pattern))
+    protein_files = sorted(
+        f for f in protein_dir.glob(pattern) if not is_hidden_file(f)
+    )
     genome_count = 0
     protein_count = 0
 
@@ -220,7 +222,9 @@ def make_database(
                 f"'{protein_pattern}' to {panproteome_fasta}[/dim]"
             )
             input_fasta = panproteome_fasta
-            genome_count = len(list(proteins.glob(protein_pattern)))
+            genome_count = len(
+                [f for f in proteins.glob(protein_pattern) if not is_hidden_file(f)]
+            )
         else:
             genome_count, protein_count = _concatenate_proteins(
                 proteins, panproteome_fasta, protein_pattern
