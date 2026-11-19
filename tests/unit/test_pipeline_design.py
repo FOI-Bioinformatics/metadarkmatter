@@ -153,3 +153,31 @@ def test_probe_tool_reads_first_version_line(tmp_path, monkeypatch):
     path, version = tool_versions.probe_tool("faketool", ["--version"])
     assert version == "faketool 3.2.1" and path.endswith("faketool")
     assert tool_versions.probe_tool("definitely-not-a-tool-xyz")[1] == "not found"
+
+
+class TestNcbiSubspeciesOptions:
+    def _download_argv(self, tmp_path, **kw):
+        from metadarkmatter.models.pipeline_config import PipelineConfig
+
+        reads = tmp_path / "r1.fastq.gz"
+        reads.write_bytes(b"reads")
+        cfg = PipelineConfig(
+            family="f__Brucellaceae", extracted_reads_1=reads,
+            output_dir=tmp_path / "out", **kw,
+        )
+        plan = Pipeline(cfg, PipelineLayout(root=cfg.output_dir)).plan()
+        return _step(plan, PipelineStep.DOWNLOAD).argv
+
+    def test_download_argv_includes_ncbi_subspecies(self, tmp_path):
+        argv = self._download_argv(
+            tmp_path, ncbi_subspecies=["s__Brucella melitensis"], per_subspecies=2
+        )
+        tail = ["--ncbi-subspecies", "s__Brucella melitensis", "--per-subspecies", "2",
+                "--per-subspecies-large", "3"]
+        i = argv.index("--ncbi-subspecies")
+        assert argv[i:i + 6] == tail
+
+    def test_download_argv_without_subspecies(self, tmp_path):
+        argv = self._download_argv(tmp_path)
+        for flag in ("--ncbi-subspecies", "--per-subspecies", "--per-subspecies-large"):
+            assert flag not in argv

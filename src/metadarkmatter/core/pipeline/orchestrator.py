@@ -428,6 +428,13 @@ class Pipeline:
             *MDM_INVOCATION, "download", "genomes", "list", str(cfg.family or ""),
             "--output", str(lay.genomes_tsv), "--include-metadata",
         ]
+        if cfg.ncbi_subspecies:
+            for sp in cfg.ncbi_subspecies:
+                download_argv += ["--ncbi-subspecies", sp]
+            download_argv += [
+                "--per-subspecies", str(cfg.per_subspecies),
+                "--per-subspecies-large", str(cfg.per_subspecies_large),
+            ]
         # Note: download is two subcommands; the orchestrator runs list then
         # fetch as a single logical step (see _run_download).
         steps.append(

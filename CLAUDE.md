@@ -138,6 +138,8 @@ GCF_000195955.2	F. tularensis	Francisella	Francisellaceae	GCF_000195955.2	d__...
 GCF_001234567.1	F. tularensis	Francisella	Francisellaceae	GCF_000195955.2	d__...
 ```
 
+An optional last column `subspecies` holds the NCBI species name of each genome. Panel genomes selected with `download genomes list --ncbi-subspecies "s__Genus species"` keep the GTDB species name and GTDB representative; the NCBI name is only a label. With this column, `score classify` adds `closest_subspecies` and `subspecies_candidates` for Known Species reads ("unresolved" when tied best hits span several subspecies), and the report Summary tab adds a subspecies table. Assignment from short reads is indicative for closely related taxa. Without the column, behavior is unchanged.
+
 **Backwards compatibility:** If `representative` column is absent, every genome maps to itself (current behavior preserved).
 
 ## Workflow Notes

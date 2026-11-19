@@ -10,6 +10,16 @@ Production-readiness and UX hardening pass.
 
 ### Added
 
+- NCBI species ("subspecies") labels within a GTDB species.
+  `download genomes list --ncbi-subspecies TEXT` (repeatable),
+  `--per-subspecies` (default 2) and `--per-subspecies-large` (default 3)
+  select a per-NCBI-species panel, write `subspecies_panel.tsv` and add an
+  optional `subspecies` column to `genome_metadata.tsv`. `score classify`
+  adds `closest_subspecies` and `subspecies_candidates` for Known Species
+  reads, and the report Summary tab adds a subspecies table. `run pipeline`
+  and `run cohort` forward the options. GTDB-based classification is
+  unchanged; subspecies assignment from short reads is indicative for
+  closely related taxa.
 - `run pipeline` / `run cohort --metadata PATH`: use a `genome_metadata.tsv`
   with `--genomes` (representative-only ANI, target-family inference,
   species/genus columns and genus grouping in the report). Without it, a

@@ -76,6 +76,21 @@ def run_pipeline(
         ),
         exists=True, dir_okay=False,
     ),
+    ncbi_subspecies: list[str] | None = typer.Option(
+        None, "--ncbi-subspecies",
+        help=(
+            "GTDB species (e.g. 's__Brucella melitensis') to expand with genomes "
+            "per NCBI species name. Repeatable."
+        ),
+    ),
+    per_subspecies: int | None = typer.Option(
+        None, "--per-subspecies", min=1,
+        help="Genomes per NCBI species within a listed GTDB species (default 2).",
+    ),
+    per_subspecies_large: int | None = typer.Option(
+        None, "--per-subspecies-large", min=1,
+        help="Genomes per NCBI species for large GTDB species (default 3).",
+    ),
     kraken_output: Path | None = typer.Option(
         None, "--kraken-output", help="Pre-computed .kraken file (skips kraken classify).",
         dir_okay=False,
@@ -144,6 +159,9 @@ def run_pipeline(
         "kraken_db": kraken_db,
         "genomes_dir": genomes,
         "metadata": metadata,
+        "ncbi_subspecies": ncbi_subspecies or None,
+        "per_subspecies": per_subspecies,
+        "per_subspecies_large": per_subspecies_large,
         "kraken_output": kraken_output,
         "extracted_reads_1": extracted_reads_1,
         "output_dir": output_dir,
@@ -291,6 +309,21 @@ def run_cohort(
         ),
         exists=True, dir_okay=False,
     ),
+    ncbi_subspecies: list[str] | None = typer.Option(
+        None, "--ncbi-subspecies",
+        help=(
+            "GTDB species (e.g. 's__Brucella melitensis') to expand with genomes "
+            "per NCBI species name. Repeatable."
+        ),
+    ),
+    per_subspecies: int | None = typer.Option(
+        None, "--per-subspecies", min=1,
+        help="Genomes per NCBI species within a listed GTDB species (default 2).",
+    ),
+    per_subspecies_large: int | None = typer.Option(
+        None, "--per-subspecies-large", min=1,
+        help="Genomes per NCBI species for large GTDB species (default 3).",
+    ),
     aligner: Aligner = typer.Option(
         Aligner.BLAST, "--aligner", help="Aligner for the alignment step.",
     ),
@@ -346,6 +379,9 @@ def run_cohort(
         "kraken_db": kraken_db,
         "genomes_dir": genomes,
         "metadata": metadata,
+        "ncbi_subspecies": ncbi_subspecies or None,
+        "per_subspecies": per_subspecies,
+        "per_subspecies_large": per_subspecies_large,
         "threads": threads,
         "ani_backend": ani_backend,
     }

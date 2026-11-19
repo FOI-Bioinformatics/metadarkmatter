@@ -54,7 +54,7 @@ For complete step-by-step workflows, see the
 
 | Command | Purpose |
 |---------|---------|
-| `download genomes list` | Query GTDB API for family genomes |
+| `download genomes list` | Query GTDB API for family genomes (`--ncbi-subspecies`, `--per-subspecies`, `--per-subspecies-large` add a per-NCBI-species panel) |
 | `download genomes fetch` | Download genomes from NCBI (use `--include-protein` for AAI) |
 | `proteins predict` | Predict proteins with Prodigal (use `--missing-only` for gaps) |
 | `kraken2 classify` | Run Kraken2 classification |
@@ -602,7 +602,8 @@ metadarkmatter tracks species-level information throughout the pipeline.
 
 | File | Created By | Contents |
 |------|------------|----------|
-| `genome_metadata.tsv` | `download genomes list` (written next to `--output`) | accession, species, genus, family, representative, gtdb_taxonomy |
+| `genome_metadata.tsv` | `download genomes list` (written next to `--output`) | accession, species, genus, family, representative, gtdb_taxonomy, optional subspecies |
+| `subspecies_panel.tsv` | `download genomes list --ncbi-subspecies` (next to `genome_metadata.tsv`) | Genomes selected per NCBI species within the listed GTDB species |
 | `{db_prefix}_contig_mapping.tsv` | `blast makedb` | contig_id, genome_accession, original_header |
 
 #### Standardized FASTA Headers
@@ -629,6 +630,39 @@ metadarkmatter score classify \
 # Output CSV includes species, genus and family columns (not in --streaming mode)
 # Summary JSON includes species_hit_counts
 ```
+
+#### NCBI Species Labels within a GTDB Species (Subspecies)
+
+A GTDB species can contain several NCBI species names. To keep these as labels
+without changing GTDB-based classification:
+
+```bash
+metadarkmatter download genomes list f__Brucellaceae --output genomes.tsv --include-metadata \
+  --ncbi-subspecies "s__Brucella melitensis" --per-subspecies 2 --per-subspecies-large 3
+```
+
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `--ncbi-subspecies TEXT` | none | GTDB species to expand; repeatable |
+| `--per-subspecies INT` | 2 | Genomes per NCBI species |
+| `--per-subspecies-large INT` | 3 | Genomes per NCBI species for large GTDB species |
+
+The same options are accepted by `run pipeline` and `run cohort` and are
+forwarded to the download step. Panel genomes keep the GTDB species name and
+GTDB representative; the NCBI name is written to the `subspecies` column.
+
+With a `subspecies` column in the metadata, `score classify` adds:
+
+| Column | Meaning |
+|--------|---------|
+| `closest_subspecies` | NCBI species of the best-hit genome; "unresolved" when tied best hits span several subspecies. Known Species reads only |
+| `subspecies_candidates` | Sorted, `;`-separated subspecies among the tied best hits |
+| `subspecies_reference` | Subspecies of the best-hit genome (metadata join, not `--streaming`) |
+
+The report Summary tab adds a subspecies table (Known Species reads; percentage
+of that GTDB species' Known Species reads). Subspecies assignment from short
+reads is indicative for closely related taxa and should be interpreted with
+that limitation.
 
 #### Using Metadata in Reports
 
