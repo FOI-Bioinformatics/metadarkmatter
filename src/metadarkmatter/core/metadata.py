@@ -98,6 +98,18 @@ class GenomeMetadata:
         else:
             self._accession_to_representative = {}
 
+        # Subspecies lookup (optional column). Null and empty cells both mean
+        # "no subspecies label".
+        self._accession_to_subspecies: dict[str, str] = {}
+        if "subspecies" in metadata_df.columns:
+            for acc, sub in zip(
+                metadata_df["accession"].to_list(),
+                metadata_df["subspecies"].to_list(),
+                strict=False,
+            ):
+                if sub is not None and str(sub).strip():
+                    self._accession_to_subspecies[acc] = str(sub).strip()
+
     @classmethod
     def from_file(cls, path: Path) -> GenomeMetadata:
         """Load metadata from TSV file.
@@ -179,6 +191,23 @@ class GenomeMetadata:
             Family name or None if not found
         """
         return self._accession_to_family.get(accession)
+
+    def get_subspecies(self, accession: str) -> str | None:
+        """Get the NCBI species label (subspecies) for a genome accession.
+
+        Returns:
+            Label, or None if the accession is unknown or has no label
+        """
+        return self._accession_to_subspecies.get(accession)
+
+    @property
+    def has_subspecies(self) -> bool:
+        """True if at least one genome has a non-empty subspecies label."""
+        return bool(self._accession_to_subspecies)
+
+    def subspecies_map(self) -> dict[str, str]:
+        """Return {accession: subspecies} for genomes with a non-empty label."""
+        return dict(self._accession_to_subspecies)
 
     def infer_target_family(self) -> str | None:
         """Infer the target family from genome metadata.
@@ -368,6 +397,19 @@ class GenomeMetadata:
             result = result.with_columns(
                 pl.col("family").fill_null("Unknown family")
             )
+
+        if self.has_subspecies:
+            lookup = pl.DataFrame(
+                {
+                    "best_match_genome": list(self._accession_to_subspecies),
+                    "subspecies_reference": list(self._accession_to_subspecies.values()),
+                },
+                schema={
+                    "best_match_genome": pl.Utf8,
+                    "subspecies_reference": pl.Utf8,
+                },
+            )
+            result = result.join(lookup, on="best_match_genome", how="left")
 
         return result
 

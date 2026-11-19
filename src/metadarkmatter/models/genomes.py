@@ -38,6 +38,9 @@ class GenomeAccession(BaseModel):
     species: str = Field(description="Species name")
     genome_size: int | None = Field(default=None, description="Genome size in bp")
     is_representative: bool = Field(default=False, description="GTDB species representative")
+    subspecies: str = Field(
+        default="", description="NCBI species label within the GTDB species (may be empty)"
+    )
 
     model_config = {"frozen": True}
 
@@ -135,6 +138,7 @@ class AccessionList(BaseModel):
         df = pl.read_csv(path, separator="\t")
 
         has_representative = "representative" in df.columns
+        has_subspecies = "subspecies" in df.columns
 
         accessions = [
             GenomeAccession(
@@ -147,6 +151,7 @@ class AccessionList(BaseModel):
                     row.get("representative", "") == row["accession"]
                     if has_representative else False
                 ),
+                subspecies=(row.get("subspecies") or "") if has_subspecies else "",
             )
             for row in df.iter_rows(named=True)
         ]
@@ -257,6 +262,11 @@ class AccessionList(BaseModel):
             "representative": representatives,
             "gtdb_taxonomy": [a.gtdb_taxonomy for a in self.accessions],
         }
+
+        # The subspecies column is written only when at least one genome has
+        # a label, so metadata without subspecies is unchanged.
+        if any(a.subspecies for a in self.accessions):
+            columns["subspecies"] = [a.subspecies for a in self.accessions]
 
         df = pl.DataFrame(columns)
         df.write_csv(path, separator="\t")

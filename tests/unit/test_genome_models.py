@@ -243,3 +243,39 @@ class TestAccessionListTSV:
         assert loaded.total_count == original.total_count
         assert loaded.accessions[0].accession == original.accessions[0].accession
         assert loaded.accessions[1].species == original.accessions[1].species
+
+
+def _acc(n, sub=""):
+    from metadarkmatter.models.genomes import GenomeAccession
+
+    return GenomeAccession(
+        accession=f"GCF_00000000{n}.1",
+        gtdb_taxonomy="d__B;p__P;c__C;o__O;f__F;g__Brucella;s__Brucella abortus",
+        species="Brucella abortus",
+        subspecies=sub,
+    )
+
+
+def test_metadata_tsv_without_subspecies_unchanged(tmp_path):
+    from metadarkmatter.models.genomes import AccessionList
+
+    out = tmp_path / "m.tsv"
+    AccessionList(taxon="g__Brucella", accessions=[_acc(1), _acc(2)]).to_metadata_tsv(out)
+    header = out.read_text().splitlines()[0]
+    assert header == "accession\tspecies\tgenus\tfamily\trepresentative\tgtdb_taxonomy"
+
+
+def test_metadata_tsv_with_subspecies_roundtrip(tmp_path):
+    from metadarkmatter.core.metadata import GenomeMetadata
+    from metadarkmatter.models.genomes import AccessionList
+
+    out = tmp_path / "m.tsv"
+    AccessionList(
+        taxon="g__Brucella", accessions=[_acc(1, "Brucella suis"), _acc(2)]
+    ).to_metadata_tsv(out)
+    assert out.read_text().splitlines()[0].endswith("\tsubspecies")
+    back = AccessionList.from_tsv(out)
+    assert [a.subspecies for a in back.accessions] == ["Brucella suis", ""]
+    meta = GenomeMetadata.from_file(out)
+    assert meta.get_subspecies("GCF_000000001.1") == "Brucella suis"
+    assert meta.get_subspecies("GCF_000000002.1") is None

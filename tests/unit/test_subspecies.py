@@ -5,6 +5,8 @@ from __future__ import annotations
 import dataclasses
 from pathlib import Path
 
+import polars as pl
+
 from metadarkmatter.core.subspecies import (
     PanelEntry,
     ncbi_species_name,
@@ -89,3 +91,54 @@ def test_write_panel_tsv_header(tmp_path: Path):
     lines = out.read_text().splitlines()
     assert lines[0] == "\t".join(f.name for f in dataclasses.fields(PanelEntry))
     assert lines[1].split("\t")[0] == "GCF_1"
+
+
+def test_assign_subspecies_rules():
+    from metadarkmatter.core.subspecies import UNRESOLVED, assign_subspecies
+
+    smap = {"A": "Brucella abortus", "S": "Brucella suis"}
+    df = pl.DataFrame(
+        {
+            "read_id": ["r1", "r2", "r3", "r4", "r5"],
+            "taxonomic_call": [
+                "Known Species",
+                "Known Species",
+                "Known Species",
+                "Known Species",
+                "Novel Species",
+            ],
+            "top_hit_genomes": [["A"], ["S", "A"], ["A", "X"], ["X"], ["A"]],
+        }
+    )
+    out = assign_subspecies(df, smap)
+    assert "top_hit_genomes" not in out.columns
+    assert out["closest_subspecies"].to_list() == [
+        "Brucella abortus",
+        UNRESOLVED,
+        "Brucella abortus",
+        None,
+        None,
+    ]
+    assert out["subspecies_candidates"].to_list() == [
+        "Brucella abortus",
+        "Brucella abortus;Brucella suis",
+        "Brucella abortus",
+        None,
+        None,
+    ]
+
+
+def test_assign_subspecies_null_top_hits():
+    from metadarkmatter.core.subspecies import assign_subspecies
+
+    df = pl.DataFrame(
+        {
+            "taxonomic_call": ["Known Species", "Known Species"],
+            "top_hit_genomes": [None, ["A"]],
+        },
+        schema={"taxonomic_call": pl.Utf8, "top_hit_genomes": pl.List(pl.Utf8)},
+    )
+    out = assign_subspecies(df, {"A": "Brucella abortus"})
+    assert out["closest_subspecies"].to_list() == [None, "Brucella abortus"]
+    assert out["subspecies_candidates"].to_list() == [None, "Brucella abortus"]
+    assert out.schema["closest_subspecies"] == pl.Utf8

@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+import polars as pl
+
 from metadarkmatter.external.ncbi_datasets import AssemblySummary
 
 UNRESOLVED: Final = "unresolved"
@@ -140,3 +142,33 @@ def write_panel_tsv(entries: list[PanelEntry], path: Path) -> None:
         writer.writerow(fields)
         for e in entries:
             writer.writerow([getattr(e, f) for f in fields])
+
+
+def assign_subspecies(df: pl.DataFrame, subspecies_map: dict[str, str]) -> pl.DataFrame:
+    """Add per-read NCBI species labels from the tied top-hit genomes.
+
+    The input needs ``taxonomic_call`` and ``top_hit_genomes`` (list of
+    accessions). Labels are the sorted unique ``subspecies_map`` values of the
+    top-hit genomes that have a label. Reads whose call is not "Known Species",
+    or with no labelled top-hit genome (including a null list), get null in
+    both new columns. One label gives that label in ``closest_subspecies``;
+    several give ``UNRESOLVED``. ``subspecies_candidates`` holds all labels
+    joined by ";". The ``top_hit_genomes`` column is dropped.
+    """
+    labels: list[list[str]] = []
+    for call, genomes in zip(
+        df["taxonomic_call"].to_list(), df["top_hit_genomes"].to_list(), strict=True
+    ):
+        if call != "Known Species" or not genomes:
+            labels.append([])
+            continue
+        labels.append(sorted({subspecies_map[g] for g in genomes if g in subspecies_map}))
+
+    closest = [
+        None if not lab else (lab[0] if len(lab) == 1 else UNRESOLVED) for lab in labels
+    ]
+    candidates = [";".join(lab) if lab else None for lab in labels]
+    return df.drop("top_hit_genomes").with_columns(
+        pl.Series("closest_subspecies", closest, dtype=pl.Utf8),
+        pl.Series("subspecies_candidates", candidates, dtype=pl.Utf8),
+    )
