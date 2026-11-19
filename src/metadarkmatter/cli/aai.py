@@ -52,12 +52,14 @@ def _find_protein_files(
         files = sorted(f for f in protein_dir.glob(pattern) if not is_hidden_file(f))
         if files:
             return files, [pattern]
-    files = sorted({
+    files = sorted(
+        {
             f
             for pat in _PROTEIN_PATTERNS
             for f in protein_dir.glob(pat)
             if not is_hidden_file(f)
-        })
+        }
+    )
     return files, list(_PROTEIN_PATTERNS)
 
 
