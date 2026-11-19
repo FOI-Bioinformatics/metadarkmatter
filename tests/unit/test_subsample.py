@@ -127,7 +127,7 @@ def test_subsample_count_mismatch_raises(tmp_path):
 def test_subsample_truncated_record_raises(tmp_path):
     r1 = tmp_path / "t.fastq"
     r1.write_text("@a\nACGT\n+\nIIII\n@b\nAC\n")
-    with pytest.raises(ValueError, match="truncated"):
+    with pytest.raises(ValueError, match="Truncated FASTQ"):
         subsample_reads(r1, None, 1, 1)
 
 
@@ -148,3 +148,12 @@ def test_subsample_failure_leaves_originals(tmp_path, monkeypatch):
         subsample_reads(r1, r2, 10, 1)
     assert (r1.read_bytes(), r2.read_bytes()) == before
     assert sorted(p.name for p in tmp_path.iterdir()) == sorted([r1.name, r2.name])
+
+
+def test_subsample_fasta_input_raises(tmp_path):
+    r1 = tmp_path / "x.fastq"
+    r1.write_text(">a\nACGT\nACGT\nACGT\n>b\nAC\nAC\nAC\n")
+    before = r1.read_bytes()
+    with pytest.raises(ValueError, match="not valid FASTQ"):
+        subsample_reads(r1, None, 1, 1)
+    assert r1.read_bytes() == before

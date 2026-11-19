@@ -479,40 +479,34 @@ def extract_reads(
         if result.stderr.strip():
             out.print(f"[dim]Tool output: {result.stderr.strip()[:300]}[/dim]")
 
-    # Compress output files if requested
-    if compress:
-        import gzip
-        import shutil
-
-        out.print("  [dim]Compressing output files...[/dim]")
-
-        for temp_file, final_file in [(temp_r1, extracted_r1), (temp_r2, extracted_r2)]:
-            if temp_file and temp_file.exists() and final_file is not None:
-                with temp_file.open("rb") as f_in, gzip.open(final_file, "wb") as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-                temp_file.unlink()  # Remove uncompressed file
-
-        out.print("  [green]Compression complete[/green]")
-
-    # A sidecar from an earlier run would misreport the re-extracted files.
+    # Remove any sidecar from an earlier run before the files change, so a
+    # failed subsample never leaves a stale sidecar next to new files.
     sidecar = output / f"{sample_name}_taxid{taxid}_subsample.json"
-    if max_read_pairs is None:
-        sidecar.unlink(missing_ok=True)
+    sidecar.unlink(missing_ok=True)
 
-    # Optional random subsample of the final output files (in place)
+    # Optional random subsample of the plain extracted files, before
+    # compression, so only the kept reads are compressed.
+    sub = None
     if max_read_pairs is not None:
         import json
 
-        from metadarkmatter.core.subsample import subsample_reads
+        from metadarkmatter.core.subsample import SubsampleResult, subsample_reads
 
         effective_seed = get_seed() if seed is None else seed
-        try:
-            sub = subsample_reads(
-                extracted_r1, extracted_r2, max_pairs=max_read_pairs, seed=effective_seed
-            )
-        except (OSError, ValueError) as e:
-            console.print(f"[red]Subsampling failed: {e}[/red]")
-            raise typer.Exit(code=1) from None
+        if temp_r1.exists():
+            try:
+                sub = subsample_reads(
+                    temp_r1,
+                    temp_r2 if temp_r2 is not None and temp_r2.exists() else None,
+                    max_pairs=max_read_pairs,
+                    seed=effective_seed,
+                )
+            except (OSError, ValueError) as e:
+                console.print(f"[red]Subsampling failed: {e}[/red]")
+                raise typer.Exit(code=1) from None
+        else:
+            # KrakenTools wrote no file (no reads for this taxon).
+            sub = SubsampleResult(total=0, kept=0, seed=effective_seed)
         sidecar.write_text(
             json.dumps(
                 {
@@ -528,9 +522,25 @@ def extract_reads(
         unit = "read pairs" if reads_2 else "reads"
         out.print(f"  Subsampled {sub.kept:,} of {sub.total:,} {unit} (seed {sub.seed})")
 
+    # Compress output files if requested
+    if compress:
+        import gzip
+        import shutil
+
+        out.print("  [dim]Compressing output files...[/dim]")
+
+        for temp_file, final_file in [(temp_r1, extracted_r1), (temp_r2, extracted_r2)]:
+            if temp_file and temp_file.exists() and final_file is not None:
+                with temp_file.open("rb") as f_in, gzip.open(final_file, "wb") as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+                temp_file.unlink()  # Remove uncompressed file
+
+        out.print("  [green]Compression complete[/green]")
+
     # Count extracted reads
-    read_count = 0
-    if extracted_r1.exists():
+    if sub is not None:
+        out.print(f"  [dim]Reads after subsampling: {sub.kept:,} of {sub.total:,}[/dim]")
+    elif extracted_r1.exists():
         # Quick line count (4 lines per FASTQ record)
         if compress:
             import gzip

@@ -37,7 +37,14 @@ def _count_records(path: Path) -> int:
     """Count FASTQ records, raising ValueError if the file is truncated."""
     n_lines = 0
     with open_reads(path) as fh:
-        for _ in fh:
+        for line in fh:
+            phase = n_lines % 4
+            if (phase == 0 and not line.startswith("@")) or (
+                phase == 2 and not line.startswith("+")
+            ):
+                raise ValueError(
+                    f"{path} is not valid FASTQ (unexpected line {n_lines + 1})"
+                )
             n_lines += 1
     if n_lines % 4 != 0:
         raise ValueError(
@@ -90,7 +97,7 @@ def subsample_reads(
 
     The same record indices are kept in both mates, input order is preserved,
     and the selection depends only on the record count, ``max_pairs`` and
-    ``seed``. Files are left untouched when they hold ``max_pairs`` records or
+    ``seed`` (reproducible for a given seed, input and Python version). Files are left untouched when they hold ``max_pairs`` records or
     fewer. Output is gzip-compressed when the path ends in ".gz".
 
     Raises:

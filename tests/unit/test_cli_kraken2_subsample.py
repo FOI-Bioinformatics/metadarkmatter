@@ -30,7 +30,14 @@ def _fake_run(**kwargs):
     )
 
 
-def _invoke(tmp_path: Path, extra: list[str], env: dict[str, str] | None = None):
+def _fake_empty(**kwargs):
+    return ToolResult(
+        command=("mock",), return_code=0, stdout="", stderr="", elapsed_seconds=0.1
+    )
+
+
+def _invoke(tmp_path: Path, extra: list[str], env: dict[str, str] | None = None,
+            empty: bool = False):
     kraken = tmp_path / "s.kraken"
     kraken.write_text("C\tr\t262\t150\t262:150")
     (tmp_path / "s.kreport").write_text("100.00\t1000\t0\tR\t1\troot\n")
@@ -43,7 +50,7 @@ def _invoke(tmp_path: Path, extra: list[str], env: dict[str, str] | None = None)
         patch("metadarkmatter.cli.kraken2.ExtractKrakenReads.check_available",
               return_value=True),
         patch("metadarkmatter.cli.kraken2.ExtractKrakenReads.run_or_raise",
-              side_effect=_fake_run),
+              side_effect=_fake_empty if empty else _fake_run),
         patch("metadarkmatter.cli.kraken2.ExtractKrakenReads.run",
               return_value=ToolResult(command=("mock",), return_code=0, stdout="",
                                       stderr="", elapsed_seconds=0.0)),
@@ -72,6 +79,19 @@ def test_extract_max_read_pairs_subsamples_and_writes_sidecar(tmp_path):
     side = json.loads((out / "s_taxid262_subsample.json").read_text())
     assert side == {"total": N_RECORDS, "kept": 5, "max_read_pairs": 5, "seed": 3}
     assert "Subsampled 5 of 20 read pairs (seed 3)" in " ".join(result.output.split())
+
+
+def test_extract_no_compress_subsamples_plain_files(tmp_path):
+    result, out = _invoke(tmp_path, ["--max-read-pairs", "5", "--no-compress"])
+    assert result.exit_code == 0, result.output
+    assert len((out / "s_taxid262_R1.fastq").read_text().splitlines()) == 20
+
+
+def test_extract_empty_output_with_max_read_pairs(tmp_path):
+    result, out = _invoke(tmp_path, ["--max-read-pairs", "5"], empty=True)
+    assert result.exit_code == 0, result.output
+    side = json.loads((out / "s_taxid262_subsample.json").read_text())
+    assert side["total"] == 0 and side["kept"] == 0
 
 
 def test_extract_quiet_suppresses_subsample_line(tmp_path):
