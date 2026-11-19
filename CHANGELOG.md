@@ -183,6 +183,10 @@ Production-readiness and UX hardening pass.
 
 ### Fixed
 
+- The `score classify` console summary table now lists Species Boundary
+  (and Ambiguous Within Genus when present), so the category rows add up
+  to the total read count. The CSV, summary JSON and report already
+  included these reads.
 - Hidden files such as macOS AppleDouble `._*` sidecars are ignored when
   discovering genome and protein files.
 - Round-5 audit, genome inputs: a directory mixing `.fna` and `.fna.gz`

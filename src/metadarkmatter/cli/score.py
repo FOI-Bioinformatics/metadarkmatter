@@ -1815,11 +1815,24 @@ def _display_summary_table(summary: TaxonomicSummary) -> None:
         style="yellow",
     )
     table.add_row(
+        "Species Boundary",
+        f"{summary.species_boundary:,}",
+        f"{100.0 * summary.species_boundary / total:.2f}%",
+        style="blue",
+    )
+    table.add_row(
         "Ambiguous",
         f"{summary.ambiguous:,}",
         f"{100.0 * summary.ambiguous / total:.2f}%",
         style="blue",
     )
+    if summary.ambiguous_within_genus > 0:
+        table.add_row(
+            "Ambiguous Within Genus",
+            f"{summary.ambiguous_within_genus:,}",
+            f"{100.0 * summary.ambiguous_within_genus / total:.2f}%",
+            style="blue",
+        )
     table.add_row(
         "Conserved Regions",
         f"{summary.conserved_regions:,}",
