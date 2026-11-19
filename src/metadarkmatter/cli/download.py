@@ -29,7 +29,12 @@ from metadarkmatter.clients.gtdb import (
     InvalidTaxonFormatError,
 )
 from metadarkmatter.core.runtime import is_dry_run
-from metadarkmatter.external import NCBIDatasets, ToolNotFoundError
+from metadarkmatter.core.subspecies import (
+    ncbi_species_name,
+    select_subspecies_panel,
+    write_panel_tsv,
+)
+from metadarkmatter.external import NCBIDatasets, ToolExecutionError, ToolNotFoundError
 from metadarkmatter.models.genomes import AccessionList, GenomeAccession
 
 app = typer.Typer(
@@ -46,6 +51,112 @@ genomes_app = typer.Typer(
 app.add_typer(genomes_app, name="genomes")
 
 console = Console()
+
+
+def _apply_ncbi_subspecies(
+    species_list: list[str],
+    accessions: list[GenomeAccession],
+    representative_map: dict[str, str],
+    *,
+    representatives_only: bool,
+    per_subspecies: int,
+    per_subspecies_large: int,
+    panel_path: Path,
+) -> list[GenomeAccession]:
+    """Label genomes by NCBI species within the given GTDB species.
+
+    Queries all GTDB genomes of each species, fetches NCBI assembly summaries
+    and selects a panel. In reps-only mode panel genomes not yet listed are
+    appended (sorted by accession) and registered under the GTDB
+    representative; with --all-genomes every listed genome of the species is
+    labelled. The panel TSV is written after all queries succeed. Exits with
+    code 1 on an unknown species or a failed 'datasets' run.
+
+    Returns the updated accession list.
+    """
+    by_species: dict[str, list[GenomeAccession]] = {}
+    for a in accessions:
+        by_species.setdefault(a.species, []).append(a)
+
+    names = sorted(set(species_list))
+    for s in names:
+        if not s.startswith("s__") or s[3:] not in by_species:
+            console.print(
+                f"[red]Error: --ncbi-subspecies '{s}' is not a species in the "
+                "query result (expected 's__<name>' as in GTDB).[/red]"
+            )
+            raise typer.Exit(code=1)
+
+    ncbi = NCBIDatasets()
+    labels: dict[str, str] = {}
+    appended: dict[str, GenomeAccession] = {}
+    panel_entries = []
+    existing = {a.accession for a in accessions}
+
+    client = GTDBClient(cache_dir=USE_DEFAULT_CACHE)
+    try:
+        for s in names:
+            name = s[3:]
+            members = by_species[name]
+            if representatives_only:
+                rep = members[0].accession
+            else:
+                rep = representative_map.get(name) or sorted(
+                    m.accession for m in members
+                )[0]
+            with spinner_progress(f"Querying GTDB for all genomes of {s}...", console, False):
+                full = client.query_genomes(s, representatives_only=False)
+            accs = sorted({g.accession for g in full.genomes} | {rep})
+            try:
+                summaries = ncbi.fetch_assembly_summaries(accs)
+            except ToolNotFoundError:
+                console.print("[red]Error: NCBI Datasets CLI not found[/red]")
+                console.print(f"\n[dim]Install with: {NCBIDatasets.INSTALL_HINT}[/dim]")
+                raise typer.Exit(code=1) from None
+            except ToolExecutionError as e:
+                console.print(f"[red]Error: NCBI Datasets failed: {e.message}[/red]")
+                console.print(f"\n[dim]{e.suggestion}[/dim]")
+                raise typer.Exit(code=1) from None
+
+            entries = select_subspecies_panel(
+                summaries,
+                name,
+                rep,
+                per_subspecies=per_subspecies,
+                per_subspecies_large=per_subspecies_large,
+            )
+            panel_entries.extend(entries)
+            if representatives_only:
+                representative_map[name] = rep
+                taxonomy = members[0].gtdb_taxonomy
+                for e in entries:
+                    labels[e.accession] = e.subspecies
+                    if e.accession not in existing:
+                        appended[e.accession] = GenomeAccession(
+                            accession=e.accession,
+                            gtdb_taxonomy=taxonomy,
+                            species=name,
+                            is_representative=False,
+                        )
+            else:
+                for summary in summaries:
+                    labels[summary.accession] = ncbi_species_name(summary.organism_name) or ""
+    finally:
+        client.close()
+
+    panel_path.parent.mkdir(parents=True, exist_ok=True)
+    write_panel_tsv(panel_entries, panel_path)
+
+    updated = [
+        a.model_copy(update={"subspecies": labels[a.accession]})
+        if a.accession in labels
+        else a
+        for a in accessions
+    ]
+    for acc in sorted(appended):
+        a = appended[acc]
+        updated.append(a.model_copy(update={"subspecies": labels.get(acc, "")}))
+    return updated
 
 
 @genomes_app.command(name="list")
@@ -83,6 +194,29 @@ def list_genomes(
         False,
         "--dry-run",
         help="Show what would be queried without making requests",
+    ),
+    ncbi_subspecies: list[str] = typer.Option(
+        [],
+        "--ncbi-subspecies",
+        help=(
+            "GTDB species (e.g., 's__Escherichia coli'; repeatable) to label by "
+            "NCBI species name. Requires the NCBI 'datasets' CLI. In reps-only "
+            "mode a small panel of genomes per NCBI species is added; with "
+            "--all-genomes every genome of the species is labelled. Writes "
+            "subspecies_panel.tsv next to genome_metadata.tsv."
+        ),
+    ),
+    per_subspecies: int = typer.Option(
+        2,
+        "--per-subspecies",
+        min=1,
+        help="Genomes kept per NCBI species within a GTDB species",
+    ),
+    per_subspecies_large: int = typer.Option(
+        3,
+        "--per-subspecies-large",
+        min=1,
+        help="Genomes kept per NCBI species when it has more than 50 genomes",
     ),
 ) -> None:
     """
@@ -249,6 +383,18 @@ def list_genomes(
         for g in result.genomes
     ]
 
+    metadata_path = output.parent / "genome_metadata.tsv"
+    if ncbi_subspecies:
+        accessions = _apply_ncbi_subspecies(
+            ncbi_subspecies,
+            accessions,
+            representative_map,
+            representatives_only=representatives_only,
+            per_subspecies=per_subspecies,
+            per_subspecies_large=per_subspecies_large,
+            panel_path=metadata_path.parent / "subspecies_panel.tsv",
+        )
+
     accession_list = AccessionList(
         taxon=taxon,
         accessions=accessions,
@@ -256,7 +402,6 @@ def list_genomes(
         representative_map=representative_map,
     )
 
-    metadata_path = output.parent / "genome_metadata.tsv"
     if metadata_path.exists():
         console.print(
             f"[yellow]Warning: overwriting existing {metadata_path} "
